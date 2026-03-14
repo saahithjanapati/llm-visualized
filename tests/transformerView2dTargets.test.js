@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildResidualRowHoverPayload,
     buildSemanticNodeHoverPayload,
+    resolveMhsaDetailSemanticTargets,
     resolveActiveFocusLabel,
     resolveActiveSemanticTarget,
     resolveDetailTargetsFromSemanticTarget,
@@ -23,7 +24,8 @@ describe('transformerView2dTargets', () => {
                 headIndex: 5
             },
             concatDetailTarget: null,
-            outputProjectionDetailTarget: null
+            outputProjectionDetailTarget: null,
+            mlpDetailTarget: null
         });
 
         expect(resolveDetailTargetsFromSemanticTarget({
@@ -36,7 +38,8 @@ describe('transformerView2dTargets', () => {
             concatDetailTarget: {
                 layerIndex: 4
             },
-            outputProjectionDetailTarget: null
+            outputProjectionDetailTarget: null,
+            mlpDetailTarget: null
         });
 
         expect(resolveDetailTargetsFromSemanticTarget({
@@ -49,7 +52,8 @@ describe('transformerView2dTargets', () => {
             concatDetailTarget: null,
             outputProjectionDetailTarget: {
                 layerIndex: 1
-            }
+            },
+            mlpDetailTarget: null
         });
     });
 
@@ -219,5 +223,77 @@ describe('transformerView2dTargets', () => {
                 }
             }
         });
+    });
+
+    it('maps head-specific MHSA selections into deep component focus targets', () => {
+        expect(resolveMhsaDetailSemanticTargets({
+            label: 'Query Vector',
+            info: {
+                layerIndex: 2,
+                headIndex: 7,
+                activationData: {
+                    layerIndex: 2,
+                    headIndex: 7,
+                    stage: 'qkv.q'
+                }
+            }
+        })).toEqual([
+            {
+                componentKind: 'mhsa',
+                layerIndex: 2,
+                headIndex: 7,
+                stage: 'projection-q',
+                role: 'projection-output'
+            },
+            {
+                componentKind: 'mhsa',
+                layerIndex: 2,
+                headIndex: 7,
+                stage: 'attention',
+                role: 'attention-query-source'
+            }
+        ]);
+
+        expect(resolveMhsaDetailSemanticTargets({
+            label: 'Post-Softmax Attention Score',
+            info: {
+                layerIndex: 1,
+                headIndex: 3,
+                activationData: {
+                    layerIndex: 1,
+                    headIndex: 3,
+                    stage: 'attention.post'
+                }
+            }
+        })).toEqual([
+            {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 3,
+                stage: 'attention',
+                role: 'attention-post'
+            }
+        ]);
+
+        expect(resolveMhsaDetailSemanticTargets({
+            label: 'Attention Weighted Sum',
+            info: {
+                layerIndex: 0,
+                headIndex: 5,
+                activationData: {
+                    layerIndex: 0,
+                    headIndex: 5,
+                    stage: 'attention.weighted_sum'
+                }
+            }
+        })).toEqual([
+            {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 5,
+                stage: 'head-output',
+                role: 'attention-head-output'
+            }
+        ]);
     });
 });

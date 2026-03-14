@@ -38,6 +38,7 @@ import {
     RESIDUAL_VECTOR_MEASURE_COLS
 } from './createResidualVectorMatrixNode.js';
 import { buildHeadDetailSceneModel } from './buildHeadDetailSceneModel.js';
+import { buildMlpDetailSceneModel } from './buildMlpDetailSceneModel.js';
 import { buildMhsaSceneModel } from './buildMhsaSceneModel.js';
 import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
 
@@ -106,6 +107,17 @@ function normalizeConcatDetailTarget(target = null) {
 }
 
 function normalizeOutputProjectionDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerIndex = normalizeIndex(target.layerIndex);
+    if (!Number.isFinite(layerIndex)) {
+        return null;
+    }
+    return {
+        layerIndex
+    };
+}
+
+function normalizeMlpDetailTarget(target = null) {
     if (!target || typeof target !== 'object') return null;
     const layerIndex = normalizeIndex(target.layerIndex);
     if (!Number.isFinite(layerIndex)) {
@@ -1166,6 +1178,95 @@ function buildFinalLayerNormModule() {
     });
 }
 
+function buildFinalOutputGroup({
+    layerIndex = null,
+    activationSource = null,
+    tokenRefs = [],
+    anchorTargetNode = null
+} = {}) {
+    const COLUMN_WIDTHS = {
+        residual: 136,
+        layerNorm: 148
+    };
+    const TOP_ROW_HEIGHT = 58;
+    const baseSemantic = {
+        componentKind: 'transformer',
+        stage: 'final-output'
+    };
+
+    const outgoingResidual = createResidualStateModule({
+        semantic: {
+            componentKind: 'residual',
+            layerIndex,
+            stage: 'outgoing',
+            role: 'module'
+        },
+        labelTex: '\\mathrm{X}',
+        labelText: 'X',
+        tokenRefs,
+        getVector: (tokenRef) => (
+            typeof activationSource?.getPostMlpResidual === 'function'
+                ? activationSource.getPostMlpResidual(layerIndex, tokenRef.tokenIndex, D_MODEL)
+                : null
+        )
+    });
+    const finalLayerNorm = buildFinalLayerNormModule();
+
+    const node = createGroupNode({
+        role: 'final-output',
+        semantic: buildSemantic(baseSemantic, { role: 'final-output' }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+        gapKey: 'stage',
+        align: 'center',
+        layout: anchorTargetNode?.id
+            ? {
+                anchorAlign: {
+                    axis: 'y',
+                    selfNodeId: outgoingResidual.cardNode.id,
+                    targetNodeId: anchorTargetNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+                }
+            }
+            : null,
+        children: [
+            createFixedWidthColumn({
+                semantic: buildSemantic(baseSemantic, { stage: 'outgoing-residual', role: 'outgoing-residual' }),
+                width: COLUMN_WIDTHS.residual,
+                height: TOP_ROW_HEIGHT,
+                child: outgoingResidual.node
+            }),
+            createFixedWidthColumn({
+                semantic: buildSemantic(baseSemantic, { stage: 'final-layer-norm', role: 'final-layer-norm' }),
+                width: COLUMN_WIDTHS.layerNorm,
+                height: TOP_ROW_HEIGHT,
+                child: finalLayerNorm.node
+            })
+        ]
+    });
+
+    const flow = [];
+    if (anchorTargetNode?.id) {
+        flow.push({
+            from: anchorTargetNode,
+            to: outgoingResidual.cardNode,
+            key: 'final-output-outgoing-residual'
+        });
+    }
+    flow.push({
+        from: outgoingResidual.cardNode,
+        to: finalLayerNorm.cardNode,
+        key: 'final-output-layer-norm'
+    });
+
+    return {
+        node,
+        entryNode: outgoingResidual.cardNode,
+        exitNode: finalLayerNorm.cardNode,
+        flow
+    };
+}
+
 function buildLogitsModule({
     tokenRefs = [],
     activationSource = null
@@ -1267,7 +1368,8 @@ export function buildTransformerSceneModel({
     visualTokens = null,
     headDetailTarget = null,
     concatDetailTarget = null,
-    outputProjectionDetailTarget = null
+    outputProjectionDetailTarget = null,
+    mlpDetailTarget = null
 } = {}) {
     const resolvedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : NUM_LAYERS;
     const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
@@ -1276,12 +1378,20 @@ export function buildTransformerSceneModel({
     const requestedConcatDetailTarget = requestedOutputProjectionDetailTarget
         ? null
         : normalizeConcatDetailTarget(concatDetailTarget);
-    const requestedHeadDetailTarget = (requestedOutputProjectionDetailTarget || requestedConcatDetailTarget)
+    const requestedMlpDetailTarget = (requestedOutputProjectionDetailTarget || requestedConcatDetailTarget)
+        ? null
+        : normalizeMlpDetailTarget(mlpDetailTarget);
+    const requestedHeadDetailTarget = (
+        requestedOutputProjectionDetailTarget
+        || requestedConcatDetailTarget
+        || requestedMlpDetailTarget
+    )
         ? null
         : normalizeHeadDetailTarget(headDetailTarget);
     const resolvedHeadDetailTarget = requestedHeadDetailTarget;
     const resolvedConcatDetailTarget = requestedConcatDetailTarget;
     const resolvedOutputProjectionDetailTarget = requestedOutputProjectionDetailTarget;
+    const resolvedMlpDetailTarget = requestedMlpDetailTarget;
     const headDetailPreview = buildHeadDetailPreview({
         activationSource,
         tokenRefs,
@@ -1310,6 +1420,15 @@ export function buildTransformerSceneModel({
     const outputProjectionDetailPreview = buildOutputProjectionDetailPreview({
         outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget
     });
+    const mlpDetailScene = resolvedMlpDetailTarget
+        ? buildMlpDetailSceneModel({
+            activationSource,
+            mlpDetailTarget: resolvedMlpDetailTarget,
+            tokenRefs,
+            visualTokens: resolvedTokens,
+            isSmallScreen
+        })
+        : null;
 
     const layerModules = Array.from({ length: resolvedLayerCount }, (_, layerIndex) => buildLayerGroup({
         layerIndex,
@@ -1320,6 +1439,14 @@ export function buildTransformerSceneModel({
         isSmallScreen,
         visualTokens: resolvedTokens
     }));
+    const finalOutputModule = layerModules.length
+        ? buildFinalOutputGroup({
+            layerIndex: layerModules.length - 1,
+            activationSource,
+            tokenRefs,
+            anchorTargetNode: layerModules[layerModules.length - 1]?.exitNode || null
+        })
+        : null;
 
     const connectors = [];
     layerModules.forEach((layerModule, layerIndex) => {
@@ -1344,9 +1471,24 @@ export function buildTransformerSceneModel({
             }));
         }
     });
+    if (finalOutputModule) {
+        finalOutputModule.flow.forEach(({ from, to, key, sourceAnchor, targetAnchor, route, styleKey, gap }) => {
+            connectors.push(createFlowConnector({
+                fromNode: from,
+                toNode: to,
+                connectorKey: key,
+                sourceAnchor,
+                targetAnchor,
+                route,
+                styleKey,
+                gap
+            }));
+        });
+    }
 
     const rootNodes = [
         ...layerModules.map((module) => module.node),
+        ...(finalOutputModule ? [finalOutputModule.node] : []),
         createGroupNode({
             role: 'connector-layer',
             semantic: {
@@ -1382,7 +1524,9 @@ export function buildTransformerSceneModel({
             concatDetailTarget: resolvedConcatDetailTarget,
             concatDetailPreview,
             outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget,
-            outputProjectionDetailPreview
+            outputProjectionDetailPreview,
+            mlpDetailTarget: resolvedMlpDetailTarget,
+            mlpDetailScene
         }
     });
 }

@@ -10,6 +10,8 @@ const TMP_CENTER_A = new THREE.Vector3();
 const TMP_CENTER_B = new THREE.Vector3();
 const TMP_CENTER_MAT_A = new THREE.Matrix4();
 const TMP_CENTER_MAT_B = new THREE.Matrix4();
+const TMP_GROUP_WORLD_POS = new THREE.Vector3();
+const TMP_GROUP_WORLD_QUAT = new THREE.Quaternion();
 const STOP_RISE_RELEASE_DURATION_MS = 420;
 const STOP_RISE_RELEASE_FALLBACK_STEP = 0.05;
 const AUTO_CAMERA_VIEW_SWITCH_HOLD_MS_DEFAULT = 90;
@@ -1141,6 +1143,17 @@ export class AutoCameraController {
         return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
     }
 
+    _getGroupWorldPositionWithoutScale(group, localPoint, out) {
+        if (!group || !localPoint || !out) return false;
+        if (typeof group.getWorldPosition !== 'function' || typeof group.getWorldQuaternion !== 'function') {
+            return false;
+        }
+        group.getWorldPosition(TMP_GROUP_WORLD_POS);
+        group.getWorldQuaternion(TMP_GROUP_WORLD_QUAT);
+        out.copy(localPoint).applyQuaternion(TMP_GROUP_WORLD_QUAT).add(TMP_GROUP_WORLD_POS);
+        return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
+    }
+
     _getVectorWorldCenter(vec, out) {
         const vecGroup = vec?.group;
         const mesh = vec?.mesh;
@@ -1155,13 +1168,20 @@ export class AutoCameraController {
         const firstIndex = Math.max(0, Math.floor((length - 1) / 2));
         const secondIndex = length % 2 === 0 ? Math.min(length - 1, firstIndex + 1) : firstIndex;
         mesh.getMatrixAt(firstIndex, TMP_CENTER_MAT_A);
-        out.setFromMatrixPosition(TMP_CENTER_MAT_A).applyMatrix4(vecGroup.matrixWorld);
+        TMP_CENTER_A.setFromMatrixPosition(TMP_CENTER_MAT_A);
+        // Ignore transient group-scale pulses when deriving the follow anchor.
+        if (!this._getGroupWorldPositionWithoutScale(vecGroup, TMP_CENTER_A, out)) {
+            return this._getGroupWorldPosition(vecGroup, out);
+        }
         if (!Number.isFinite(out.y) || out.y <= hideThreshold) {
             return this._getGroupWorldPosition(vecGroup, out);
         }
         if (secondIndex !== firstIndex) {
             mesh.getMatrixAt(secondIndex, TMP_CENTER_MAT_B);
-            TMP_CENTER_B.setFromMatrixPosition(TMP_CENTER_MAT_B).applyMatrix4(vecGroup.matrixWorld);
+            TMP_CENTER_B.setFromMatrixPosition(TMP_CENTER_MAT_B);
+            if (!this._getGroupWorldPositionWithoutScale(vecGroup, TMP_CENTER_B, TMP_CENTER_B)) {
+                return this._getGroupWorldPosition(vecGroup, out);
+            }
             if (!Number.isFinite(TMP_CENTER_B.y) || TMP_CENTER_B.y <= hideThreshold) {
                 return this._getGroupWorldPosition(vecGroup, out);
             }

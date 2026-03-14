@@ -71,11 +71,23 @@ export function resolveOutputProjectionDetailTarget(target = null) {
     };
 }
 
+export function resolveMlpDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerIndex = normalizeOptionalIndex(target.layerIndex);
+    if (!Number.isFinite(layerIndex)) {
+        return null;
+    }
+    return {
+        layerIndex
+    };
+}
+
 function resolveResidualHoverActivationStage(rowSemantic = null) {
     const stage = String(rowSemantic?.stage || '').trim().toLowerCase();
     if (stage === 'incoming') return 'layer.incoming';
     if (stage === 'post-attn-residual') return 'residual.post_attention';
     if (stage === 'post-mlp-residual') return 'residual.post_mlp';
+    if (stage === 'outgoing') return 'residual.post_mlp';
     if (stage === 'ln1.shift') return 'ln1.shift';
     if (stage === 'ln2.shift') return 'ln2.shift';
     return '';
@@ -242,6 +254,176 @@ export function buildOutputProjectionDetailSemanticTarget(target = null, role = 
     });
 }
 
+export function buildMlpDetailSemanticTarget(target = null, role = 'module') {
+    const resolvedTarget = resolveMlpDetailTarget(target);
+    if (!resolvedTarget) return null;
+    return buildSemanticTarget({
+        componentKind: 'mlp',
+        layerIndex: resolvedTarget.layerIndex,
+        stage: 'mlp',
+        role
+    });
+}
+
+function appendUniqueSemanticTarget(targets = [], target = null) {
+    const safeTarget = buildSemanticTarget(target);
+    if (!safeTarget) return targets;
+    const nextKey = JSON.stringify(safeTarget);
+    if (targets.some((candidate) => JSON.stringify(candidate) === nextKey)) {
+        return targets;
+    }
+    targets.push(safeTarget);
+    return targets;
+}
+
+function buildMhsaDetailSemanticTarget({
+    layerIndex = null,
+    headIndex = null,
+    stage = '',
+    role = ''
+} = {}) {
+    if (!Number.isFinite(layerIndex) || !Number.isFinite(headIndex)) {
+        return null;
+    }
+    return buildSemanticTarget({
+        componentKind: 'mhsa',
+        layerIndex,
+        headIndex,
+        stage,
+        role
+    });
+}
+
+function resolveMhsaDetailFocusLabel(label = '', stageLower = '') {
+    const lower = String(label || '').trim().toLowerCase();
+    if (!lower.length) return '';
+    if (lower.includes('query weight matrix')) return 'Query Weight Matrix';
+    if (lower.includes('key weight matrix')) return 'Key Weight Matrix';
+    if (lower.includes('value weight matrix')) return 'Value Weight Matrix';
+    if (lower.includes('query bias')) return 'Query Bias Vector';
+    if (lower.includes('key bias')) return 'Key Bias Vector';
+    if (lower.includes('value bias')) return 'Value Bias Vector';
+    if (lower.includes('query vector')) return 'Query Vector';
+    if (lower.includes('key vector')) return 'Key Vector';
+    if (lower.includes('weighted value vector')) return 'Weighted Value Vector';
+    if (lower.includes('value vector')) return 'Value Vector';
+    if (lower.includes('attention weighted sum') || stageLower === 'attention.weighted_sum') {
+        return 'Attention Weighted Sum';
+    }
+    if (lower.includes('pre-softmax attention score') || stageLower === 'attention.pre') {
+        return 'Pre-Softmax Attention Score';
+    }
+    if (lower.includes('post-softmax attention score') || stageLower === 'attention.post') {
+        return 'Post-Softmax Attention Score';
+    }
+    if (lower.includes('attention mask')) return 'Attention Mask';
+    if (lower.includes('softmax')) return 'Softmax';
+    return String(label || '').trim();
+}
+
+export function resolveMhsaDetailSemanticTargets(selectionInfo = null, normalizedLabel = '') {
+    const label = String(normalizedLabel || selectionInfo?.label || '').trim();
+    if (!label.length) return [];
+
+    const lower = label.toLowerCase();
+    const activationData = getActivationDataFromSelection(selectionInfo);
+    const stageLower = String(activationData?.stage || '').toLowerCase();
+    const layerIndex = normalizeOptionalIndex(findUserDataNumber(selectionInfo, 'layerIndex'));
+    const headIndex = normalizeOptionalIndex(findUserDataNumber(selectionInfo, 'headIndex'));
+    if (!Number.isFinite(layerIndex) || !Number.isFinite(headIndex)) {
+        return [];
+    }
+
+    const detailTargets = [];
+    const appendMhsaTarget = (stage, role) => {
+        appendUniqueSemanticTarget(detailTargets, buildMhsaDetailSemanticTarget({
+            layerIndex,
+            headIndex,
+            stage,
+            role
+        }));
+    };
+
+    if (stageLower === 'attention.weighted_sum' || lower.includes('attention weighted sum')) {
+        appendMhsaTarget('head-output', 'attention-head-output');
+        return detailTargets;
+    }
+
+    if (stageLower === 'attention.weighted_value' || lower.includes('weighted value vector')) {
+        appendMhsaTarget('head-output', 'attention-head-output-product');
+        appendMhsaTarget('head-output', 'attention-value-post');
+        return detailTargets;
+    }
+
+    if (stageLower === 'attention.pre' || lower.includes('pre-softmax attention score')) {
+        appendMhsaTarget('attention', 'attention-pre-score');
+        return detailTargets;
+    }
+
+    if (stageLower === 'attention.post' || lower.includes('post-softmax attention score')) {
+        appendMhsaTarget('attention', 'attention-post');
+        return detailTargets;
+    }
+
+    if (stageLower === 'attention.mask' || lower.includes('attention mask')) {
+        appendMhsaTarget('attention', 'attention-mask');
+        return detailTargets;
+    }
+
+    if (lower === 'softmax' || lower.includes('softmax(') || lower.includes('softmax')) {
+        appendMhsaTarget('attention', 'attention-softmax-body');
+        appendMhsaTarget('attention', 'attention-softmax-label');
+        return detailTargets;
+    }
+
+    if (
+        stageLower === 'qkv.q'
+        || lower.includes('query ')
+    ) {
+        if (lower.includes('weight matrix')) {
+            appendMhsaTarget('projection-q', 'projection-weight');
+        } else if (lower.includes('bias')) {
+            appendMhsaTarget('projection-q', 'projection-bias');
+        } else {
+            appendMhsaTarget('projection-q', 'projection-output');
+            appendMhsaTarget('attention', 'attention-query-source');
+        }
+        return detailTargets;
+    }
+
+    if (
+        stageLower === 'qkv.k'
+        || lower.includes('key ')
+    ) {
+        if (lower.includes('weight matrix')) {
+            appendMhsaTarget('projection-k', 'projection-weight');
+        } else if (lower.includes('bias')) {
+            appendMhsaTarget('projection-k', 'projection-bias');
+        } else {
+            appendMhsaTarget('projection-k', 'projection-output');
+            appendMhsaTarget('attention', 'attention-key-transpose');
+        }
+        return detailTargets;
+    }
+
+    if (
+        stageLower === 'qkv.v'
+        || lower.includes('value ')
+    ) {
+        if (lower.includes('weight matrix')) {
+            appendMhsaTarget('projection-v', 'projection-weight');
+        } else if (lower.includes('bias')) {
+            appendMhsaTarget('projection-v', 'projection-bias');
+        } else {
+            appendMhsaTarget('projection-v', 'projection-output');
+            appendMhsaTarget('head-output', 'attention-value-post');
+        }
+        return detailTargets;
+    }
+
+    return detailTargets;
+}
+
 export function deriveBaseSemanticTarget(target = null) {
     const safeTarget = buildSemanticTarget(target);
     if (
@@ -283,31 +465,43 @@ export function resolveDetailTargetsFromSemanticTarget(target = null) {
     )
         ? resolveOutputProjectionDetailTarget(safeTarget)
         : null;
+    const mlpDetailTarget = (
+        !headDetailTarget
+        && !concatDetailTarget
+        && !outputProjectionDetailTarget
+        && safeTarget?.componentKind === 'mlp'
+    )
+        ? resolveMlpDetailTarget(safeTarget)
+        : null;
 
     return {
         headDetailTarget,
         concatDetailTarget,
-        outputProjectionDetailTarget
+        outputProjectionDetailTarget,
+        mlpDetailTarget
     };
 }
 
 export function hasActiveDetailTarget({
     headDetailTarget = null,
     concatDetailTarget = null,
-    outputProjectionDetailTarget = null
+    outputProjectionDetailTarget = null,
+    mlpDetailTarget = null
 } = {}) {
-    return !!(headDetailTarget || concatDetailTarget || outputProjectionDetailTarget);
+    return !!(headDetailTarget || concatDetailTarget || outputProjectionDetailTarget || mlpDetailTarget);
 }
 
 export function resolveActiveSemanticTarget({
     baseSemanticTarget = null,
     headDetailTarget = null,
     concatDetailTarget = null,
-    outputProjectionDetailTarget = null
+    outputProjectionDetailTarget = null,
+    mlpDetailTarget = null
 } = {}) {
     if (headDetailTarget) return buildHeadDetailSemanticTarget(headDetailTarget);
     if (concatDetailTarget) return buildConcatDetailSemanticTarget(concatDetailTarget);
     if (outputProjectionDetailTarget) return buildOutputProjectionDetailSemanticTarget(outputProjectionDetailTarget);
+    if (mlpDetailTarget) return buildMlpDetailSemanticTarget(mlpDetailTarget);
     return buildSemanticTarget(baseSemanticTarget);
 }
 
@@ -316,15 +510,17 @@ export function resolveActiveFocusLabel({
     baseFocusLabel = '',
     headDetailTarget = null,
     concatDetailTarget = null,
-    outputProjectionDetailTarget = null
+    outputProjectionDetailTarget = null,
+    mlpDetailTarget = null
 } = {}) {
     const semanticTarget = resolveActiveSemanticTarget({
         baseSemanticTarget,
         headDetailTarget,
         concatDetailTarget,
-        outputProjectionDetailTarget
+        outputProjectionDetailTarget,
+        mlpDetailTarget
     });
-    if (headDetailTarget || concatDetailTarget || outputProjectionDetailTarget) {
+    if (headDetailTarget || concatDetailTarget || outputProjectionDetailTarget || mlpDetailTarget) {
         return describeTransformerView2dTarget(semanticTarget);
     }
     return String(baseFocusLabel || '').trim() || describeTransformerView2dTarget(semanticTarget);
@@ -335,7 +531,8 @@ export function resolveFocusSemanticTargets({
     baseSemanticTarget = null,
     headDetailTarget = null,
     concatDetailTarget = null,
-    outputProjectionDetailTarget = null
+    outputProjectionDetailTarget = null,
+    mlpDetailTarget = null
 } = {}) {
     const candidates = [];
     if (headDetailTarget) {
@@ -353,6 +550,12 @@ export function resolveFocusSemanticTargets({
             buildOutputProjectionDetailSemanticTarget(outputProjectionDetailTarget, 'projection-weight'),
             buildOutputProjectionDetailSemanticTarget(outputProjectionDetailTarget, 'module')
         );
+    } else if (mlpDetailTarget) {
+        candidates.push(
+            buildMlpDetailSemanticTarget(mlpDetailTarget, 'module-card'),
+            buildMlpDetailSemanticTarget(mlpDetailTarget, 'module-title'),
+            buildMlpDetailSemanticTarget(mlpDetailTarget, 'module')
+        );
     } else {
         candidates.push(
             buildSemanticTarget(semanticTarget)
@@ -360,7 +563,8 @@ export function resolveFocusSemanticTargets({
                 baseSemanticTarget,
                 headDetailTarget,
                 concatDetailTarget,
-                outputProjectionDetailTarget
+                outputProjectionDetailTarget,
+                mlpDetailTarget
             })
         );
     }
@@ -399,6 +603,16 @@ export function isOutputProjectionOverviewEntry(entry = null) {
     if (!Number.isFinite(semantic.layerIndex)) return false;
     return entry.role === 'projection-weight'
         || entry.role === 'module-title';
+}
+
+export function isMlpOverviewEntry(entry = null) {
+    const semantic = entry?.semantic;
+    if (!semantic || semantic.componentKind !== 'mlp') return false;
+    if (!Number.isFinite(semantic.layerIndex)) return false;
+    if (semantic.stage !== 'mlp') return false;
+    return entry.role === 'module-card'
+        || entry.role === 'module-title'
+        || entry.role === 'module';
 }
 
 function isTopUnembeddingLabel(lower = '') {
@@ -693,9 +907,21 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     }
 
     if (!semanticTarget) return null;
+    const detailSemanticTargets = (
+        semanticTarget?.componentKind === 'mhsa'
+        && Number.isFinite(semanticTarget?.headIndex)
+    )
+        ? resolveMhsaDetailSemanticTargets(selectionInfo, label)
+        : [];
+    const detailFocusLabel = detailSemanticTargets.length
+        ? resolveMhsaDetailFocusLabel(label, stageLower)
+        : '';
     return {
         semanticTarget,
         focusLabel: describeTransformerView2dTarget(semanticTarget),
+        ...(detailSemanticTargets.length ? { detailSemanticTargets } : {}),
+        ...(detailFocusLabel.length ? { detailFocusLabel } : {}),
+        ...(detailSemanticTargets.length ? { transitionMode: 'staged-head-detail' } : {}),
         actionLabel: 'View in 2D / matrix form'
     };
 }

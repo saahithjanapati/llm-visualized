@@ -14,6 +14,20 @@ import { CanvasSceneRenderer } from '../src/view2d/render/canvas/CanvasSceneRend
 import { resolveViewportFitTransform } from '../src/view2d/runtime/View2dViewportController.js';
 import { flattenSceneNodes } from '../src/view2d/schema/sceneTypes.js';
 import { D_HEAD, D_MODEL } from '../src/ui/selectionPanelConstants.js';
+import { resolveTransformerView2dOverviewMinScale } from '../src/ui/selectionPanelTransformerView2dViewportUtils.js';
+
+const HEAD_DETAIL_VIEWPORT_PADDING = Object.freeze({
+    top: 44,
+    right: 56,
+    bottom: 44,
+    left: 56
+});
+const HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
+    top: 20,
+    right: 24,
+    bottom: 20,
+    left: 24
+});
 
 function createActivationSource(tokenCount = 4) {
     const promptTokens = Array.from({ length: tokenCount }, (_, index) => index);
@@ -220,6 +234,11 @@ function drainRafQueue(queue, now = performance.now()) {
     }
 }
 
+function flushRafFrame(queue, now = performance.now()) {
+    const callbacks = queue.splice(0);
+    callbacks.forEach((callback) => callback?.(now));
+}
+
 function resolveSceneRenderableBounds(scene, layout) {
     const registry = layout?.registry || null;
     return flattenSceneNodes(scene)
@@ -338,6 +357,33 @@ describe('selectionPanelTransformerView2d', () => {
         expect(context?.focusLabel).toBe('Layer 4 Attention Head 9');
     });
 
+    it('adds staged deep-component targets for head-specific MHSA selections', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Query Weight Matrix',
+            info: {
+                layerIndex: 3,
+                headIndex: 8,
+                activationData: {
+                    layerIndex: 3,
+                    headIndex: 8,
+                    stage: 'qkv.q'
+                }
+            }
+        });
+
+        expect(context?.detailSemanticTargets).toEqual([
+            {
+                componentKind: 'mhsa',
+                layerIndex: 3,
+                headIndex: 8,
+                stage: 'projection-q',
+                role: 'projection-weight'
+            }
+        ]);
+        expect(context?.detailFocusLabel).toBe('Query Weight Matrix');
+        expect(context?.transitionMode).toBe('staged-head-detail');
+    });
+
     it('maps concatenate selections into concat-focused 2D targets', () => {
         const context = resolveTransformerView2dActionContext({
             label: 'Concatenate',
@@ -417,6 +463,39 @@ describe('selectionPanelTransformerView2d', () => {
             role: 'mlp-up'
         });
         expect(context?.focusLabel).toBe('Layer 8 Multilayer Perceptron Up Projection');
+    });
+
+    it('builds an MLP detail scene with wider hidden-state activations and asymmetric projection cards', () => {
+        const activationSource = createActivationSource(4);
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1,
+            mlpDetailTarget: {
+                layerIndex: 0
+            }
+        });
+        const detailScene = scene.metadata.mlpDetailScene;
+        const detailLayout = buildSceneLayout(detailScene);
+        const entries = detailLayout.registry.getNodeEntries();
+        const inputEntry = entries.find((entry) => entry.role === 'mlp-input');
+        const upOutputEntry = entries.find((entry) => entry.role === 'mlp-up-output');
+        const upCopyEntry = entries.find((entry) => entry.role === 'mlp-up-output-copy');
+        const upWeightEntry = entries.find((entry) => entry.role === 'mlp-up-weight');
+        const downWeightEntry = entries.find((entry) => entry.role === 'mlp-down-weight');
+        const outputEntry = entries.find((entry) => entry.role === 'mlp-output');
+
+        expect(detailScene?.metadata?.source).toBe('buildMlpDetailSceneModel');
+        expect(inputEntry).toBeTruthy();
+        expect(upOutputEntry).toBeTruthy();
+        expect(upCopyEntry).toBeTruthy();
+        expect(upWeightEntry).toBeTruthy();
+        expect(downWeightEntry).toBeTruthy();
+        expect(outputEntry).toBeTruthy();
+        expect(upOutputEntry.contentBounds.width).toBeGreaterThan(inputEntry.contentBounds.width);
+        expect(upCopyEntry.contentBounds.width).toBeLessThan(upOutputEntry.contentBounds.width);
+        expect(upWeightEntry.contentBounds.width).toBeGreaterThan(downWeightEntry.contentBounds.width);
+        expect(downWeightEntry.contentBounds.height).toBeGreaterThan(upWeightEntry.contentBounds.height);
+        expect(outputEntry.contentBounds.width).toBeLessThan(upOutputEntry.contentBounds.width);
     });
 
     it('maps logits selections and top unembedding labels into output-space targets', () => {
@@ -542,6 +621,62 @@ describe('selectionPanelTransformerView2d', () => {
         expect(resizedViewport.panX).toBeCloseTo(expectedFit.panX, 6);
         expect(resizedViewport.panY).toBeCloseTo(expectedFit.panY, 6);
         expect(resizedViewport.scale).toBeGreaterThan(initialViewport.scale);
+    });
+
+    it('allows the overview canvas to zoom farther out on narrow small screens', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+        const canvasRect = {
+            width: 320,
+            height: 640
+        };
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: canvasRect.width,
+            bottom: canvasRect.height,
+            width: canvasRect.width,
+            height: canvasRect.height
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            isSmallScreen: true
+        });
+
+        const viewport = view.getViewportState();
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            isSmallScreen: true
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: true
+        });
+        const expectedFit = resolveViewportFitTransform(layout.sceneBounds, canvasRect, {
+            padding: 28,
+            minScale: resolveTransformerView2dOverviewMinScale({
+                isSmallScreen: true,
+                viewportWidth: canvasRect.width
+            }),
+            maxScale: 10
+        });
+
+        expect(viewport.scale).toBeLessThan(0.035);
+        expect(viewport.scale).toBeCloseTo(expectedFit.scale, 6);
+        expect(viewport.panX).toBeCloseTo(expectedFit.panX, 6);
+        expect(viewport.panY).toBeCloseTo(expectedFit.panY, 6);
     });
 
     it('renders prompt token chips in the bottom-left 2D overlay from the live token window', () => {
@@ -704,8 +839,36 @@ describe('selectionPanelTransformerView2d', () => {
         });
 
         const headScale = view.getViewportState().scale;
+        const detailScene = buildTransformerSceneModel({
+            activationSource: createActivationSource(4),
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 4
+            }
+        }).metadata.mhsaHeadDetailScene;
+        const detailLayout = buildSceneLayout(detailScene);
+        const detailBounds = resolveSceneRenderableBounds(detailScene, detailLayout);
+        const tighterHeadFit = resolveViewportFitTransform(detailBounds, {
+            width: 640,
+            height: 360
+        }, {
+            padding: 28,
+            minScale: 0.06,
+            maxScale: 10
+        });
+        const paddedHeadFit = resolveViewportFitTransform(detailBounds, {
+            width: 640,
+            height: 360
+        }, {
+            padding: HEAD_DETAIL_VIEWPORT_PADDING,
+            minScale: 0.06,
+            maxScale: 10
+        });
         expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
         expect(hud.hidden).toBe(true);
+        expect(headScale).toBeCloseTo(paddedHeadFit.scale, 6);
+        expect(headScale).toBeLessThan(tighterHeadFit.scale);
         expect(headScale).toBeGreaterThan(moduleScale);
 
         canvas.dispatchEvent(new WheelEvent('wheel', {
@@ -721,6 +884,129 @@ describe('selectionPanelTransformerView2d', () => {
         expect(zoomedOutScale).toBeLessThan(headScale);
         expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
         expect(hud.hidden).toBe(true);
+    });
+
+    it('starts MHSA component opens from the full overview before flying into the deep head component', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panel.querySelector('.detail-transformer-view2d-canvas-card');
+        const focusReadout = panel.querySelector('[data-transformer-view2d-readout="focus"]');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 4,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 1 Attention Head 5',
+            detailSemanticTargets: [
+                {
+                    componentKind: 'mhsa',
+                    layerIndex: 0,
+                    headIndex: 4,
+                    stage: 'projection-q',
+                    role: 'projection-weight'
+                }
+            ],
+            detailFocusLabel: 'Query Weight Matrix',
+            transitionMode: 'staged-head-detail'
+        });
+
+        const overviewScene = buildTransformerSceneModel({ activationSource });
+        const overviewLayout = buildSceneLayout(overviewScene);
+        const overviewFit = resolveViewportFitTransform(overviewLayout.sceneBounds, {
+            width: 640,
+            height: 360
+        }, {
+            padding: 28,
+            minScale: 0.035,
+            maxScale: 10
+        });
+
+        const initialViewport = view.getViewportState();
+        expect(initialViewport.scale).toBeCloseTo(overviewFit.scale, 6);
+        expect(initialViewport.panX).toBeCloseTo(overviewFit.panX, 6);
+        expect(initialViewport.panY).toBeCloseTo(overviewFit.panY, 6);
+        expect(focusReadout?.textContent).toBe('Transformer overview');
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
+
+        const startTime = performance.now();
+        flushRafFrame(rafQueue, startTime + 16);
+        flushRafFrame(rafQueue, startTime + 240);
+
+        expect(focusReadout?.textContent).toBe('Transformer overview');
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
+
+        flushRafFrame(rafQueue, startTime + 480);
+
+        expect(focusReadout?.textContent).toBe('Layer 1 Attention Head 5');
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
+
+        [760, 1040, 1360].forEach((offset) => {
+            flushRafFrame(rafQueue, startTime + offset);
+        });
+
+        expect(focusReadout?.textContent).toBe('Layer 1 Attention Head 5');
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
+
+        [1880, 2360, 2840, 3320].forEach((offset) => {
+            flushRafFrame(rafQueue, startTime + offset);
+        });
+
+        const detailScene = buildTransformerSceneModel({
+            activationSource,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 4
+            }
+        }).metadata.mhsaHeadDetailScene;
+        const detailLayout = buildSceneLayout(detailScene);
+        const componentBounds = detailLayout.registry.resolveBoundsForSemanticTarget({
+            componentKind: 'mhsa',
+            layerIndex: 0,
+            headIndex: 4,
+            stage: 'projection-q',
+            role: 'projection-weight'
+        });
+        expect(componentBounds).toBeTruthy();
+        const expectedTransform = resolveViewportFitTransform(componentBounds, {
+            width: 640,
+            height: 360
+        }, {
+            padding: HEAD_DETAIL_COMPONENT_FOCUS_PADDING,
+            minScale: 0.06,
+            maxScale: 10
+        });
+
+        const finalViewport = view.getViewportState();
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
+        expect(focusReadout?.textContent).toBe('Query Weight Matrix');
+        expect(finalViewport.scale).toBeCloseTo(expectedTransform.scale, 6);
+        expect(finalViewport.panX).toBeCloseTo(expectedTransform.panX, 6);
+        expect(finalViewport.panY).toBeCloseTo(expectedTransform.panY, 6);
     });
 
     it('caps the deepest head-detail viewport at a separate zoom-out floor', () => {
@@ -775,12 +1061,12 @@ describe('selectionPanelTransformerView2d', () => {
         const detailLayout = buildSceneLayout(headDetailScene);
         const detailBounds = resolveSceneRenderableBounds(headDetailScene, detailLayout);
         const unclampedFit = resolveViewportFitTransform(detailBounds, canvasRect, {
-            padding: 28,
+            padding: HEAD_DETAIL_VIEWPORT_PADDING,
             minScale: 0.035,
             maxScale: 10
         });
         const expectedFit = resolveViewportFitTransform(detailBounds, canvasRect, {
-            padding: 28,
+            padding: HEAD_DETAIL_VIEWPORT_PADDING,
             minScale: 0.06,
             maxScale: 10
         });
@@ -892,6 +1178,68 @@ describe('selectionPanelTransformerView2d', () => {
 
         expect(canvasCard.classList.contains('is-head-detail-active')).toBe(false);
         expect(hud.hidden).toBe(false);
+    });
+
+    it('enters the MLP detail state for MLP targets and fits the scene-backed detail viewport', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panel.querySelector('.detail-transformer-view2d-canvas-card');
+        const hud = panel.querySelector('.detail-transformer-view2d-hud');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 0,
+                stage: 'mlp-up',
+                role: 'mlp-up'
+            },
+            focusLabel: 'Layer 1 Multilayer Perceptron Up Projection'
+        });
+
+        const detailScale = view.getViewportState().scale;
+        const detailScene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1,
+            mlpDetailTarget: {
+                layerIndex: 0
+            }
+        }).metadata.mlpDetailScene;
+        const detailLayout = buildSceneLayout(detailScene);
+        const detailBounds = resolveSceneRenderableBounds(detailScene, detailLayout);
+        const expectedFit = resolveViewportFitTransform(detailBounds, {
+            width: 640,
+            height: 360
+        }, {
+            padding: HEAD_DETAIL_VIEWPORT_PADDING,
+            minScale: 0.06,
+            maxScale: 10
+        });
+
+        expect(canvasCard.classList.contains('is-head-detail-active')).toBe(true);
+        expect(canvasCard.classList.contains('is-head-detail-scene-active')).toBe(true);
+        expect(hud.hidden).toBe(true);
+        expect(detailScale).toBeCloseTo(expectedFit.scale, 6);
     });
 
     it('shows the shared residual hover tooltip for hovered 2D residual rows and hides it on leave', () => {
@@ -1321,6 +1669,140 @@ describe('selectionPanelTransformerView2d', () => {
 
         expect(afterPinchPan.panX).toBeGreaterThan(afterPinch.panX);
         expect(afterPinchPan.panY).toBeGreaterThan(afterPinch.panY);
+    });
+
+    it('keeps pinned head-detail focus during short touch drags but clears it on desktop empty-space clicks', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const renderSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'render');
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+        canvas.setPointerCapture = vi.fn();
+        canvas.releasePointerCapture = vi.fn();
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 4,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 1 MHSA Head 5'
+        });
+        drainRafQueue(rafQueue);
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 4
+            }
+        });
+        const headDetailScene = scene.metadata.mhsaHeadDetailScene || scene.metadata.headDetailScene;
+        const detailLayout = buildSceneLayout(headDetailScene);
+        const valueEntry = detailLayout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'projection-output'
+            && entry.metadata?.kind === 'v'
+        ));
+        const detailViewport = view.getViewportState();
+        const valuePoint = resolveInteractiveRowClientPoint(
+            headDetailScene,
+            detailLayout,
+            detailViewport,
+            valueEntry,
+            1
+        );
+
+        const pinRenderCountBefore = renderSpy.mock.calls.length;
+        dispatchPointerEvent(canvas, 'pointerdown', {
+            ...valuePoint,
+            pointerId: 1,
+            pointerType: 'mouse'
+        });
+        dispatchPointerEvent(canvas, 'pointerup', {
+            ...valuePoint,
+            pointerId: 1,
+            pointerType: 'mouse'
+        });
+        drainRafQueue(rafQueue);
+
+        const pinnedFocusCall = renderSpy.mock.calls
+            .slice(pinRenderCountBefore)
+            .map(([args]) => args)
+            .reverse()
+            .find((args) => args?.interactionState?.detailSceneFocus);
+        expect(pinnedFocusCall?.interactionState?.detailSceneFocus?.activeNodeIds?.length).toBeGreaterThan(0);
+
+        const touchDragRenderCountBefore = renderSpy.mock.calls.length;
+        dispatchPointerEvent(canvas, 'pointerdown', {
+            clientX: 8,
+            clientY: 8,
+            pointerId: 7,
+            pointerType: 'touch'
+        });
+        dispatchPointerEvent(canvas, 'pointermove', {
+            clientX: 11,
+            clientY: 8,
+            pointerId: 7,
+            pointerType: 'touch'
+        });
+        dispatchPointerEvent(canvas, 'pointerup', {
+            clientX: 11,
+            clientY: 8,
+            pointerId: 7,
+            pointerType: 'touch'
+        });
+        drainRafQueue(rafQueue);
+
+        const touchDragFocusCall = renderSpy.mock.calls
+            .slice(touchDragRenderCountBefore)
+            .map(([args]) => args)
+            .reverse()
+            .find((args) => args?.interactionState);
+        expect(touchDragFocusCall?.interactionState?.detailSceneFocus?.activeNodeIds?.length).toBeGreaterThan(0);
+
+        const mouseClearRenderCountBefore = renderSpy.mock.calls.length;
+        dispatchPointerEvent(canvas, 'pointerdown', {
+            clientX: 8,
+            clientY: 8,
+            pointerId: 2,
+            pointerType: 'mouse'
+        });
+        dispatchPointerEvent(canvas, 'pointerup', {
+            clientX: 8,
+            clientY: 8,
+            pointerId: 2,
+            pointerType: 'mouse'
+        });
+        drainRafQueue(rafQueue);
+
+        const mouseClearCall = renderSpy.mock.calls
+            .slice(mouseClearRenderCountBefore)
+            .map(([args]) => args)
+            .reverse()
+            .find((args) => args?.interactionState);
+        expect(mouseClearCall?.interactionState?.detailSceneFocus ?? null).toBeNull();
     });
 
 });

@@ -810,6 +810,26 @@ function buildOutputProjectionDetailSemanticTarget(target = null, role = 'projec
     };
 }
 
+function normalizeMlpDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerIndex = Number.isFinite(target.layerIndex) ? Math.max(0, Math.floor(target.layerIndex)) : null;
+    if (!Number.isFinite(layerIndex)) return null;
+    return {
+        layerIndex
+    };
+}
+
+function buildMlpDetailSemanticTarget(target = null, role = 'module') {
+    const resolvedTarget = normalizeMlpDetailTarget(target);
+    if (!resolvedTarget) return null;
+    return {
+        componentKind: 'mlp',
+        layerIndex: resolvedTarget.layerIndex,
+        stage: 'mlp',
+        role
+    };
+}
+
 function drawHeadDetailStage(ctx, resolution, headDetailPreview = null, config = null) {
     if (!ctx || !resolution) return;
     const width = Math.max(1, Number(resolution.width) || 1);
@@ -1050,6 +1070,12 @@ function resolveOutputProjectionDetailFocusBounds(layout = null, target = null, 
     const registry = layout?.registry || null;
     if (!registry || typeof registry.resolveBoundsForSemanticTarget !== 'function') return null;
     return cloneBounds(registry.resolveBoundsForSemanticTarget(buildOutputProjectionDetailSemanticTarget(target, role)) || null);
+}
+
+function resolveMlpDetailFocusBounds(layout = null, target = null, role = 'module') {
+    const registry = layout?.registry || null;
+    if (!registry || typeof registry.resolveBoundsForSemanticTarget !== 'function') return null;
+    return cloneBounds(registry.resolveBoundsForSemanticTarget(buildMlpDetailSemanticTarget(target, role)) || null);
 }
 
 function resolveVisibleWorldBounds(resolution, {
@@ -2646,6 +2672,7 @@ export class CanvasSceneRenderer {
         this.headDetailSceneState = createPreparedSceneState(
             this.scene?.metadata?.mhsaHeadDetailScene
             || this.scene?.metadata?.headDetailScene
+            || this.scene?.metadata?.mlpDetailScene
             || null
         );
         return this.layout;
@@ -2828,6 +2855,9 @@ export class CanvasSceneRenderer {
         const activeOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(
             this.scene?.metadata?.outputProjectionDetailTarget
         );
+        const activeMlpDetailTarget = normalizeMlpDetailTarget(
+            this.scene?.metadata?.mlpDetailTarget
+        );
         const activeHeadDetailBounds = activeHeadDetailTarget
             ? (
                 resolveHeadDetailFocusBounds(this.layout, activeHeadDetailTarget, 'head')
@@ -2846,9 +2876,20 @@ export class CanvasSceneRenderer {
                 || resolveOutputProjectionDetailFocusBounds(this.layout, activeOutputProjectionDetailTarget, 'module')
             )
             : null;
+        const activeMlpDetailBounds = activeMlpDetailTarget
+            ? (
+                resolveMlpDetailFocusBounds(this.layout, activeMlpDetailTarget, 'module-card')
+                || resolveMlpDetailFocusBounds(this.layout, activeMlpDetailTarget, 'module-title')
+                || resolveMlpDetailFocusBounds(this.layout, activeMlpDetailTarget, 'module')
+            )
+            : null;
         const activeDetailTargetKind = activeOutputProjectionDetailTarget
             ? 'output-projection'
-            : (activeConcatDetailTarget ? 'concatenate' : (activeHeadDetailTarget ? 'head' : ''));
+            : (
+                activeConcatDetailTarget
+                    ? 'concatenate'
+                    : (activeMlpDetailTarget ? 'mlp' : (activeHeadDetailTarget ? 'head' : ''))
+            );
         this.activeDetailSceneRenderState = null;
         const renderState = {
             ok: true,
@@ -2887,13 +2928,19 @@ export class CanvasSceneRenderer {
                 ? { ...activeOutputProjectionDetailTarget }
                 : null,
             outputProjectionDetailBounds: cloneBounds(activeOutputProjectionDetailBounds),
+            mlpDetailTarget: activeMlpDetailTarget ? { ...activeMlpDetailTarget } : null,
+            mlpDetailBounds: cloneBounds(activeMlpDetailBounds),
             detailTargetKind: activeDetailTargetKind,
             headDetailDepthActive: !!headDetailDepthActive
         };
         this.lastRenderState = renderState;
 
         try {
-            if (headDetailDepthActive && activeDetailTargetKind === 'head' && this.headDetailSceneState?.layout?.registry) {
+            if (
+                headDetailDepthActive
+                && (activeDetailTargetKind === 'head' || activeDetailTargetKind === 'mlp')
+                && this.headDetailSceneState?.layout?.registry
+            ) {
                 const detailSceneBounds = this.headDetailSceneState.visibleBounds
                     || this.headDetailSceneState.layout.sceneBounds
                     || this.headDetailSceneState.layout.registry.getSceneBounds();

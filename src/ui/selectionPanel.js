@@ -6151,6 +6151,9 @@ class SelectionPanel {
     openTransformerView2d({
         semanticTarget = null,
         focusLabel = '',
+        detailSemanticTargets = null,
+        detailFocusLabel = '',
+        transitionMode = '',
         syncRoute = true
     } = {}) {
         return this._openTransformerView2dPreview({
@@ -6159,6 +6162,9 @@ class SelectionPanel {
             view2dContext: {
                 semanticTarget,
                 focusLabel: String(focusLabel || '').trim() || describeTransformerView2dTarget(semanticTarget),
+                detailSemanticTargets,
+                detailFocusLabel: String(detailFocusLabel || '').trim(),
+                transitionMode: String(transitionMode || '').trim(),
                 actionLabel: 'View in 2D / matrix form'
             }
         });
@@ -6191,7 +6197,12 @@ class SelectionPanel {
             this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
             this.subtitle.textContent = 'Scalable semantic canvas for the current transformer state';
         }
-        this._setSubtitleSecondaryText(`Focus: ${resolvedView2dContext.focusLabel}`);
+        const resolvedCanvasFocusLabel = String(
+            resolvedView2dContext.detailFocusLabel
+            || resolvedView2dContext.focusLabel
+            || ''
+        ).trim();
+        this._setSubtitleSecondaryText(`Focus: ${resolvedCanvasFocusLabel}`);
         this._setSubtitleTertiaryText('Prototype view. Drag or use one finger to pan, and pinch or scroll to zoom.');
         this.open();
         this._transformerView2dDetailView?.setVisible(true);
@@ -6201,6 +6212,9 @@ class SelectionPanel {
             tokenLabels: Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels : this.tokenLabels,
             semanticTarget: resolvedView2dContext.semanticTarget,
             focusLabel: resolvedView2dContext.focusLabel,
+            detailSemanticTargets: resolvedView2dContext.detailSemanticTargets,
+            detailFocusLabel: resolvedView2dContext.detailFocusLabel,
+            transitionMode: resolvedView2dContext.transitionMode,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
         });
         this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);

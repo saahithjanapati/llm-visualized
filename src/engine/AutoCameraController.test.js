@@ -82,3 +82,44 @@ describe('AutoCameraController follow re-enable', () => {
         expect(controller._autoCameraViewPendingSinceMs).toBe(123);
     });
 });
+
+describe('AutoCameraController vector center sampling', () => {
+    it('keeps the follow anchor stable across temporary vector scale pulses', () => {
+        const controller = Object.create(AutoCameraController.prototype)
+        const group = new THREE.Group()
+        group.position.set(50, 100, -20)
+
+        const mesh = {
+            getMatrixAt(index, matrix) {
+                if (index === 0) {
+                    matrix.makeTranslation(-4, 10, 0)
+                    return
+                }
+                matrix.makeTranslation(8, 14, 0)
+            }
+        }
+
+        const vec = {
+            group,
+            mesh,
+            rawData: [1, 2],
+            instanceCount: 2
+        }
+
+        group.scale.setScalar(1)
+        group.updateMatrixWorld(true)
+        const baseCenter = new THREE.Vector3()
+        expect(controller._getVectorWorldCenter(vec, baseCenter)).toBe(true)
+        expect(baseCenter.x).toBeCloseTo(52, 6)
+        expect(baseCenter.y).toBeCloseTo(112, 6)
+        expect(baseCenter.z).toBeCloseTo(-20, 6)
+
+        group.scale.setScalar(1.16)
+        group.updateMatrixWorld(true)
+        const pulsedCenter = new THREE.Vector3()
+        expect(controller._getVectorWorldCenter(vec, pulsedCenter)).toBe(true)
+        expect(pulsedCenter.x).toBeCloseTo(baseCenter.x, 6)
+        expect(pulsedCenter.y).toBeCloseTo(baseCenter.y, 6)
+        expect(pulsedCenter.z).toBeCloseTo(baseCenter.z, 6)
+    })
+})
