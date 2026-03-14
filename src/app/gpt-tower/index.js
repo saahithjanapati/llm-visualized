@@ -33,6 +33,11 @@ import {
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
 import { resolveTransformerView2dRoute } from '../../ui/selectionPanelTransformerView2d.js';
 import { initPromptTokenStrip } from '../../ui/promptTokenStrip.js';
+import {
+    dispatchTokenChipHoverSync,
+    tokenChipEntryListsMatch
+} from '../../ui/tokenChipHoverSync.js';
+import { resolveHoverTokenChipSyncEntries } from '../../engine/coreHoverTokenContext.js';
 import { loadActivationState } from './activation.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
 import { buildPassState, initGenerationController } from './generationController.js';
@@ -47,6 +52,7 @@ import {
 } from './config.js';
 
 const vec3 = (arr) => new THREE.Vector3(arr[0], arr[1], arr[2]);
+const SCENE_RAYCAST_TOKEN_HOVER_SOURCE = 'scene-raycast';
 
 function hideLoadingOverlay() {
     const overlay = document.getElementById('loadingOverlay');
@@ -351,6 +357,24 @@ const promptTokenStrip = initPromptTokenStrip({
         selectionPanel.handleSelection(selection);
     }
 });
+let hoveredSceneTokenEntries = [];
+const syncSceneHoverTokenEntry = (selection = null) => {
+    const nextEntries = selection?.label
+        ? resolveHoverTokenChipSyncEntries({
+            label: selection.label,
+            info: selection.info,
+            object: selection.object,
+            activationSource
+        })
+        : [];
+    const entryChanged = !tokenChipEntryListsMatch(nextEntries, hoveredSceneTokenEntries);
+    if (!entryChanged) return;
+    hoveredSceneTokenEntries = nextEntries;
+    dispatchTokenChipHoverSync(nextEntries, {
+        active: nextEntries.length > 0,
+        source: SCENE_RAYCAST_TOKEN_HOVER_SOURCE
+    });
+};
 if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'function') {
     pipeline.engine.setRaycastSelectionHandler(selection => {
         if (!selection || !selection.label) {
@@ -360,6 +384,11 @@ if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'fu
         }
         followModeControls?.suppressPendingFollowDisable?.();
         selectionPanel.handleSelection(selection);
+    });
+}
+if (pipeline.engine && typeof pipeline.engine.setRaycastHoverHandler === 'function') {
+    pipeline.engine.setRaycastHoverHandler((selection) => {
+        syncSceneHoverTokenEntry(selection);
     });
 }
 

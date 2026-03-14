@@ -88,6 +88,17 @@ function make2dContext() {
         stroke() {},
         fill() {},
         arc() {},
+        closePath() {},
+        save() {},
+        restore() {},
+        translate() {},
+        scale() {},
+        rotate() {},
+        rect() {},
+        roundRect() {},
+        quadraticCurveTo() {},
+        bezierCurveTo() {},
+        clip() {},
         setLineDash() {},
         fillText() {},
         measureText: () => ({ width: 96 }),
@@ -551,5 +562,25 @@ describe('selectionPanel history preview reuse', () => {
             'selectionPanelAttentionSectionCollapsed',
             'false'
         );
+    });
+
+    it('suppresses 3D hover sync while the 2D transformer preview is open', () => {
+        buildPanelDom();
+        const engine = {
+            pause: vi.fn(),
+            resume: vi.fn(),
+            setHoverLabelsSuppressed: vi.fn()
+        };
+        const panel = initSelectionPanel({ engine });
+
+        expect(panel.openTransformerView2d({
+            semanticTarget: null,
+            focusLabel: 'Transformer overview'
+        })).toBe(true);
+        expect(engine.setHoverLabelsSuppressed).toHaveBeenCalledWith(true);
+
+        panel.handleSelection(makeSelection());
+
+        expect(engine.setHoverLabelsSuppressed).toHaveBeenLastCalledWith(false);
     });
 });

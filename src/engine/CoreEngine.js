@@ -388,7 +388,9 @@ export class CoreEngine {
 
         // Bind pointer move handler and add listener
         this._onPointerMove = this._onPointerMove.bind(this);
+        this._onPointerLeave = this._onPointerLeave.bind(this);
         this.renderer.domElement.addEventListener('pointermove', this._onPointerMove);
+        this.renderer.domElement.addEventListener('pointerleave', this._onPointerLeave);
 
         // Track pointer down / cancel to detect taps on touchscreens
         this._onPointerDown = this._onPointerDown.bind(this);
@@ -588,13 +590,7 @@ export class CoreEngine {
     /** Enable or disable hover raycasting and label updates at runtime. */
     setRaycastingEnabled(enabled) {
         this._raycastingEnabled = !!enabled;
-        if (!this._raycastingEnabled && this._hoverLabelDiv) {
-            this._hoverLabelDiv.style.display = 'none';
-        }
-        if (!this._raycastingEnabled) {
-            this._setCanvasCursor(false);
-            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
-        }
+        if (!this._raycastingEnabled) this._clearRaycastHoverState();
     }
 
     /**
@@ -606,9 +602,7 @@ export class CoreEngine {
         if (this._hoverLabelsSuppressed === next) return;
         this._hoverLabelsSuppressed = next;
         if (next) {
-            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
-            this._setCanvasCursor(false);
-            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
+            this._clearRaycastHoverState();
         }
     }
 
@@ -777,6 +771,7 @@ export class CoreEngine {
         }
         this.renderer.dispose();
         this.renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
+        this.renderer.domElement.removeEventListener('pointerleave', this._onPointerLeave);
         this.renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
         this.renderer.domElement.removeEventListener('pointercancel', this._onPointerCancel);
         this.renderer.domElement.removeEventListener('pointerup', this._onPointerUp);
@@ -1225,6 +1220,7 @@ export class CoreEngine {
         this._isUserNavigating = true;
         this._cancelPendingPixelRatioRefresh();
         this._resetAdaptiveRenderDprSampling();
+        this._clearRaycastHoverState();
     }
 
     _onControlsEndInteraction() {
@@ -1311,9 +1307,7 @@ export class CoreEngine {
         }
         this._cancelPendingControlsInteractionEnd();
         this._isUserNavigating = false;
-        if (this._hoverLabelDiv) {
-            this._hoverLabelDiv.style.display = 'none';
-        }
+        this._clearRaycastHoverState();
         if (typeof controls.dispatchEvent === 'function') {
             controls.dispatchEvent({ type: 'end' });
         }
@@ -1593,9 +1587,7 @@ export class CoreEngine {
             }
         }
         if (this._hoverLabelsSuppressed) {
-            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
-            this._setCanvasCursor(false);
-            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
+            this._clearRaycastHoverState();
             return;
         }
         if (!this._hoverLabelsEnabled) {
@@ -1606,6 +1598,11 @@ export class CoreEngine {
         this._lastPointerX = event.clientX;
         this._lastPointerY = event.clientY;
         this._scheduleRaycast();
+    };
+
+    _onPointerLeave = (event) => {
+        if (event?.pointerType === 'touch') return;
+        this._clearRaycastHoverState();
     };
 
     _isRaycastObjectVisible(object) {
@@ -1655,9 +1652,7 @@ export class CoreEngine {
         if (this._hoverLabelsEnabled === enabled) return;
         this._hoverLabelsEnabled = enabled;
         if (!enabled) {
-            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
-            this._setCanvasCursor(false);
-            if (this._raycastHoverHandler) this._raycastHoverHandler(null);
+            this._clearRaycastHoverState();
         }
     }
 
@@ -1669,15 +1664,29 @@ export class CoreEngine {
         this.renderer.domElement.style.cursor = next;
     }
 
+    _emitRaycastHoverSelection(selection = null) {
+        if (this._raycastHoverHandler) {
+            this._raycastHoverHandler(selection || null);
+        }
+    }
+
+    _clearRaycastHoverState() {
+        if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
+        this._setCanvasCursor(false);
+        this._emitRaycastHoverSelection(null);
+    }
+
     _performRaycastAt(clientX, clientY, { force = false } = {}) {
         if (!this._raycastingEnabled) return;
         if (this._hoverLabelsSuppressed) {
-            if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
-            this._setCanvasCursor(false);
+            this._clearRaycastHoverState();
             return;
         }
         if (!this._hoverLabelsEnabled) return;
-        if (!force && this._isUserNavigating) return;
+        if (!force && this._isUserNavigating) {
+            this._clearRaycastHoverState();
+            return;
+        }
         if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
 
         const rect = this._canvasRect;
@@ -1688,8 +1697,7 @@ export class CoreEngine {
 
         this._raycaster.setFromCamera(this._pointer, this.camera);
         if (!this._raycastRoots.length) {
-            this._hoverLabelDiv.style.display = 'none';
-            this._setCanvasCursor(false);
+            this._clearRaycastHoverState();
             return;
         }
 
@@ -1711,19 +1719,24 @@ export class CoreEngine {
                 resolved.object || resolved.hit?.object || null
             );
             if (!rendered) {
-                this._hoverLabelDiv.style.display = 'none';
-                this._setCanvasCursor(false);
+                this._clearRaycastHoverState();
                 return;
             }
             this._hoverLabelDiv.style.left = `${clientX + 12}px`;
             this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
             this._hoverLabelDiv.style.display = 'block';
             this._setCanvasCursor(true);
+            this._emitRaycastHoverSelection({
+                label: hoverLabel,
+                kind: resolved.kind || null,
+                info: resolved.info || null,
+                object: resolved.object || resolved.hit?.object || null,
+                hit: resolved.hit || null
+            });
             return;
         }
         // No intersection with a labelled object – hide overlay.
-        this._hoverLabelDiv.style.display = 'none';
-        this._setCanvasCursor(false);
+        this._clearRaycastHoverState();
     }
 
     _renderHoverLabel(label = '', info = null, object = null) {

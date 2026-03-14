@@ -275,6 +275,49 @@ function shouldSuppressTokenChipHover(info = null, object = null) {
     return candidates.some((candidate) => candidate?.suppressTokenChip === true);
 }
 
+function normalizeHoverTokenChipSyncEntry(entry = null) {
+    if (!entry || typeof entry !== 'object') return null;
+    const tokenIndex = toFiniteTokenNumber(entry.tokenIndex);
+    const tokenId = toFiniteTokenNumber(entry.tokenId ?? entry.token_id);
+    const tokenLabel = String(entry.tokenLabel || '').trim();
+    if (!Number.isFinite(tokenIndex) && !Number.isFinite(tokenId) && !tokenLabel.length) {
+        return null;
+    }
+    return {
+        tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+        tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+        tokenLabel
+    };
+}
+
+function hoverTokenChipSyncEntriesMatch(a = null, b = null) {
+    const left = normalizeHoverTokenChipSyncEntry(a);
+    const right = normalizeHoverTokenChipSyncEntry(b);
+    if (!left || !right) return false;
+    if (Number.isFinite(left.tokenIndex) && Number.isFinite(right.tokenIndex)) {
+        return left.tokenIndex === right.tokenIndex;
+    }
+    if (Number.isFinite(left.tokenId) && Number.isFinite(right.tokenId)) {
+        if (left.tokenId !== right.tokenId) return false;
+        if (left.tokenLabel.length && right.tokenLabel.length) {
+            return left.tokenLabel === right.tokenLabel;
+        }
+        return true;
+    }
+    return left.tokenLabel.length > 0
+        && right.tokenLabel.length > 0
+        && left.tokenLabel === right.tokenLabel;
+}
+
+function pushUniqueHoverTokenChipSyncEntry(entries, entry = null) {
+    const normalizedEntry = normalizeHoverTokenChipSyncEntry(entry);
+    if (!normalizedEntry) return;
+    if (entries.some((candidate) => hoverTokenChipSyncEntriesMatch(candidate, normalizedEntry))) {
+        return;
+    }
+    entries.push(normalizedEntry);
+}
+
 function resolveAttentionRowContext({
     roleLabel = 'Token',
     tokenIndex = null,
@@ -307,6 +350,51 @@ function resolveAttentionRowContext({
             ? `Position ${safeTokenIndex + 1}`
             : 'Position n/a'
     };
+}
+
+function resolveAttentionScoreHoverTokenEntries({
+    label = '',
+    info = null,
+    object = null,
+    activationSource = null
+} = {}) {
+    if (!isAttentionScoreHoverSelection(label, info, object)) return [];
+
+    const sourceTokenIndex = (() => {
+        const queryTokenIndex = findHoverTokenNumber(info, object, 'queryTokenIndex');
+        if (Number.isFinite(queryTokenIndex)) return Math.floor(queryTokenIndex);
+        const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');
+        return Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+    })();
+    const sourceTokenLabel = findHoverTokenString(info, object, 'queryTokenLabel')
+        || findHoverTokenString(info, object, 'tokenLabel');
+    const sourceTokenId = (() => {
+        const queryTokenId = findHoverTokenNumber(info, object, 'queryTokenId');
+        if (Number.isFinite(queryTokenId)) return Math.floor(queryTokenId);
+        const tokenId = findHoverTokenNumber(info, object, 'tokenId');
+        return Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+    })();
+
+    const targetTokenIndex = findHoverTokenNumber(info, object, 'keyTokenIndex');
+    const targetTokenLabel = findHoverTokenString(info, object, 'keyTokenLabel');
+    const targetTokenId = findHoverTokenNumber(info, object, 'keyTokenId');
+
+    const entries = [];
+    pushUniqueHoverTokenChipSyncEntry(entries, resolveAttentionRowContext({
+        roleLabel: 'Source',
+        tokenIndex: sourceTokenIndex,
+        tokenId: sourceTokenId,
+        tokenLabel: sourceTokenLabel,
+        activationSource
+    }));
+    pushUniqueHoverTokenChipSyncEntry(entries, resolveAttentionRowContext({
+        roleLabel: 'Target',
+        tokenIndex: targetTokenIndex,
+        tokenId: targetTokenId,
+        tokenLabel: targetTokenLabel,
+        activationSource
+    }));
+    return entries;
 }
 
 function resolveAttentionScoreHoverContext({
@@ -417,7 +505,48 @@ function resolveAttentionScoreHoverContext({
     };
 }
 
-export function resolveHoverTokenContext({
+function resolveAssociatedHoverTokenIndex(info = null, object = null) {
+    const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');
+    if (Number.isFinite(tokenIndex)) return Math.floor(tokenIndex);
+
+    const queryTokenIndex = findHoverTokenNumber(info, object, 'queryTokenIndex');
+    if (Number.isFinite(queryTokenIndex)) return Math.floor(queryTokenIndex);
+
+    const keyTokenIndex = findHoverTokenNumber(info, object, 'keyTokenIndex');
+    if (Number.isFinite(keyTokenIndex)) return Math.floor(keyTokenIndex);
+
+    return null;
+}
+
+function resolveAssociatedHoverTokenId(info = null, object = null, tokenIndex = null, activationSource = null) {
+    const tokenId = findHoverTokenNumber(info, object, 'tokenId');
+    if (Number.isFinite(tokenId)) return Math.floor(tokenId);
+
+    const queryTokenId = findHoverTokenNumber(info, object, 'queryTokenId');
+    if (Number.isFinite(queryTokenId)) return Math.floor(queryTokenId);
+
+    const keyTokenId = findHoverTokenNumber(info, object, 'keyTokenId');
+    if (Number.isFinite(keyTokenId)) return Math.floor(keyTokenId);
+
+    if (Number.isFinite(tokenIndex) && typeof activationSource?.getTokenId === 'function') {
+        const resolvedTokenId = activationSource.getTokenId(tokenIndex);
+        if (Number.isFinite(resolvedTokenId)) return Math.floor(resolvedTokenId);
+    }
+
+    return null;
+}
+
+function resolveAssociatedHoverTokenLabel(info = null, object = null, tokenIndex = null, activationSource = null) {
+    return resolvePreferredTokenLabel({
+        tokenLabel: findHoverTokenString(info, object, 'tokenLabel')
+            || findHoverTokenString(info, object, 'queryTokenLabel')
+            || findHoverTokenString(info, object, 'keyTokenLabel'),
+        tokenIndex,
+        activationSource
+    });
+}
+
+function resolveAssociatedHoverTokenEntry({
     label = '',
     info = null,
     object = null,
@@ -429,9 +558,87 @@ export function resolveHoverTokenContext({
     if (isBiasVectorHoverSelection(label)) {
         return null;
     }
-
+    if (isLayerNormParamHoverSelection(label, info, object)) {
+        return null;
+    }
     if (isBottomPositionChipHoverSelection(label)) return null;
 
+    const isBottomTokenChip = isBottomTokenChipHoverSelection(label);
+    if (!isBottomTokenChip && shouldSuppressTokenChipHover(info, object)) return null;
+    if (!isBottomTokenChip && !isVectorLikeHoverSelection(label, info, object)) return null;
+
+    const tokenIndex = resolveAssociatedHoverTokenIndex(info, object);
+    const tokenId = resolveAssociatedHoverTokenId(info, object, tokenIndex, activationSource);
+    const tokenLabel = resolveAssociatedHoverTokenLabel(info, object, tokenIndex, activationSource);
+
+    if (!tokenLabel && !Number.isFinite(tokenIndex) && !Number.isFinite(tokenId)) {
+        return null;
+    }
+
+    return {
+        isBottomTokenChip,
+        tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+        tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+        tokenLabel
+    };
+}
+
+export function resolveHoverTokenChipSyncEntries({
+    label = '',
+    info = null,
+    object = null,
+    activationSource = null
+} = {}) {
+    const attentionEntries = resolveAttentionScoreHoverTokenEntries({
+        label,
+        info,
+        object,
+        activationSource
+    });
+    if (attentionEntries.length) return attentionEntries;
+
+    const tokenEntry = resolveAssociatedHoverTokenEntry({
+        label,
+        info,
+        object,
+        activationSource
+    });
+    if (!tokenEntry) return [];
+
+    return [{
+        tokenIndex: tokenEntry.tokenIndex,
+        tokenId: tokenEntry.tokenId,
+        tokenLabel: tokenEntry.tokenLabel
+    }];
+}
+
+export function resolveHoverTokenChipSyncEntry({
+    label = '',
+    info = null,
+    object = null,
+    activationSource = null
+} = {}) {
+    const tokenEntry = resolveAssociatedHoverTokenEntry({
+        label,
+        info,
+        object,
+        activationSource
+    });
+    if (!tokenEntry) return null;
+
+    return {
+        tokenIndex: tokenEntry.tokenIndex,
+        tokenId: tokenEntry.tokenId,
+        tokenLabel: tokenEntry.tokenLabel
+    };
+}
+
+export function resolveHoverTokenContext({
+    label = '',
+    info = null,
+    object = null,
+    activationSource = null
+} = {}) {
     const attentionScoreContext = resolveAttentionScoreHoverContext({
         label,
         info,
@@ -440,37 +647,27 @@ export function resolveHoverTokenContext({
     });
     if (attentionScoreContext) return attentionScoreContext;
 
-    const isBottomTokenChip = isBottomTokenChipHoverSelection(label);
-    if (!isBottomTokenChip && shouldSuppressTokenChipHover(info, object)) return null;
-    if (!isBottomTokenChip && !isVectorLikeHoverSelection(label, info, object)) return null;
-
-    const tokenIndex = findHoverTokenNumber(info, object, 'tokenIndex');
-    let tokenId = findHoverTokenNumber(info, object, 'tokenId');
-    if (!Number.isFinite(tokenId) && Number.isFinite(tokenIndex) && typeof activationSource?.getTokenId === 'function') {
-        const resolvedTokenId = activationSource.getTokenId(tokenIndex);
-        if (Number.isFinite(resolvedTokenId)) tokenId = Math.floor(resolvedTokenId);
-    }
-
+    const tokenEntry = resolveAssociatedHoverTokenEntry({
+        label,
+        info,
+        object,
+        activationSource
+    });
+    if (!tokenEntry) return null;
     if (isWeightedSumHoverSelection(label, info, object)) return null;
     if (isLayerNormParamHoverSelection(label, info, object)) return null;
 
-    const tokenLabel = resolvePreferredTokenLabel({
-        tokenLabel: findHoverTokenString(info, object, 'tokenLabel'),
-        tokenIndex,
-        activationSource
-    });
-
-    const resolvedLabel = resolveTokenChipLabel(tokenLabel, tokenIndex);
+    const resolvedLabel = resolveTokenChipLabel(tokenEntry.tokenLabel, tokenEntry.tokenIndex);
     if (!resolvedLabel) return null;
 
     return {
         suppressHoverLabel: false,
         showPrimaryLabel: true,
-        primaryLabelText: isBottomTokenChip ? 'Token' : '',
+        primaryLabelText: tokenEntry.isBottomTokenChip ? 'Token' : '',
         detailKind: 'token-chip',
         detailText: resolvedLabel,
-        tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
-        tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
+        tokenIndex: tokenEntry.tokenIndex,
+        tokenId: tokenEntry.tokenId,
         tokenLabel: resolvedLabel
     };
 }

@@ -14,6 +14,7 @@ import {
     VIEW2D_MATRIX_PRESENTATIONS,
     VIEW2D_MATRIX_SHAPES
 } from '../../schema/sceneTypes.js';
+import { buildSceneLayout } from '../../layout/buildSceneLayout.js';
 import { D_HEAD, D_MODEL } from '../../../ui/selectionPanelConstants.js';
 import {
     createMhsaDetailSceneIndex,
@@ -102,7 +103,9 @@ function createMockContext() {
         beginPath() {
             currentPath = [];
         },
-        rect() {},
+        rect(x, y, width, height) {
+            currentPath.push({ type: 'rect', x, y, width, height });
+        },
         moveTo(x, y) {
             currentPath.push({ type: 'moveTo', x, y });
         },
@@ -140,6 +143,19 @@ function createMockContext() {
                 transformScaleY: this.currentScaleY,
                 effectiveLineWidth: this.lineWidth * this.currentScaleY,
                 path: currentPath.map((entry) => ({ ...entry }))
+            });
+        },
+        strokeRect(x, y, width, height) {
+            this.operations.push({
+                type: 'strokeRect',
+                x,
+                y,
+                width,
+                height,
+                strokeStyle: this.strokeStyle,
+                lineWidth: this.lineWidth,
+                globalAlpha: this.globalAlpha,
+                filter: this.filter
             });
         },
         clip() {},
@@ -441,6 +457,80 @@ function measureHorizontalArrowScreenMetrics(operations = [], bounds = null, opt
     expect(head).toBeTruthy();
 
     const [shaftStart, shaftEnd] = shaft.path;
+    const [tip, baseA, baseB] = head.path;
+    const shaftScale = Number(shaft.transformScaleX) || 1;
+    const headScaleX = Number(head.transformScaleX) || 1;
+    const headScaleY = Number(head.transformScaleY) || 1;
+    const baseMidX = (baseA.x + baseB.x) * 0.5;
+    const baseMidY = (baseA.y + baseB.y) * 0.5;
+    const effectiveHeadLength = Math.hypot(
+        (tip.x - baseMidX) * headScaleX,
+        (tip.y - baseMidY) * headScaleY
+    );
+    const effectiveHeadSpan = Math.hypot(
+        (baseA.x - baseB.x) * headScaleX,
+        (baseA.y - baseB.y) * headScaleY
+    );
+
+    return {
+        effectiveLength: Math.abs((shaftEnd.x - shaftStart.x) * shaftScale),
+        effectiveLineWidth: Number(shaft.effectiveLineWidth) || 0,
+        effectiveHeadLength,
+        effectiveHeadSpan,
+        tipX: Number(tip.x) || 0
+    };
+}
+
+function findConnectorStrokeByPath(operations = [], pathPoints = [], tolerance = 1.25) {
+    if (!Array.isArray(pathPoints) || pathPoints.length < 2) return null;
+    const startPoint = pathPoints[0];
+    const endPoint = pathPoints[pathPoints.length - 1];
+    return operations.find((operation) => {
+        if (operation?.type !== 'stroke' || !Array.isArray(operation.path) || operation.path.length < 2) {
+            return false;
+        }
+        const move = operation.path[0];
+        const line = operation.path[operation.path.length - 1];
+        if (move?.type !== 'moveTo' || line?.type !== 'lineTo') {
+            return false;
+        }
+        return Math.abs(move.x - startPoint.x) <= tolerance
+            && Math.abs(move.y - startPoint.y) <= tolerance
+            && Math.abs(line.x - endPoint.x) <= tolerance
+            && Math.abs(line.y - endPoint.y) <= tolerance;
+    }) || null;
+}
+
+function findConnectorArrowHeadFillByPath(operations = [], pathPoints = [], tolerance = 1.25) {
+    if (!Array.isArray(pathPoints) || pathPoints.length < 2) return null;
+    const headPoint = pathPoints[pathPoints.length - 1];
+    return operations.find((operation) => {
+        if (operation?.type !== 'fill' || !Array.isArray(operation.path) || operation.path.length < 3) {
+            return false;
+        }
+        const [tip, baseA, baseB] = operation.path;
+        if (
+            tip?.type !== 'moveTo'
+            || baseA?.type !== 'lineTo'
+            || baseB?.type !== 'lineTo'
+        ) {
+            return false;
+        }
+        const baseMidX = (baseA.x + baseB.x) * 0.5;
+        return Math.abs(tip.x - headPoint.x) <= tolerance
+            && Math.abs(tip.y - headPoint.y) <= tolerance
+            && Math.abs(baseMidX - headPoint.x) <= 32;
+    }) || null;
+}
+
+function measureConnectorArrowScreenMetrics(operations = [], pathPoints = []) {
+    const shaft = findConnectorStrokeByPath(operations, pathPoints);
+    const head = findConnectorArrowHeadFillByPath(operations, pathPoints);
+    expect(shaft).toBeTruthy();
+    expect(head).toBeTruthy();
+
+    const shaftStart = shaft.path[0];
+    const shaftEnd = shaft.path[shaft.path.length - 1];
     const [tip, baseA, baseB] = head.path;
     const shaftScale = Number(shaft.transformScaleX) || 1;
     const headScaleX = Number(head.transformScaleX) || 1;
@@ -883,6 +973,89 @@ describe('CanvasSceneRenderer', () => {
         expect(sortedAlphas[0]).toBeCloseTo(1, 3);
         expect(sortedAlphas[1]).toBeCloseTo(1, 3);
         expect(sortedAlphas[2]).toBeCloseTo(0.18, 3);
+    });
+
+    it('focuses a specific compact-row vector-strip band when cell selections target it', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const matrixNode = createMatrixNode({
+            role: 'concat-output-matrix',
+            semantic: {
+                componentKind: 'output-projection',
+                layerIndex: 0,
+                stage: 'concatenate',
+                role: 'concat-output-matrix'
+            },
+            dimensions: { rows: 3, cols: 256 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
+            },
+            metadata: {
+                interactiveBandHit: true,
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT,
+                    bandCount: 4,
+                    bandSeparatorOpacity: 0.22,
+                    hoverStrokeColor: 'rgba(255,255,255,0.10)'
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [matrixNode],
+            metadata: {
+                visualContract: 'selection-panel-output-projection-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: [matrixNode.id],
+                    cellSelections: [
+                        { nodeId: matrixNode.id, rowIndex: 1, colIndex: 2 }
+                    ]
+                }
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(matrixNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+
+        const bandWidth = entry.layoutData.compactWidth / 4;
+        const expectedX = entry.contentBounds.x + entry.layoutData.innerPaddingX + (bandWidth * 2) + 0.5;
+        const expectedY = entry.contentBounds.y + entry.layoutData.innerPaddingY + (entry.layoutData.rowHeight + entry.layoutData.rowGap) + 0.5;
+        const strokeRect = ctx.operations.find((operation) => (
+            operation.type === 'strokeRect'
+            && Math.abs(operation.x - expectedX) < 1.25
+            && Math.abs(operation.y - expectedY) < 1.25
+        ));
+
+        expect(strokeRect).toBeTruthy();
+        expect(strokeRect?.width).toBeCloseTo(Math.max(0, bandWidth - 1), 2);
     });
 
     it('keeps preserve-detail grid cells visible during interactive hover fast paths', () => {
@@ -1697,6 +1870,79 @@ describe('CanvasSceneRenderer', () => {
         expect(rowHit?.rowHit?.rowIndex).toBe(1);
     });
 
+    it('resolves band hits for band-interactive compact-row vector strips', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const compactRowNode = createMatrixNode({
+            role: 'concat-output-matrix',
+            semantic: {
+                componentKind: 'output-projection',
+                layerIndex: 0,
+                stage: 'concatenate',
+                role: 'concat-output-matrix'
+            },
+            dimensions: { rows: 3, cols: 768 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
+            },
+            metadata: {
+                interactiveBandHit: true,
+                compactRows: {
+                    compactWidth: 144,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT,
+                    bandCount: 12,
+                    bandSeparatorOpacity: 0.22
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [compactRowNode],
+            metadata: {
+                visualContract: 'selection-panel-output-projection-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(compactRowNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const layoutData = entry.layoutData;
+        const bandWidth = layoutData.compactWidth / 12;
+        const hitX = contentBounds.x + layoutData.innerPaddingX + (bandWidth * 4.5);
+        const hitY = contentBounds.y + layoutData.innerPaddingY + layoutData.rowHeight + layoutData.rowGap + (layoutData.rowHeight * 0.5);
+        const bandHit = renderer.resolveInteractiveHitAtPoint(hitX, hitY);
+
+        expect(bandHit?.cellHit?.rowIndex).toBe(1);
+        expect(bandHit?.cellHit?.colIndex).toBe(4);
+        expect(bandHit?.cellHit?.rowItem?.label).toBe('Token B');
+    });
+
     it('draws a connector-style right-facing continuation arrow with a gap for the H_i matrix', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);
@@ -2088,6 +2334,77 @@ describe('CanvasSceneRenderer', () => {
         );
         const lastPathPoint = connectorEntry?.pathPoints?.[connectorEntry.pathPoints.length - 1] || null;
         expect((lastPathPoint?.x || 0)).toBeGreaterThan(connectorEntry?.pathPoints?.[0]?.x || 0);
+    });
+
+    it('scales the MLP(x_ln) outgoing right-edge connector with the scene zoom', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 960, 540);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const tokenRefs = ['Token A', 'Token B'].map((tokenLabel, rowIndex) => ({
+            rowIndex,
+            tokenIndex: rowIndex,
+            tokenLabel
+        }));
+        const scene = buildMlpDetailSceneModel({
+            activationSource: {
+                getLayerLn2(_layerIndex = 0, _kind = 'shift', tokenIndex = 0, targetLength = D_MODEL) {
+                    return Array.from({ length: targetLength }, (_, index) => Number(
+                        ((tokenIndex * 0.1) + (index * 0.01)).toFixed(4)
+                    ));
+                }
+            },
+            mlpDetailTarget: {
+                layerIndex: 0
+            },
+            tokenRefs
+        });
+        const sceneNodes = flattenSceneNodes(scene);
+        const outputNode = sceneNodes.find((node) => node.role === 'mlp-down-output') || null;
+        const connectorNode = sceneNodes.find((node) => node.role === 'connector-mlp-down-output-outgoing') || null;
+        const sceneLayout = buildSceneLayout(scene);
+        const sceneConnectorEntry = sceneLayout?.registry?.getConnectorEntry(connectorNode?.id || '');
+        const anchorPoint = sceneConnectorEntry?.pathPoints?.[sceneConnectorEntry.pathPoints.length - 1] || null;
+
+        renderer.setScene(scene);
+
+        const renderAndMeasureArrow = (scale) => {
+            ctx.operations.length = 0;
+            expect(renderer.render({
+                width: 960,
+                height: 540,
+                dpr: 1,
+                viewportTransform: {
+                    scale,
+                    offsetX: 900 - ((anchorPoint?.x || 0) * scale),
+                    offsetY: 270 - ((anchorPoint?.y || 0) * scale)
+                }
+            })).toBe(true);
+
+            const entry = renderer.layout?.registry?.getNodeEntry(outputNode?.id || '');
+            const connectorEntry = renderer.layout?.registry?.getConnectorEntry(connectorNode?.id || '');
+            const contentBounds = entry?.contentBounds || null;
+            expect(contentBounds).toBeTruthy();
+            return {
+                ...measureConnectorArrowScreenMetrics(ctx.operations, connectorEntry?.pathPoints || []),
+                contentBounds,
+                connectorEntry
+            };
+        };
+
+        const zoomedOutArrow = renderAndMeasureArrow(0.24);
+        const zoomedInArrow = renderAndMeasureArrow(1.16);
+        const zoomRatio = 1.16 / 0.24;
+
+        expect(zoomedOutArrow.tipX).toBeGreaterThan(
+            (zoomedOutArrow.contentBounds?.x || 0) + (zoomedOutArrow.contentBounds?.width || 0) + 4
+        );
+        expect(zoomedInArrow.tipX).toBeGreaterThan(
+            (zoomedInArrow.contentBounds?.x || 0) + (zoomedInArrow.contentBounds?.width || 0) + 4
+        );
+        expect(zoomedInArrow.effectiveLength / Math.max(0.01, zoomedOutArrow.effectiveLength)).toBeCloseTo(zoomRatio, 0);
+        expect(zoomedInArrow.effectiveLineWidth).toBeGreaterThan(zoomedOutArrow.effectiveLineWidth);
+        expect(zoomedInArrow.effectiveHeadLength).toBeGreaterThan(zoomedOutArrow.effectiveHeadLength);
+        expect(zoomedInArrow.effectiveHeadSpan).toBeGreaterThan(zoomedOutArrow.effectiveHeadSpan);
     });
 
     it('uses the scene connector layer for the MHSA x_ln incoming edge arrow', () => {

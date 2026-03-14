@@ -27,6 +27,24 @@ export function normalizeTokenChipEntry(entry = null) {
     };
 }
 
+export function normalizeTokenChipEntries(entries = null) {
+    const rawEntries = Array.isArray(entries)
+        ? entries
+        : Array.isArray(entries?.entries)
+            ? entries.entries
+            : [entries];
+    const normalizedEntries = [];
+    rawEntries.forEach((entry) => {
+        const normalizedEntry = normalizeTokenChipEntry(entry);
+        if (!normalizedEntry) return;
+        if (normalizedEntries.some((candidate) => tokenChipEntriesMatch(candidate, normalizedEntry))) {
+            return;
+        }
+        normalizedEntries.push(normalizedEntry);
+    });
+    return normalizedEntries;
+}
+
 export function tokenChipEntriesMatch(a, b) {
     const left = normalizeTokenChipEntry(a);
     const right = normalizeTokenChipEntry(b);
@@ -46,20 +64,38 @@ export function tokenChipEntriesMatch(a, b) {
         && left.tokenLabel === right.tokenLabel;
 }
 
+export function tokenChipEntryListsMatch(a, b) {
+    const left = normalizeTokenChipEntries(a);
+    const right = normalizeTokenChipEntries(b);
+    if (left.length !== right.length) return false;
+    return left.every((entry) => right.some((candidate) => tokenChipEntriesMatch(entry, candidate)));
+}
+
+export function matchesFocusVisibleTarget(target = null) {
+    if (!target || typeof target.matches !== 'function') return false;
+    try {
+        return target.matches(':focus-visible');
+    } catch (_) {
+        return false;
+    }
+}
+
 export function dispatchTokenChipHoverSync(entry = null, {
     active = true,
     source = ''
 } = {}) {
     if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
-    const normalized = normalizeTokenChipEntry(entry);
-    const isActive = !!active && !!normalized;
+    const normalizedEntries = !!active ? normalizeTokenChipEntries(entry) : [];
+    const primaryEntry = normalizedEntries[0] || null;
+    const isActive = !!active && normalizedEntries.length > 0;
     window.dispatchEvent(new CustomEvent(TOKEN_CHIP_HOVER_SYNC_EVENT, {
         detail: {
             active: isActive,
             source: String(source || ''),
-            tokenIndex: isActive ? normalized.tokenIndex : null,
-            tokenId: isActive ? normalized.tokenId : null,
-            tokenLabel: isActive ? normalized.tokenLabel : ''
+            entries: isActive ? normalizedEntries : [],
+            tokenIndex: isActive ? primaryEntry.tokenIndex : null,
+            tokenId: isActive ? primaryEntry.tokenId : null,
+            tokenLabel: isActive ? primaryEntry.tokenLabel : ''
         }
     }));
 }

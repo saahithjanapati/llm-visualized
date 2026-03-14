@@ -319,6 +319,7 @@ function drawVectorStripRows(
         baseAlpha = 1,
         bandCount = 12,
         bandSeparatorOpacity = 0,
+        focusedBandCells = null,
         hoverScaleY = 1,
         hoverGlowColor = null,
         hoverGlowBlur = 0,
@@ -335,6 +336,34 @@ function drawVectorStripRows(
         : 0;
     const resolvedHoverScaleY = Number.isFinite(hoverScaleY) ? Math.max(1, hoverScaleY) : 1;
     const resolvedHoverGlowBlur = Number.isFinite(hoverGlowBlur) ? Math.max(0, hoverGlowBlur) : 0;
+    const focusedBandMap = new Map();
+    if (focusedBandCells instanceof Map) {
+        focusedBandCells.forEach((bandSet, rowIndex) => {
+            if (!Number.isFinite(rowIndex) || !(bandSet instanceof Set) || !bandSet.size) return;
+            const normalizedRowIndex = Math.max(0, Math.floor(rowIndex));
+            const normalizedBandSet = new Set(
+                Array.from(bandSet)
+                    .filter((value) => Number.isFinite(value))
+                    .map((value) => Math.max(0, Math.floor(value)))
+            );
+            if (normalizedBandSet.size) {
+                focusedBandMap.set(normalizedRowIndex, normalizedBandSet);
+            }
+        });
+    } else if (Array.isArray(focusedBandCells)) {
+        focusedBandCells.forEach((selection) => {
+            const rowIndex = Number.isFinite(selection?.rowIndex) ? Math.max(0, Math.floor(selection.rowIndex)) : null;
+            const bandIndex = Number.isFinite(selection?.bandIndex) ? Math.max(0, Math.floor(selection.bandIndex)) : null;
+            if (!Number.isFinite(rowIndex) || !Number.isFinite(bandIndex)) return;
+            let bandSet = focusedBandMap.get(rowIndex);
+            if (!bandSet) {
+                bandSet = new Set();
+                focusedBandMap.set(rowIndex, bandSet);
+            }
+            bandSet.add(bandIndex);
+        });
+    }
+    const hasFocusedBands = focusedBandMap.size > 0;
     const focusedRowIndexSet = focusedRowIndices instanceof Set
         ? focusedRowIndices
         : new Set(
@@ -378,6 +407,10 @@ function drawVectorStripRows(
                     ? (focusedRowIndexSet.has(index)
                         ? 1
                         : Math.max(0, Math.min(1, Number.isFinite(dimmedRowOpacity) ? dimmedRowOpacity : 0.18)))
+                    : hasFocusedBands
+                        ? (focusedBandMap.has(index)
+                            ? 1
+                            : Math.max(0, Math.min(1, Number.isFinite(dimmedRowOpacity) ? dimmedRowOpacity : 0.18)))
                     : resolveRowDimmingAlpha(index, hoveredRowIndex, {
                         previousHoveredRowIndex,
                         hoverRowBlend,
@@ -398,34 +431,82 @@ function drawVectorStripRows(
     ctx.clip();
     rowDrawEntries
         .sort((left, right) => left.highlightStrength - right.highlightStrength)
-        .forEach(({ rowItem, bounds, alpha, highlightStrength }) => {
+        .forEach(({ rowItem, index, bounds, alpha, highlightStrength }) => {
+            const focusedBands = focusedBandMap.get(index) || null;
+            const hasFocusedBandsForRow = !!(focusedBands && focusedBands.size);
+            const rowFill = resolveFill(ctx, rowItem.gradientCss, bounds, accent);
+            const bandWidth = resolvedBandCount > 0 ? (bounds.width / resolvedBandCount) : bounds.width;
             if (highlightStrength > 0.001 && typeof hoverGlowColor === 'string' && hoverGlowColor.length && resolvedHoverGlowBlur > 0) {
                 ctx.save();
                 ctx.globalAlpha = alpha * highlightStrength;
-                ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, bounds, accent);
+                ctx.fillStyle = rowFill;
                 ctx.shadowColor = hoverGlowColor;
                 ctx.shadowBlur = resolvedHoverGlowBlur;
                 ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
                 ctx.restore();
             }
-            ctx.fillStyle = resolveFill(ctx, rowItem.gradientCss, bounds, accent);
-            ctx.globalAlpha = alpha;
-            ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-            if (highlightStrength > 0.001 && typeof hoverStrokeColor === 'string' && hoverStrokeColor.length) {
-                ctx.save();
-                ctx.globalAlpha = alpha * highlightStrength;
-                ctx.lineWidth = VECTOR_STRIP_HIGHLIGHT_STROKE_SCREEN_PX;
-                ctx.strokeStyle = hoverStrokeColor;
-                ctx.strokeRect(
-                    bounds.x + 0.5,
-                    bounds.y + 0.5,
-                    Math.max(0, bounds.width - 1),
-                    Math.max(0, bounds.height - 1)
-                );
-                ctx.restore();
+            if (hasFocusedBandsForRow) {
+                ctx.fillStyle = rowFill;
+                ctx.globalAlpha = alpha * Math.max(0, Math.min(1, Number.isFinite(dimmedRowOpacity) ? dimmedRowOpacity : 0.18));
+                ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+
+                focusedBands.forEach((bandIndex) => {
+                    if (bandIndex < 0 || bandIndex >= resolvedBandCount) return;
+                    const bandBounds = {
+                        x: bounds.x + (bandWidth * bandIndex),
+                        y: bounds.y,
+                        width: bandIndex === (resolvedBandCount - 1)
+                            ? Math.max(0, bounds.x + bounds.width - (bounds.x + (bandWidth * bandIndex)))
+                            : bandWidth,
+                        height: bounds.height
+                    };
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(bandBounds.x, bandBounds.y, bandBounds.width, bandBounds.height);
+                    ctx.clip();
+                    ctx.fillStyle = rowFill;
+                    ctx.globalAlpha = alpha;
+                    ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+                    if (typeof hoverGlowColor === 'string' && hoverGlowColor.length && resolvedHoverGlowBlur > 0) {
+                        ctx.shadowColor = hoverGlowColor;
+                        ctx.shadowBlur = resolvedHoverGlowBlur;
+                        ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+                    }
+                    ctx.restore();
+
+                    if (typeof hoverStrokeColor === 'string' && hoverStrokeColor.length) {
+                        ctx.save();
+                        ctx.globalAlpha = alpha;
+                        ctx.lineWidth = VECTOR_STRIP_HIGHLIGHT_STROKE_SCREEN_PX;
+                        ctx.strokeStyle = hoverStrokeColor;
+                        ctx.strokeRect(
+                            bandBounds.x + 0.5,
+                            bandBounds.y + 0.5,
+                            Math.max(0, bandBounds.width - 1),
+                            Math.max(0, bandBounds.height - 1)
+                        );
+                        ctx.restore();
+                    }
+                });
+            } else {
+                ctx.fillStyle = rowFill;
+                ctx.globalAlpha = alpha;
+                ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+                if (highlightStrength > 0.001 && typeof hoverStrokeColor === 'string' && hoverStrokeColor.length) {
+                    ctx.save();
+                    ctx.globalAlpha = alpha * highlightStrength;
+                    ctx.lineWidth = VECTOR_STRIP_HIGHLIGHT_STROKE_SCREEN_PX;
+                    ctx.strokeStyle = hoverStrokeColor;
+                    ctx.strokeRect(
+                        bounds.x + 0.5,
+                        bounds.y + 0.5,
+                        Math.max(0, bounds.width - 1),
+                        Math.max(0, bounds.height - 1)
+                    );
+                    ctx.restore();
+                }
             }
             if (resolvedBandCount > 1 && resolvedBandSeparatorOpacity > 0 && bounds.width > 4) {
-                const bandWidth = bounds.width / resolvedBandCount;
                 const separatorWidth = Math.max(0.35, Math.min(1, bandWidth * 0.06));
                 ctx.fillStyle = `rgba(255, 255, 255, ${resolvedBandSeparatorOpacity})`;
                 for (let bandIndex = 1; bandIndex < resolvedBandCount; bandIndex += 1) {
@@ -783,9 +864,63 @@ function resolveMatrixRowHit(node = null, entry = null, x = 0, y = 0, detailScal
 
 function resolveMatrixCellHit(node = null, entry = null, x = 0, y = 0) {
     if (!node || node.kind !== VIEW2D_NODE_KINDS.MATRIX) return null;
-    if (node.presentation !== VIEW2D_MATRIX_PRESENTATIONS.GRID) return null;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     if (!containsPoint(entry?.contentBounds || entry?.bounds, x, y)) return null;
+    if (node.presentation === VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS) {
+        const compactRowsMeta = node.metadata?.compactRows || {};
+        const interactiveBandHit = compactRowsMeta.interactiveBandHit === true || node.metadata?.interactiveBandHit === true;
+        const isVectorStripRows = compactRowsMeta.variant === VIEW2D_VECTOR_STRIP_VARIANT;
+        if (interactiveBandHit && isVectorStripRows) {
+            const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
+            const layoutData = entry?.layoutData || null;
+            const contentBounds = entry?.contentBounds || entry?.bounds || null;
+            if (!rowItems.length || !layoutData || !contentBounds) return null;
+            const innerPaddingX = Math.max(0, Number(layoutData.innerPaddingX) || 0);
+            const innerPaddingY = Math.max(0, Number(layoutData.innerPaddingY) || 0);
+            const rowHeight = Math.max(1, Number(layoutData.rowHeight) || 0);
+            const rowGap = Math.max(0, Number(layoutData.rowGap) || 0);
+            const compactWidth = Math.max(
+                1,
+                Math.min(
+                    Number(layoutData.compactWidth) || 0,
+                    contentBounds.width - (innerPaddingX * 2)
+                )
+            );
+            const relativeY = y - (contentBounds.y + innerPaddingY);
+            const resolvedRow = resolveTrackIndex(relativeY, rowHeight, rowGap, rowItems.length);
+            if (!resolvedRow) return null;
+            const bandCount = Number.isFinite(compactRowsMeta.bandCount)
+                ? Math.max(1, Math.floor(compactRowsMeta.bandCount))
+                : VIEW2D_VECTOR_STRIP_DEFAULTS.bandCount;
+            const relativeX = x - (contentBounds.x + innerPaddingX);
+            const resolvedBand = resolveTrackIndex(relativeX, compactWidth / bandCount, 0, bandCount);
+            if (!resolvedBand) return null;
+            const rowIndex = resolvedRow.index;
+            const colIndex = resolvedBand.index;
+            return {
+                rowIndex,
+                colIndex,
+                rowItem: rowItems[rowIndex],
+                cellItem: {
+                    rowItem: rowItems[rowIndex],
+                    bandIndex: colIndex,
+                    semantic: {
+                        ...(rowItems[rowIndex]?.semantic || node?.semantic || {}),
+                        rowIndex,
+                        colIndex
+                    }
+                },
+                bounds: {
+                    x: contentBounds.x + innerPaddingX + (resolvedBand.index * (compactWidth / bandCount)),
+                    y: contentBounds.y + innerPaddingY + rowIndex * (rowHeight + rowGap),
+                    width: compactWidth / bandCount,
+                    height: rowHeight
+                }
+            };
+        }
+        return null;
+    }
+    if (node.presentation !== VIEW2D_MATRIX_PRESENTATIONS.GRID) return null;
     const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
     const layoutData = entry?.layoutData || null;
     const contentBounds = entry?.contentBounds || entry?.bounds || null;
@@ -1947,6 +2082,19 @@ function drawMatrixNode(
             const sceneFocusedRowIndices = sceneRowSelections?.size
                 ? Array.from(sceneRowSelections)
                 : null;
+            const sceneCellSelections = sceneFocusState?.cellSelections?.get(node.id) || null;
+            const sceneFocusedBandCells = sceneCellSelections?.size
+                ? Array.from(sceneCellSelections).map((value) => {
+                    const [rowIndex, bandIndex] = String(value || '').split(':').map((part) => Number.parseInt(part, 10));
+                    return {
+                        rowIndex,
+                        bandIndex
+                    };
+                }).filter((selection) => (
+                    Number.isFinite(selection.rowIndex)
+                    && Number.isFinite(selection.bandIndex)
+                ))
+                : null;
             drawVectorStripRows(
                 ctx,
                 rowItems,
@@ -1961,6 +2109,7 @@ function drawMatrixNode(
                         baseAlpha: nodeFocusAlpha,
                         bandCount: vectorStripBandCount,
                         bandSeparatorOpacity: vectorStripBandSeparatorOpacity,
+                        focusedBandCells: sceneFocusedBandCells,
                         hoverScaleY: vectorStripHoverScaleY,
                         hoverGlowColor: vectorStripHoverGlowColor,
                         hoverGlowBlur: vectorStripHoverGlowBlur,
@@ -1977,6 +2126,7 @@ function drawMatrixNode(
                                 baseAlpha: nodeFocusAlpha,
                                 bandCount: vectorStripBandCount,
                                 bandSeparatorOpacity: vectorStripBandSeparatorOpacity,
+                                focusedBandCells: sceneFocusedBandCells,
                                 hoverScaleY: vectorStripHoverScaleY,
                                 hoverGlowColor: vectorStripHoverGlowColor,
                                 hoverGlowBlur: vectorStripHoverGlowBlur,
@@ -1986,6 +2136,7 @@ function drawMatrixNode(
                                 baseAlpha: nodeFocusAlpha,
                                 bandCount: vectorStripBandCount,
                                 bandSeparatorOpacity: vectorStripBandSeparatorOpacity,
+                                focusedBandCells: sceneFocusedBandCells,
                                 hoverScaleY: vectorStripHoverScaleY,
                                 hoverGlowColor: vectorStripHoverGlowColor,
                                 hoverGlowBlur: vectorStripHoverGlowBlur,

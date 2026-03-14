@@ -633,8 +633,10 @@ describe('buildMlpDetailSceneModel', () => {
         });
 
         expect(hoverState?.label).toBe('MLP Down Projection');
+        expect(hoverState?.info?.suppressTokenChip).toBe(true);
         expect(hoverState?.info?.activationData?.label).toBe('MLP Down Projection');
         expect(hoverState?.info?.activationData?.stage).toBe('mlp.down');
+        expect(hoverState?.info?.activationData?.suppressTokenChip).toBe(true);
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(0);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);

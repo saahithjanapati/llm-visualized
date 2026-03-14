@@ -2,7 +2,9 @@ import { appState } from '../state/appState.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
+    matchesFocusVisibleTarget,
     normalizeTokenChipEntry,
+    normalizeTokenChipEntries,
     tokenChipEntriesMatch
 } from './tokenChipHoverSync.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
@@ -148,7 +150,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     let detailPanelObserver = null;
     let touchClickCleanup = null;
     let hoveredEntry = null;
-    let mirroredEntry = null;
+    let mirroredEntries = [];
     let layoutSyncFrame = null;
     let lastCollisionMaxWidthPx = null;
 
@@ -263,16 +265,21 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
 
     const applyActiveTokenState = () => {
         const chips = dom.tokensEl.querySelectorAll('[data-token-entry-index]');
+        let hasFocusedChip = false;
         chips.forEach((chip) => {
             const rawIndex = Number(chip.dataset.tokenEntryIndex);
             const entry = Number.isFinite(rawIndex) ? clickableEntries[Math.floor(rawIndex)] : null;
-            const isActive = !!entry && (
-                tokenChipEntriesMatch(entry, hoveredEntry)
-                || tokenChipEntriesMatch(entry, mirroredEntry)
-            );
+            const isLocallyActive = !!entry && tokenChipEntriesMatch(entry, hoveredEntry);
+            const isMirroredActive = !!entry && mirroredEntries.some((candidate) => (
+                tokenChipEntriesMatch(entry, candidate)
+            ));
+            const isActive = isLocallyActive || isMirroredActive;
+            if (isActive) hasFocusedChip = true;
             chip.classList.toggle('is-token-chip-active', isActive);
+            chip.classList.toggle('is-token-chip-hover-synced', isMirroredActive);
             chip.dataset.tokenActive = isActive ? 'true' : 'false';
         });
+        dom.tokensEl.dataset.tokenFocusActive = hasFocusedChip ? 'true' : 'false';
     };
 
     const setHoveredEntry = (entry, { emit = true } = {}) => {
@@ -311,7 +318,11 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     };
 
     const handleTokenFocusIn = (event) => {
-        setHoveredEntry(resolveEntryFromTarget(event?.target), { emit: true });
+        const entry = resolveEntryFromTarget(event?.target);
+        if (!entry) return;
+        const chip = event?.target?.closest?.('[data-token-entry-index]') || null;
+        if (!matchesFocusVisibleTarget(chip)) return;
+        setHoveredEntry(entry, { emit: true });
     };
 
     const handleTokenFocusOut = (event) => {
@@ -332,7 +343,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
     const handleTokenChipHoverSync = (event) => {
         const detail = event?.detail || null;
         if (!detail || detail.source === PROMPT_TOKEN_STRIP_HOVER_SOURCE) return;
-        mirroredEntry = detail.active ? normalizeTokenChipEntry(detail) : null;
+        mirroredEntries = detail.active ? normalizeTokenChipEntries(detail) : [];
         applyActiveTokenState();
     };
 
@@ -466,7 +477,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             setPromptTokenStripHeightVar(0);
             clickableEntries = [];
             setHoveredEntry(null, { emit: true });
-            mirroredEntry = null;
+            mirroredEntries = [];
             clearCollisionMaxWidth();
             clearMobileFullWidthWrapState();
             setActivePromptTokenChipEntries([]);

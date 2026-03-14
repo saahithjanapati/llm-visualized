@@ -733,6 +733,51 @@ describe('selectionPanelTransformerView2d', () => {
         expect(tokenChips[1]?.dataset.tokenNav).toBe('true');
     });
 
+    it('does not preselect the trailing space token in the 2D overlay when no token is active', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const view = createTransformerView2dDetailView(panel);
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = {
+            ...createActivationSource(5),
+            getTokenId(tokenIndex) {
+                return 1000 + tokenIndex;
+            }
+        };
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices: [0, 1, 2, 3, 4],
+            tokenLabels: ['Can', ' machines', ' think', '?', ' '],
+            semanticTarget: null,
+            focusLabel: 'Transformer overview'
+        });
+
+        const tokenChips = Array.from(panel.querySelectorAll('.detail-transformer-view2d-token-strip__token'));
+
+        expect(tokenChips).toHaveLength(5);
+        expect(tokenChips[4]?.textContent?.replace(/\u00A0/g, ' ')).toBe('" "');
+        expect(tokenChips[4]?.classList.contains('detail-transformer-view2d-token--selected')).toBe(false);
+        expect(tokenChips.some((chip) => chip.classList.contains('detail-transformer-view2d-token--selected'))).toBe(false);
+    });
+
     it('supports keyboard pan and zoom on the transformer 2D canvas surface', () => {
         const panel = document.createElement('section');
         panel.innerHTML = `

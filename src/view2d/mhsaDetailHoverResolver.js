@@ -29,6 +29,8 @@ import {
 } from './mhsaDetailFocusResult.js';
 import {
     buildAttentionCellHoverInfo,
+    buildConcatenatedHeadOutputBandHoverInfo,
+    buildConcatenatedHeadOutputHoverInfo,
     buildMlpActivationHoverInfo,
     buildMlpDownBiasHoverInfo,
     buildMlpDownProjectionHoverInfo,
@@ -393,18 +395,173 @@ function findOutputProjectionHeadConnectorId(index = null, headIndex = null) {
     return '';
 }
 
+function findOutputProjectionConcatCopyConnectorId(index = null, headIndex = null) {
+    const safeHeadIndex = Number.isFinite(headIndex) ? Math.max(0, Math.floor(headIndex)) : null;
+    if (!index?.nodesById || !Number.isFinite(safeHeadIndex)) return '';
+    for (const node of index.nodesById.values()) {
+        if (node?.role !== 'concat-copy-connector') continue;
+        const nodeHeadIndex = Number.isFinite(node?.semantic?.headIndex)
+            ? Math.max(0, Math.floor(node.semantic.headIndex))
+            : null;
+        if (nodeHeadIndex === safeHeadIndex) {
+            return node.id;
+        }
+    }
+    return '';
+}
+
+function findOutputProjectionHeadMatrixIds(index = null, headIndex = null) {
+    const safeHeadIndex = Number.isFinite(headIndex) ? Math.max(0, Math.floor(headIndex)) : null;
+    if (!index?.nodesById || !Number.isFinite(safeHeadIndex)) {
+        return {
+            sourceNodeId: '',
+            copyNodeId: ''
+        };
+    }
+    let sourceNodeId = '';
+    let copyNodeId = '';
+    for (const node of index.nodesById.values()) {
+        const nodeRole = String(node?.role || '').trim();
+        if (nodeRole !== 'head-output-matrix' && nodeRole !== 'concat-head-copy-matrix') continue;
+        const nodeHeadIndex = Number.isFinite(node?.semantic?.headIndex)
+            ? Math.max(0, Math.floor(node.semantic.headIndex))
+            : null;
+        if (nodeHeadIndex !== safeHeadIndex) continue;
+        if (nodeRole === 'head-output-matrix') {
+            sourceNodeId = node.id;
+        } else if (nodeRole === 'concat-head-copy-matrix') {
+            copyNodeId = node.id;
+        }
+    }
+    return {
+        sourceNodeId,
+        copyNodeId
+    };
+}
+
+function findOutputProjectionConcatOutputNodeId(index = null) {
+    return (index?.nodeIdsByRole?.get('concat-output-matrix') || [])[0] || '';
+}
+
+function collectOutputProjectionHeadMatrixNodeIds(index = null) {
+    const nodeIds = [];
+    appendAllUnique(nodeIds, index?.nodeIdsByRole?.get('head-output-matrix') || []);
+    appendAllUnique(nodeIds, index?.nodeIdsByRole?.get('concat-head-copy-matrix') || []);
+    return nodeIds;
+}
+
+function collectOutputProjectionConnectorIds(index = null) {
+    const connectorIds = [];
+    if (!index?.nodesById) return connectorIds;
+    for (const node of index.nodesById.values()) {
+        if (node?.role !== 'head-output-connector' && node?.role !== 'concat-copy-connector') continue;
+        appendUnique(connectorIds, node.id);
+    }
+    return connectorIds;
+}
+
 function buildOutputProjectionHeadOutputRowResult(index = null, node = null, rowHit = null, options = null) {
     if (!index || !node || !rowHit) return null;
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
     if (!Number.isFinite(rowIndex)) return null;
-    const connectorId = findOutputProjectionHeadConnectorId(index, node?.semantic?.headIndex);
+    const headIndex = Number.isFinite(node?.semantic?.headIndex)
+        ? Math.max(0, Math.floor(node.semantic.headIndex))
+        : null;
+    const connectorId = findOutputProjectionHeadConnectorId(index, headIndex);
+    const concatCopyConnectorId = findOutputProjectionConcatCopyConnectorId(index, headIndex);
+    const {
+        sourceNodeId,
+        copyNodeId
+    } = findOutputProjectionHeadMatrixIds(index, headIndex);
+    const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index);
     return buildPathFocusResult(index, {
         label: 'Attention Weighted Sum',
         info: buildWeightedSumHoverInfo(node, rowHit.rowItem),
-        extraConnectorIds: connectorId ? [connectorId] : [],
-        rowSelections: [{
+        extraConnectorIds: [
+            ...(connectorId ? [connectorId] : []),
+            ...(concatCopyConnectorId ? [concatCopyConnectorId] : [])
+        ],
+        rowSelections: [
+            ...(sourceNodeId ? [{
+                nodeId: sourceNodeId,
+                rowIndex
+            }] : []),
+            ...(copyNodeId ? [{
+                nodeId: copyNodeId,
+                rowIndex
+            }] : [])
+        ],
+        cellSelections: [
+            ...(concatOutputNodeId && Number.isFinite(headIndex)
+                ? [{
+                    nodeId: concatOutputNodeId,
+                    rowIndex,
+                    colIndex: headIndex
+                }]
+                : [])
+        ]
+    }, options);
+}
+
+function buildOutputProjectionConcatOutputRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    if (!Number.isFinite(rowIndex)) return null;
+    const headMatrixNodeIds = collectOutputProjectionHeadMatrixNodeIds(index);
+    const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index) || node.id;
+    return buildPathFocusResult(index, {
+        label: 'Concatenated Head Output',
+        info: buildConcatenatedHeadOutputHoverInfo(node, rowHit.rowItem),
+        extraConnectorIds: collectOutputProjectionConnectorIds(index),
+        rowSelections: [
+            ...headMatrixNodeIds.map((nodeId) => ({
+                nodeId,
+                rowIndex
+            })),
+            ...(concatOutputNodeId ? [{
+                nodeId: concatOutputNodeId,
+                rowIndex
+            }] : [])
+        ]
+    }, options);
+}
+
+function buildOutputProjectionConcatOutputBandResult(index = null, node = null, cellHit = null, options = null) {
+    if (!index || !node || !cellHit) return null;
+    const rowIndex = Number.isFinite(cellHit.rowIndex) ? Math.max(0, Math.floor(cellHit.rowIndex)) : null;
+    const headIndex = Number.isFinite(cellHit.colIndex) ? Math.max(0, Math.floor(cellHit.colIndex)) : null;
+    if (!Number.isFinite(rowIndex) || !Number.isFinite(headIndex)) return null;
+    const connectorId = findOutputProjectionHeadConnectorId(index, headIndex);
+    const concatCopyConnectorId = findOutputProjectionConcatCopyConnectorId(index, headIndex);
+    const {
+        sourceNodeId,
+        copyNodeId
+    } = findOutputProjectionHeadMatrixIds(index, headIndex);
+    return buildPathFocusResult(index, {
+        label: 'Attention Weighted Sum',
+        info: buildConcatenatedHeadOutputBandHoverInfo(
+            node,
+            cellHit?.rowItem || cellHit?.cellItem?.rowItem || null,
+            headIndex
+        ),
+        extraConnectorIds: [
+            ...(connectorId ? [connectorId] : []),
+            ...(concatCopyConnectorId ? [concatCopyConnectorId] : [])
+        ],
+        rowSelections: [
+            ...(sourceNodeId ? [{
+                nodeId: sourceNodeId,
+                rowIndex
+            }] : []),
+            ...(copyNodeId ? [{
+                nodeId: copyNodeId,
+                rowIndex
+            }] : [])
+        ],
+        cellSelections: [{
             nodeId: node.id,
-            rowIndex
+            rowIndex,
+            colIndex: headIndex
         }]
     }, options);
 }
@@ -859,6 +1016,14 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
 
     if (entity.type === 'output-projection-head-output-row') {
         return buildOutputProjectionHeadOutputRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'output-projection-concat-output-band') {
+        return buildOutputProjectionConcatOutputBandResult(index, entity.node, entity.cellHit, options);
+    }
+
+    if (entity.type === 'output-projection-concat-output-row') {
+        return buildOutputProjectionConcatOutputRowResult(index, entity.node, entity.rowHit, options);
     }
 
     if (entity.type === 'projection-weight') {

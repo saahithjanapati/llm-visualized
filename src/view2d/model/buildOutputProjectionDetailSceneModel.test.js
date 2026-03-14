@@ -44,13 +44,75 @@ describe('buildOutputProjectionDetailSceneModel', () => {
             node?.kind === VIEW2D_NODE_KINDS.CONNECTOR
             && node?.role === 'head-output-connector'
         ));
+        const concatCopyConnectorNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.CONNECTOR
+            && node?.role === 'concat-copy-connector'
+        ));
+        const concatLabelNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.role === 'concat-label'
+        ));
+        const concatOpenNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.OPERATOR
+            && node?.role === 'concat-open'
+        ));
+        const concatCloseNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.OPERATOR
+            && node?.role === 'concat-close'
+        ));
+        const concatEqualsNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.OPERATOR
+            && node?.role === 'concat-equals'
+        ));
+        const concatHeadNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'concat-head-copy-matrix'
+        ));
+        const headStackTopSpacerNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'output-projection-detail-head-stack-top-spacer'
+        ));
+        const concatOutputNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'concat-output-matrix'
+        ));
+        const concatSeparatorNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.OPERATOR
+            && node?.role === 'concat-separator'
+        ));
 
         expect(scene?.metadata?.visualContract).toBe('selection-panel-output-projection-v1');
         expect(matrixNodes).toHaveLength(12);
         expect(connectorNodes).toHaveLength(12);
+        expect(concatCopyConnectorNodes).toHaveLength(12);
+        expect(concatLabelNode?.tex).toBe('\\mathrm{concat}');
+        expect(concatOpenNode?.text).toBe('(');
+        expect(concatCloseNode?.text).toBe(')');
+        expect(concatEqualsNode?.text).toBe('=');
+        expect(concatCopyConnectorNodes[0]?.metadata?.targetAnchorMode).toBe('caption-bottom');
+        expect(concatHeadNodes).toHaveLength(12);
+        expect(headStackTopSpacerNode).toBeTruthy();
+        expect(concatSeparatorNodes).toHaveLength(11);
+        expect(concatOutputNode?.label?.tex).toBe('H_{\\mathrm{concat}}');
+        expect(concatOutputNode?.dimensions).toEqual({
+            rows: 3,
+            cols: D_HEAD * 12
+        });
+        expect(concatOutputNode?.rowItems).toHaveLength(3);
+        expect(concatOutputNode?.metadata?.compactRows?.bandCount).toBe(12);
+        expect(concatOutputNode?.metadata?.compactRows?.bandSeparatorOpacity).toBeGreaterThan(0);
 
         expect(matrixNodes[0]?.label?.tex).toBe('H_{1}');
         expect(matrixNodes[11]?.label?.tex).toBe('H_{12}');
+        expect(concatHeadNodes[0]?.label?.tex).toBe('H_{1}');
+        expect(concatHeadNodes[11]?.label?.tex).toBe('H_{12}');
+        expect(concatHeadNodes[0]?.rowItems).toHaveLength(3);
+        expect(concatHeadNodes[0]?.metadata?.compactRows?.compactWidth).toBe(
+            matrixNodes[0]?.metadata?.compactRows?.compactWidth
+        );
+        expect(concatHeadNodes[0]?.metadata?.compactRows?.rowHeight).toBe(
+            matrixNodes[0]?.metadata?.compactRows?.rowHeight
+        );
         expect(matrixNodes[0]?.semantic).toMatchObject({
             componentKind: 'output-projection',
             layerIndex: 3,
@@ -74,9 +136,43 @@ describe('buildOutputProjectionDetailSceneModel', () => {
         const layout = buildSceneLayout(scene);
         const firstMatrixEntry = layout?.registry?.getNodeEntry(matrixNodes[0]?.id);
         const firstConnectorEntry = layout?.registry?.getConnectorEntry(connectorNodes[0]?.id);
+        const firstConcatCopyConnectorEntry = layout?.registry?.getConnectorEntry(concatCopyConnectorNodes[0]?.id);
+        const headStackTopSpacerEntry = layout?.registry?.getNodeEntry(headStackTopSpacerNode?.id);
+        const concatLabelEntry = layout?.registry?.getNodeEntry(concatLabelNode?.id);
+        const concatOpenEntry = layout?.registry?.getNodeEntry(concatOpenNode?.id);
+        const firstConcatHeadEntry = layout?.registry?.getNodeEntry(concatHeadNodes[0]?.id);
+        const concatCloseEntry = layout?.registry?.getNodeEntry(concatCloseNode?.id);
+        const concatEqualsEntry = layout?.registry?.getNodeEntry(concatEqualsNode?.id);
+        const concatOutputEntry = layout?.registry?.getNodeEntry(concatOutputNode?.id);
 
         expect(firstMatrixEntry?.contentBounds).toBeTruthy();
+        expect(firstMatrixEntry?.contentBounds?.y).toBeGreaterThanOrEqual(
+            (headStackTopSpacerEntry?.contentBounds?.y ?? 0)
+            + (headStackTopSpacerEntry?.contentBounds?.height ?? 0)
+        );
         expect(firstConnectorEntry?.pathPoints?.length).toBeGreaterThan(1);
+        expect(firstConcatCopyConnectorEntry?.pathPoints?.length).toBeGreaterThan(1);
+        expect(concatLabelEntry?.contentBounds?.x).toBeGreaterThan(
+            (firstMatrixEntry?.contentBounds?.x ?? 0) + (firstMatrixEntry?.contentBounds?.width ?? 0)
+        );
+        expect(concatOpenEntry?.contentBounds?.x).toBeGreaterThan(
+            (concatLabelEntry?.contentBounds?.x ?? 0) + (concatLabelEntry?.contentBounds?.width ?? 0)
+        );
+        expect(firstConcatHeadEntry?.contentBounds?.x).toBeGreaterThan(
+            (concatOpenEntry?.contentBounds?.x ?? 0) + (concatOpenEntry?.contentBounds?.width ?? 0)
+        );
+        expect(concatEqualsEntry?.contentBounds?.x).toBeGreaterThan(
+            (concatCloseEntry?.contentBounds?.x ?? 0) + (concatCloseEntry?.contentBounds?.width ?? 0)
+        );
+        expect(concatOutputEntry?.contentBounds?.x).toBeGreaterThan(
+            (concatEqualsEntry?.contentBounds?.x ?? 0) + (concatEqualsEntry?.contentBounds?.width ?? 0)
+        );
+        expect(
+            (firstConcatHeadEntry?.contentBounds?.y ?? Number.POSITIVE_INFINITY)
+            + (firstConcatHeadEntry?.contentBounds?.height ?? 0)
+        ).toBeLessThan(
+            firstMatrixEntry?.contentBounds?.y ?? Number.NEGATIVE_INFINITY
+        );
         expect(firstConnectorEntry?.pathPoints?.at(-1)?.x).toBeLessThan(
             firstMatrixEntry?.anchors?.[VIEW2D_ANCHOR_SIDES.LEFT]?.x ?? Number.POSITIVE_INFINITY
         );

@@ -1157,6 +1157,15 @@ body.pass-intro-active[data-pass-intro-committed="true"] #promptTokenStrip {
     padding-bottom: 3px;
     padding-right: 2px;
 }
+#promptTokenStrip .prompt-token-strip__tokens[data-token-focus-active="true"] .prompt-token-strip__token:not(.is-token-chip-active):not([data-token-active="true"]),
+.detail-transformer-view2d-token-strip .prompt-token-strip__tokens[data-token-focus-active="true"] .prompt-token-strip__token:not(.is-token-chip-active):not([data-token-active="true"]) {
+    opacity: 0.42;
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.28);
+    box-shadow: none;
+    transform: translateY(0) scale(0.985);
+    filter: saturate(0.5) brightness(0.74);
+}
 #promptTokenStrip .prompt-token-strip__token,
 .detail-transformer-view2d-token-strip .prompt-token-strip__token {
     --token-color-border: rgba(255,255,255,0.92);
@@ -1213,10 +1222,20 @@ body.pass-intro-active[data-pass-intro-committed="true"] #promptTokenStrip {
     background: var(--token-color-fill-active);
     border-color: var(--token-color-border);
     box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.08),
-        0 6px 14px rgba(0,0,0,0.24);
-    transform: translateY(-1px);
-    filter: none;
+        inset 0 1px 0 rgba(255,255,255,0.12),
+        0 12px 22px rgba(0,0,0,0.3),
+        0 0 18px var(--token-color-fill-hover);
+    transform: translateY(-3px) scale(1.045);
+    filter: saturate(1.16) brightness(1.12);
+}
+#promptTokenStrip .prompt-token-strip__token.is-token-chip-hover-synced,
+.detail-transformer-view2d-token-strip .prompt-token-strip__token.is-token-chip-hover-synced {
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.1),
+        0 16px 28px rgba(0,0,0,0.34),
+        0 0 22px var(--token-color-fill-hover);
+    transform: translateY(-5px) scale(1.07);
+    filter: saturate(1.26) brightness(1.18);
 }
 #promptTokenStrip .prompt-token-strip__token:active,
 .detail-transformer-view2d-token-strip .prompt-token-strip__token:active {

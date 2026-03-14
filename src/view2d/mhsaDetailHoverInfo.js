@@ -171,6 +171,7 @@ export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
     const label = 'MLP Down Projection';
     const info = buildProjectionHoverInfo(node, label, {
         stage: 'mlp.down',
+        suppressTokenChip: true,
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -179,10 +180,12 @@ export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
 
     return {
         ...tokenInfo,
+        suppressTokenChip: true,
         ...info,
         activationData: {
             ...(info.activationData || {}),
             stage: 'mlp.down',
+            suppressTokenChip: true,
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
@@ -308,6 +311,65 @@ export function buildWeightedSumHoverInfo(node = null, rowItem = null) {
             ...(info.activationData || {}),
             stage: 'attention.weighted_sum',
             isWeightedSum: true,
+            ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+            ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+                ? { tokenLabel: tokenInfo.tokenLabel }
+                : {})
+        }
+    };
+}
+
+export function buildConcatenatedHeadOutputHoverInfo(node = null, rowItem = null) {
+    const tokenInfo = createTokenInfo(rowItem) || {};
+    const info = buildProjectionHoverInfo(node, 'Concatenated Head Output', {
+        stage: 'attention.concatenate',
+        vectorCategory: 'concatenated-head-output',
+        ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+        ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+            ? { tokenLabel: tokenInfo.tokenLabel }
+            : {})
+    }) || {};
+
+    return {
+        ...tokenInfo,
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: 'attention.concatenate',
+            vectorCategory: 'concatenated-head-output',
+            ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+            ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+                ? { tokenLabel: tokenInfo.tokenLabel }
+                : {})
+        }
+    };
+}
+
+export function buildConcatenatedHeadOutputBandHoverInfo(node = null, rowItem = null, headIndex = null) {
+    const tokenInfo = createTokenInfo(rowItem) || {};
+    const layerIndex = normalizeSceneIndex(node?.semantic?.layerIndex);
+    const safeHeadIndex = normalizeSceneIndex(headIndex);
+    const baseInfo = buildProjectionHoverInfo(node, 'Attention Weighted Sum', {
+        stage: 'attention.weighted_sum',
+        isWeightedSum: true,
+        ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+        ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+            ? { tokenLabel: tokenInfo.tokenLabel }
+            : {})
+    }) || {};
+
+    return {
+        ...tokenInfo,
+        ...(Number.isFinite(layerIndex) ? { layerIndex } : {}),
+        ...(Number.isFinite(safeHeadIndex) ? { headIndex: safeHeadIndex } : {}),
+        ...baseInfo,
+        isWeightedSum: true,
+        activationData: {
+            ...(baseInfo.activationData || {}),
+            stage: 'attention.weighted_sum',
+            isWeightedSum: true,
+            ...(Number.isFinite(layerIndex) ? { layerIndex } : {}),
+            ...(Number.isFinite(safeHeadIndex) ? { headIndex: safeHeadIndex } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }

@@ -68,8 +68,6 @@ const GELU_CONNECTOR_TARGET_GAP = 12;
 const MLP_DOWN_CONNECTOR_SOURCE_GAP = 8;
 const MLP_DOWN_CONNECTOR_TARGET_GAP = 8;
 const MLP_DOWN_OUTPUT_EDGE_SOURCE_GAP = 8;
-const MLP_DOWN_OUTPUT_EDGE_ARROW_HEAD_LENGTH_SCREEN_PX = 6;
-const MLP_DOWN_OUTPUT_EDGE_ARROW_HEAD_WING_SCREEN_PX = 3.2;
 const MLP_ACTIVATION_COPY_OFFSET = 40;
 const MLP_ACTIVATION_COPY_OFFSET_SMALL = 28;
 const MLP_WEIGHT_MIN_WIDTH = 108;
@@ -1227,10 +1225,7 @@ export function buildMlpDetailSceneModel({
         },
         metadata: {
             preserveColor: true,
-            strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE,
-            fixedScreenArrowHeadLengthPx: MLP_DOWN_OUTPUT_EDGE_ARROW_HEAD_LENGTH_SCREEN_PX,
-            fixedScreenArrowHeadWingPx: MLP_DOWN_OUTPUT_EDGE_ARROW_HEAD_WING_SCREEN_PX,
-            disableScreenSnap: true
+            strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE
         }
     });
 

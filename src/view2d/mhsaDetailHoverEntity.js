@@ -27,6 +27,13 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
     if (!node) return null;
 
     if (hit?.cellHit) {
+        if (node.role === 'concat-output-matrix') {
+            return {
+                type: 'output-projection-concat-output-band',
+                node,
+                cellHit: hit.cellHit
+            };
+        }
         const stageKey = resolveMatrixStageKey(node, hit.cellHit);
         if (!stageKey) return null;
         return {
@@ -132,9 +139,16 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
                 rowHit: hit.rowHit
             };
         }
-        if (node.role === 'head-output-matrix') {
+        if (node.role === 'head-output-matrix' || node.role === 'concat-head-copy-matrix') {
             return {
                 type: 'output-projection-head-output-row',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
+        if (node.role === 'concat-output-matrix') {
+            return {
+                type: 'output-projection-concat-output-row',
                 node,
                 rowHit: hit.rowHit
             };

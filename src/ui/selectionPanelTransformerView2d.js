@@ -46,6 +46,9 @@ import {
 } from './selectionPanelTransformerView2dStateUtils.js';
 import { hasView2dPointerExceededClickSlop } from './selectionPanelTransformerView2dInteractionUtils.js';
 import {
+    hasTransformerView2dLockedDetailSelection
+} from './selectionPanelTransformerView2dLockUtils.js';
+import {
     createTransformerView2dTokenHoverSync,
     resolveTransformerView2dTokenEntryFromHoverPayload
 } from './selectionPanelTransformerView2dTokenHoverUtils.js';
@@ -447,6 +450,7 @@ export function createTransformerView2dDetailView(panelEl) {
         detailScenePinnedFocus: null,
         detailScenePinnedSignature: '',
         detailScenePinnedTokenEntry: null,
+        detailScenePinnedTokenSticky: false,
         hoveredResidualRow: null,
         hoverDimming: {
             value: 0,
@@ -1233,15 +1237,15 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function clearPinnedDetailSceneFocus({ scheduleRender: shouldScheduleRender = true } = {}) {
-        const hadPinnedFocus = !!state.detailScenePinnedFocus;
-        const hadPinnedTokenEntry = !!state.detailScenePinnedTokenEntry;
+        const hadPinnedFocus = hasTransformerView2dLockedDetailSelection(state.detailScenePinnedFocus);
         state.detailScenePinnedFocus = null;
         state.detailScenePinnedSignature = '';
         state.detailScenePinnedTokenEntry = null;
+        state.detailScenePinnedTokenSticky = false;
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
         resetCanvasHoverTargetKey();
-        if (hadPinnedTokenEntry) {
+        if (hadPinnedFocus) {
             tokenHoverSync.clearCanvasEntry({ emit: true });
         }
         hoverLabelOverlay.hide();
@@ -1252,7 +1256,8 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function lockPinnedDetailSceneFocus(detailHoverState = null, {
-        scheduleRender: shouldScheduleRender = true
+        scheduleRender: shouldScheduleRender = true,
+        persistTokenChip = false
     } = {}) {
         if (!detailHoverState?.focusState) return false;
         const pinnedTokenEntry = resolveTransformerView2dTokenEntryFromHoverPayload(detailHoverState);
@@ -1272,10 +1277,15 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailScenePinnedFocus = detailHoverState.focusState;
         state.detailScenePinnedSignature = nextSignature;
         state.detailScenePinnedTokenEntry = pinnedTokenEntry;
+        state.detailScenePinnedTokenSticky = persistTokenChip === true && !!pinnedTokenEntry;
         state.detailSceneFocus = detailHoverState.focusState;
         state.detailSceneHoverSignature = nextSignature;
         resetCanvasHoverTargetKey();
-        tokenHoverSync.setCanvasEntry(pinnedTokenEntry, { emit: true });
+        if (state.detailScenePinnedTokenSticky) {
+            tokenHoverSync.setCanvasEntry(pinnedTokenEntry, { emit: true });
+        } else {
+            tokenHoverSync.clearCanvasEntry({ emit: true });
+        }
         hoverLabelOverlay.hide();
         if (didChange && shouldScheduleRender) {
             scheduleRender();
@@ -1289,7 +1299,11 @@ export function createTransformerView2dDetailView(panelEl) {
     } = {}) {
         if (state.detailScenePinnedFocus && force !== true) {
             const hadResidualHover = !!state.hoveredResidualRow;
-            tokenHoverSync.setCanvasEntry(state.detailScenePinnedTokenEntry, { emit: true });
+            if (state.detailScenePinnedTokenSticky && state.detailScenePinnedTokenEntry) {
+                tokenHoverSync.setCanvasEntry(state.detailScenePinnedTokenEntry, { emit: true });
+            } else {
+                tokenHoverSync.clearCanvasEntry({ emit: true });
+            }
             resetCanvasHoverTargetKey();
             state.hoveredResidualRow = null;
             state.detailSceneFocus = state.detailScenePinnedFocus;
@@ -1354,14 +1368,6 @@ export function createTransformerView2dDetailView(panelEl) {
             return hit?.entry || null;
         }
         if (allowDetailSceneHover) {
-            if (state.detailScenePinnedFocus) {
-                tokenHoverSync.setCanvasEntry(state.detailScenePinnedTokenEntry, { emit: true });
-                resetCanvasHoverTargetKey();
-                hoverLabelOverlay.hide();
-                state.detailSceneFocus = state.detailScenePinnedFocus;
-                state.detailSceneHoverSignature = state.detailScenePinnedSignature;
-                return hit?.entry || null;
-            }
             const detailHoverKey = buildCanvasHoverTargetKey(hit, 'detail');
             if (detailHoverKey === state.hoverTargetKey) {
                 hoverLabelOverlay.move({
@@ -1755,6 +1761,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailScenePinnedFocus = null;
         state.detailScenePinnedSignature = '';
         state.detailScenePinnedTokenEntry = null;
+        state.detailScenePinnedTokenSticky = false;
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
         resetCanvasHoverTargetKey();
@@ -1766,7 +1773,8 @@ export function createTransformerView2dDetailView(panelEl) {
             );
             if (initialDetailHoverState?.focusState) {
                 lockPinnedDetailSceneFocus(initialDetailHoverState, {
-                    scheduleRender: false
+                    scheduleRender: false,
+                    persistTokenChip: false
                 });
             }
             state.pendingDetailInteractionTargets = [];
@@ -2598,7 +2606,9 @@ export function createTransformerView2dDetailView(panelEl) {
             if (state.headDetailDepthActive && state.detailSceneIndex) {
                 const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, clickedHit);
                 if (detailHoverState?.focusState) {
-                    lockPinnedDetailSceneFocus(detailHoverState);
+                    lockPinnedDetailSceneFocus(detailHoverState, {
+                        persistTokenChip: true
+                    });
                     return;
                 }
                 if (clearPinnedDetailSceneFocus({ scheduleRender: true })) {
@@ -2654,6 +2664,16 @@ export function createTransformerView2dDetailView(panelEl) {
     document.addEventListener('focusin', onDocumentFocusIn);
 
     return {
+        hasSelectionLock() {
+            return hasTransformerView2dLockedDetailSelection(state.detailScenePinnedFocus);
+        },
+        clearSelectionLock({
+            scheduleRender: shouldScheduleRender = true
+        } = {}) {
+            return clearPinnedDetailSceneFocus({
+                scheduleRender: shouldScheduleRender
+            });
+        },
         setVisible(visible = false) {
             state.visible = !!visible;
             root.classList.toggle('is-visible', state.visible);

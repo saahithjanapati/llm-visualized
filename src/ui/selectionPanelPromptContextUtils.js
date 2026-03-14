@@ -59,13 +59,22 @@ export function buildSelectionPromptContext({
         })
         .filter(Boolean);
 
-    const selectedDisplayText = getIncompleteUtf8TokenDisplay(selectedTokenId)
-        || formatTokenLabel(selectedTokenText);
-    const selectedEntry = normalizeTokenChipEntry({
-        tokenIndex: selectedTokenIndex,
-        tokenId: selectedTokenId,
-        tokenLabel: selectedDisplayText
-    });
+    const hasExplicitSelectedToken = Number.isFinite(selectedTokenIndex)
+        || Number.isFinite(selectedTokenId)
+        || (typeof selectedTokenText === 'string' && selectedTokenText.length > 0);
+    const selectedDisplayText = hasExplicitSelectedToken
+        ? (
+            getIncompleteUtf8TokenDisplay(selectedTokenId)
+            || formatTokenLabel(selectedTokenText)
+        )
+        : '';
+    const selectedEntry = hasExplicitSelectedToken
+        ? normalizeTokenChipEntry({
+            tokenIndex: selectedTokenIndex,
+            tokenId: selectedTokenId,
+            tokenLabel: selectedDisplayText
+        })
+        : null;
     const activeIndex = selectedEntry
         ? entries.findIndex((entry) => tokenChipEntriesMatch(entry, selectedEntry))
         : -1;

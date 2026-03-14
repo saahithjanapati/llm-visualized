@@ -29,4 +29,30 @@ describe('selectionPanelPromptContextUtils', () => {
         expect(result.entries[1]?.seed).toBe(canonicalSeed);
         expect(legacyAdjacentSeed).not.toBe(canonicalSeed);
     });
+
+    it('does not mark a trailing space token as selected when no token is selected', () => {
+        const activationSource = {
+            getTokenId(tokenIndex) {
+                return 1000 + tokenIndex;
+            }
+        };
+
+        const result = buildSelectionPromptContext({
+            activationSource,
+            laneTokenIndices: [0, 1, 2, 3, 4],
+            tokenLabels: ['Can', ' machines', ' think', '?', ' '],
+            selectedTokenIndex: null,
+            selectedTokenId: null,
+            selectedTokenText: ''
+        });
+
+        expect(result.entries.map((entry) => entry.tokenLabel)).toEqual([
+            'Can',
+            ' machines',
+            ' think',
+            '?',
+            '" "'
+        ]);
+        expect(result.activeIndex).toBe(-1);
+    });
 });

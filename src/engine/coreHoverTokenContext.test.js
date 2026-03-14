@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
     resolveHoverLabelSubtitle,
+    resolveHoverTokenChipSyncEntries,
+    resolveHoverTokenChipSyncEntry,
     resolveHoverTokenContext
 } from './coreHoverTokenContext.js';
 
@@ -87,5 +89,103 @@ describe('resolveHoverTokenContext attention metrics', () => {
         });
 
         expect(subtitle).toBe('Position 2 • Layer 4');
+    });
+
+    it('resolves weighted-sum vector hovers to a token chip sync entry', () => {
+        const entry = resolveHoverTokenChipSyncEntry({
+            label: 'Attention Weighted Sum',
+            info: {
+                activationData: {
+                    stage: 'attention.weighted_sum',
+                    isWeightedSum: true,
+                    tokenIndex: 2,
+                    tokenId: 102,
+                    tokenLabel: 'Token C'
+                }
+            }
+        });
+
+        expect(entry).toEqual({
+            tokenIndex: 2,
+            tokenId: 102,
+            tokenLabel: 'Token C'
+        });
+    });
+
+    it('ignores attention-score hovers for token chip sync', () => {
+        const entry = resolveHoverTokenChipSyncEntry({
+            label: 'Pre-Softmax Attention Score',
+            info: buildAttentionInfo({
+                stage: 'attention.pre'
+            })
+        });
+
+        expect(entry).toBeNull();
+    });
+
+    it('resolves attention-score hovers to source and target token chip sync entries', () => {
+        const entries = resolveHoverTokenChipSyncEntries({
+            label: 'Pre-Softmax Attention Score',
+            info: buildAttentionInfo({
+                stage: 'attention.pre'
+            })
+        });
+
+        expect(entries).toEqual([
+            {
+                tokenIndex: 1,
+                tokenId: null,
+                tokenLabel: 'Token B'
+            },
+            {
+                tokenIndex: 0,
+                tokenId: null,
+                tokenLabel: 'Token A'
+            }
+        ]);
+    });
+
+    it('ignores layer norm parameter hovers for token chip sync even with lane token metadata', () => {
+        const entry = resolveHoverTokenChipSyncEntry({
+            label: 'LayerNorm 1 Scale',
+            info: {
+                tokenIndex: 0,
+                tokenLabel: 'Token A',
+                activationData: {
+                    stage: 'ln1.param.scale',
+                    layerIndex: 3
+                }
+            }
+        });
+
+        expect(entry).toBeNull();
+    });
+
+    it('honors explicit MLP down token-chip suppression for shared hover labels', () => {
+        const context = resolveHoverTokenContext({
+            label: 'MLP Down Projection',
+            info: {
+                activationData: {
+                    stage: 'mlp.down',
+                    suppressTokenChip: true,
+                    tokenIndex: 1,
+                    tokenLabel: 'Token B'
+                }
+            }
+        });
+        const entry = resolveHoverTokenChipSyncEntry({
+            label: 'MLP Down Projection',
+            info: {
+                activationData: {
+                    stage: 'mlp.down',
+                    suppressTokenChip: true,
+                    tokenIndex: 1,
+                    tokenLabel: 'Token B'
+                }
+            }
+        });
+
+        expect(context).toBeNull();
+        expect(entry).toBeNull();
     });
 });

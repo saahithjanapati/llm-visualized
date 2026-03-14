@@ -157,6 +157,9 @@ import {
     registerMhsaTokenMatrixCell
 } from './selectionPanelMhsaCellStoreUtils.js';
 import {
+    resolveMhsaTokenMatrixHoverTokenEntries
+} from './selectionPanelMhsaTokenHoverUtils.js';
+import {
     buildMhsaSceneModel
 } from '../view2d/model/buildMhsaSceneModel.js';
 import { createHoverLabelOverlay } from './hoverLabelOverlay.js';
@@ -285,7 +288,10 @@ import { createTokenChipMesh } from '../utils/tokenChipMeshFactory.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
+    matchesFocusVisibleTarget,
     normalizeTokenChipEntry,
+    normalizeTokenChipEntries,
+    tokenChipEntryListsMatch,
     tokenChipEntriesMatch
 } from './tokenChipHoverSync.js';
 import {
@@ -2726,7 +2732,8 @@ class SelectionPanel {
         this._currentSelectionDescription = '';
         this._currentSelectionEquations = '';
         this._panelTokenHoverEntry = null;
-        this._mirroredTokenHoverEntry = null;
+        this._panelTokenHoverEntries = [];
+        this._mirroredTokenHoverEntries = [];
         this._tokenHoverSyncSource = SELECTION_PANEL_TOKEN_HOVER_SOURCE;
         this._copyContextFeedbackTimer = null;
         this._copyContextFadeTimer = null;
@@ -4019,6 +4026,14 @@ class SelectionPanel {
 
         if (event.key === 'Escape' && this.isOpen) {
             if (this._transformerView2dDetailOpen) {
+                const didClearTransformerView2dLock = this._transformerView2dDetailView?.clearSelectionLock?.({
+                    scheduleRender: true
+                }) === true;
+                if (didClearTransformerView2dLock) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
                 this.close({ clearHistory: false });
                 return;
             }
@@ -4854,22 +4869,24 @@ class SelectionPanel {
         });
     }
 
-    _setPanelTokenHoverEntry(entry = null, { emit = true } = {}) {
-        const normalizedEntry = normalizeTokenChipEntry(entry);
-        const wasEmpty = !this._panelTokenHoverEntry;
-        const nextEmpty = !normalizedEntry;
-        const unchanged = (wasEmpty && nextEmpty)
-            || (!wasEmpty && !nextEmpty && tokenChipEntriesMatch(this._panelTokenHoverEntry, normalizedEntry));
+    _setPanelTokenHoverEntries(entries = null, { emit = true } = {}) {
+        const normalizedEntries = normalizeTokenChipEntries(entries);
+        const unchanged = tokenChipEntryListsMatch(this._panelTokenHoverEntries, normalizedEntries);
         if (!unchanged) {
-            this._panelTokenHoverEntry = normalizedEntry;
+            this._panelTokenHoverEntries = normalizedEntries;
+            this._panelTokenHoverEntry = normalizedEntries[0] || null;
             if (emit) {
-                dispatchTokenChipHoverSync(normalizedEntry, {
-                    active: !!normalizedEntry,
+                dispatchTokenChipHoverSync(normalizedEntries, {
+                    active: normalizedEntries.length > 0,
                     source: this._tokenHoverSyncSource
                 });
             }
         }
         this._applyTokenChipHoverState();
+    }
+
+    _setPanelTokenHoverEntry(entry = null, { emit = true } = {}) {
+        this._setPanelTokenHoverEntries(entry, { emit });
     }
 
     _applyTokenChipHoverState() {
@@ -4879,8 +4896,12 @@ class SelectionPanel {
             const canNavigate = chip.dataset.tokenNav === 'true';
             const chipEntry = canNavigate ? this._extractPanelTokenChipEntry(chip) : null;
             const isActive = !!chipEntry && (
-                tokenChipEntriesMatch(chipEntry, this._panelTokenHoverEntry)
-                || tokenChipEntriesMatch(chipEntry, this._mirroredTokenHoverEntry)
+                this._panelTokenHoverEntries.some((candidate) => (
+                    tokenChipEntriesMatch(chipEntry, candidate)
+                ))
+                || this._mirroredTokenHoverEntries.some((candidate) => (
+                    tokenChipEntriesMatch(chipEntry, candidate)
+                ))
             );
             chip.classList.toggle('is-token-chip-active', isActive);
             chip.dataset.tokenActive = isActive ? 'true' : 'false';
@@ -4906,6 +4927,7 @@ class SelectionPanel {
     _onPanelTokenChipFocusIn(event) {
         const chip = this._resolvePanelTokenChipTarget(event?.target);
         if (!chip) return;
+        if (!matchesFocusVisibleTarget(chip)) return;
         this._setPanelTokenHoverEntry(this._extractPanelTokenChipEntry(chip), { emit: true });
     }
 
@@ -4922,7 +4944,7 @@ class SelectionPanel {
     _onTokenChipHoverSync(event) {
         const detail = event?.detail || null;
         if (!detail || detail.source === this._tokenHoverSyncSource) return;
-        this._mirroredTokenHoverEntry = detail.active ? normalizeTokenChipEntry(detail) : null;
+        this._mirroredTokenHoverEntries = detail.active ? normalizeTokenChipEntries(detail) : [];
         this._applyTokenChipHoverState();
     }
 
@@ -6229,6 +6251,7 @@ class SelectionPanel {
         this._setSubtitleSecondaryText(`Focus: ${resolvedCanvasFocusLabel}`);
         this._setSubtitleTertiaryText('Prototype view. Drag or use one finger to pan, and pinch or scroll to zoom.');
         this.open();
+        this._setHoverLabelSuppression(true);
         this._transformerView2dDetailView?.setVisible(true);
         this._transformerView2dDetailView?.open({
             activationSource: this.activationSource,
@@ -6271,6 +6294,7 @@ class SelectionPanel {
         this._transformerView2dDetailView?.setVisible(false);
         syncTransformerView2dRoute({ active: false });
         this.engine?.resume?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
+        this._syncHoverLabelSuppressionFromHoverState();
         if (this._mhsaFullscreenActive) {
             this._setMhsaFullscreen(false);
         }
@@ -7909,6 +7933,19 @@ class SelectionPanel {
         };
     }
 
+    _resolveMhsaTokenMatrixHoverTokenEntries(targetInfo = null) {
+        return resolveMhsaTokenMatrixHoverTokenEntries(targetInfo, {
+            previewData: this._mhsaTokenMatrixData,
+            tokenIndices: Array.isArray(this.attentionTokenIndices)
+                ? this.attentionTokenIndices
+                : this.laneTokenIndices,
+            tokenLabels: Array.isArray(this.attentionTokenLabels)
+                ? this.attentionTokenLabels
+                : this.tokenLabels,
+            activationSource: this.activationSource
+        });
+    }
+
     _setMhsaTokenMatrixSceneElementState(element, hasSceneFocus, isActive) {
         if (Array.isArray(element)) {
             element.forEach((entry) => {
@@ -9540,6 +9577,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixPinnedStage = Number.isFinite(targetInfo.stageIndex) ? targetInfo.stageIndex : null;
         this._mhsaTokenMatrixPinnedFocusKey = typeof targetInfo.focusKey === 'string' ? targetInfo.focusKey : null;
         this._setMhsaTokenMatrixHoverValue(null);
+        this._setPanelTokenHoverEntries(null, { emit: true });
         this._applyMhsaTokenMatrixResolvedTarget(targetInfo);
         this._syncMhsaTokenMatrixPinnedClasses();
         return true;
@@ -9567,6 +9605,7 @@ class SelectionPanel {
         const forceFlag = force === true;
         if (this._mhsaTokenMatrixPinned && !forceFlag) {
             this._setMhsaTokenMatrixHoverValue(null);
+            this._setPanelTokenHoverEntries(null, { emit: true });
             return;
         }
         this._mhsaTokenMatrixBody?.classList.remove('has-focus-row', 'has-focus-column');
@@ -9600,6 +9639,7 @@ class SelectionPanel {
         this._mhsaTokenMatrixHoverSource = null;
         this._mhsaTokenMatrixHoverStage = null;
         this._setMhsaTokenMatrixHoverValue(null);
+        this._setPanelTokenHoverEntries(null, { emit: true });
         this._applyMhsaTokenMatrixSceneFocus(null);
         this._syncMhsaTokenMatrixPinnedClasses();
     }
@@ -9657,15 +9697,21 @@ class SelectionPanel {
         const target = event?.target instanceof Element ? event.target : null;
         if (!target || !this.mhsaTokenMatrixBody) {
             this._setMhsaTokenMatrixHoverValue(null);
+            this._setPanelTokenHoverEntries(null, { emit: true });
             return;
         }
         if (this._mhsaTokenMatrixPinned) {
             this._setMhsaTokenMatrixHoverValue(null);
+            this._setPanelTokenHoverEntries(null, { emit: true });
             return;
         }
         const targetInfo = this._resolveMhsaTokenMatrixInteractionTarget(target);
         const applied = this._applyMhsaTokenMatrixResolvedTarget(targetInfo);
         if (applied) {
+            this._setPanelTokenHoverEntries(
+                this._resolveMhsaTokenMatrixHoverTokenEntries(targetInfo),
+                { emit: true }
+            );
             const hoverPayload = targetInfo?.kind === 'score'
                 ? this._resolveMhsaTokenMatrixScoreHoverPayload(targetInfo)
                 : (targetInfo?.kind === 'attention-block'
@@ -11768,7 +11814,7 @@ class SelectionPanel {
             this._updateHistoryNavigationControls();
         }
         this._setPanelTokenHoverEntry(null, { emit: true });
-        this._mirroredTokenHoverEntry = null;
+        this._mirroredTokenHoverEntries = [];
         this._applyTokenChipHoverState();
         this._hideLegendHover();
         this._resetCopyContextFeedback();

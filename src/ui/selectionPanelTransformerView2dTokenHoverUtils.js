@@ -1,7 +1,11 @@
+import { resolveHoverTokenChipSyncEntries } from '../engine/coreHoverTokenContext.js';
 import {
     TOKEN_CHIP_HOVER_SYNC_EVENT,
     dispatchTokenChipHoverSync,
+    matchesFocusVisibleTarget,
     normalizeTokenChipEntry,
+    normalizeTokenChipEntries,
+    tokenChipEntryListsMatch,
     tokenChipEntriesMatch
 } from './tokenChipHoverSync.js';
 
@@ -13,9 +17,7 @@ const TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_CANVAS = 'canvas';
 const TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_STRIP = 'strip';
 
 function tokenEntriesEquivalent(a, b) {
-    if (!a && !b) return true;
-    if (!a || !b) return false;
-    return tokenChipEntriesMatch(a, b);
+    return tokenChipEntryListsMatch(a, b);
 }
 
 export function extractTransformerView2dTokenChipEntry(chip) {
@@ -39,8 +41,62 @@ function resolveTransformerView2dTokenEntryFromHoverInfo(info = null) {
     });
 }
 
-export function resolveTransformerView2dTokenEntryFromHoverPayload(payload = null) {
+function resolveTransformerView2dTokenEntriesFromHoverInfo(info = null) {
+    const entries = normalizeTokenChipEntries([
+        {
+            tokenIndex: info?.tokenIndex ?? info?.queryTokenIndex,
+            tokenId: info?.tokenId ?? info?.queryTokenId ?? info?.token_id,
+            tokenLabel: info?.tokenLabel
+                || info?.queryTokenLabel
+                || info?.tokenText
+                || info?.token
+        },
+        {
+            tokenIndex: info?.keyTokenIndex,
+            tokenId: info?.keyTokenId,
+            tokenLabel: info?.keyTokenLabel
+        }
+    ]);
+    if (entries.length) return entries;
+    const fallbackEntry = resolveTransformerView2dTokenEntryFromHoverInfo(info);
+    return fallbackEntry ? [fallbackEntry] : [];
+}
+
+function resolveTransformerView2dTokenEntriesFromSharedHoverPayload(payload = null) {
+    const label = typeof payload?.label === 'string' && payload.label.length
+        ? payload.label
+        : (
+            payload?.info?.activationData?.label
+            || payload?.activationData?.label
+            || payload?.info?.label
+            || ''
+        );
+    const stage = payload?.info?.activationData?.stage
+        || payload?.activationData?.stage
+        || payload?.info?.stage
+        || payload?.stage
+        || '';
+    const hasSharedContext = Boolean(
+        (typeof label === 'string' && label.length)
+        || (typeof stage === 'string' && stage.length)
+        || payload?.object
+        || payload?.hit?.object
+    );
+    if (!hasSharedContext) {
+        return null;
+    }
+    return resolveHoverTokenChipSyncEntries({
+        label,
+        info: payload?.info || payload || null,
+        object: payload?.object || payload?.hit?.object || null
+    });
+}
+
+export function resolveTransformerView2dTokenEntriesFromHoverPayload(payload = null) {
+    const sharedEntries = resolveTransformerView2dTokenEntriesFromSharedHoverPayload(payload);
+    if (sharedEntries) return sharedEntries;
     const sources = [
+        payload?.tokenEntries,
         payload?.tokenEntry,
         payload?.info?.activationData,
         payload?.activationData,
@@ -48,51 +104,71 @@ export function resolveTransformerView2dTokenEntryFromHoverPayload(payload = nul
         payload
     ];
     for (const source of sources) {
-        const entry = resolveTransformerView2dTokenEntryFromHoverInfo(source);
-        if (entry) return entry;
+        const entries = normalizeTokenChipEntries(source);
+        if (entries.length) return entries;
+        const infoEntries = resolveTransformerView2dTokenEntriesFromHoverInfo(source);
+        if (infoEntries.length) return infoEntries;
     }
-    return null;
+    return [];
+}
+
+export function resolveTransformerView2dTokenEntryFromHoverPayload(payload = null) {
+    return resolveTransformerView2dTokenEntriesFromHoverPayload(payload)[0] || null;
+}
+
+export function resolveTransformerView2dTokenEntriesFromResidualHoverPayload(payload = null) {
+    const sharedEntries = resolveTransformerView2dTokenEntriesFromSharedHoverPayload(payload);
+    if (sharedEntries) return sharedEntries;
+    const info = payload?.info || payload || null;
+    return resolveTransformerView2dTokenEntriesFromHoverInfo(info);
 }
 
 export function resolveTransformerView2dTokenEntryFromResidualHoverPayload(payload = null) {
-    const info = payload?.info || payload || null;
-    return resolveTransformerView2dTokenEntryFromHoverInfo(info);
+    return resolveTransformerView2dTokenEntriesFromResidualHoverPayload(payload)[0]
+        || resolveTransformerView2dTokenEntryFromHoverInfo(payload?.info || payload || null);
 }
 
 export function createTransformerView2dTokenHoverSync({ container = null } = {}) {
-    let localEntry = null;
+    let localEntries = [];
     let localSource = '';
-    let mirroredEntry = null;
+    let mirroredEntries = [];
 
     const applyActiveState = () => {
         if (!container || typeof container.querySelectorAll !== 'function') return;
+        let hasFocusedChip = false;
         container.querySelectorAll(TRANSFORMER_VIEW2D_TOKEN_CHIP_SELECTOR).forEach((chip) => {
             const canNavigate = chip.dataset.tokenNav === 'true';
             const chipEntry = canNavigate ? extractTransformerView2dTokenChipEntry(chip) : null;
-            const isActive = !!chipEntry && (
-                tokenChipEntriesMatch(chipEntry, localEntry)
-                || tokenChipEntriesMatch(chipEntry, mirroredEntry)
-            );
+            const isLocallyActive = !!chipEntry && localEntries.some((candidate) => (
+                tokenChipEntriesMatch(chipEntry, candidate)
+            ));
+            const isMirroredActive = !!chipEntry && mirroredEntries.some((candidate) => (
+                tokenChipEntriesMatch(chipEntry, candidate)
+            ));
+            const isActive = isLocallyActive || isMirroredActive;
+            if (isActive) hasFocusedChip = true;
             chip.classList.toggle('is-token-chip-active', isActive);
+            chip.classList.toggle('is-token-chip-hover-synced', isMirroredActive);
             chip.dataset.tokenActive = isActive ? 'true' : 'false';
         });
+        container.dataset.tokenFocusActive = hasFocusedChip ? 'true' : 'false';
     };
 
-    const emitLocalEntry = () => {
-        dispatchTokenChipHoverSync(localEntry, {
-            active: !!localEntry,
+    const emitLocalEntries = () => {
+        dispatchTokenChipHoverSync(localEntries, {
+            active: localEntries.length > 0,
             source: TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE
         });
     };
 
-    const setLocalEntry = (entry, source = '', { emit = true } = {}) => {
-        const normalizedEntry = normalizeTokenChipEntry(entry);
-        const nextSource = normalizedEntry ? String(source || '').trim() : '';
-        const didChange = localSource !== nextSource || !tokenEntriesEquivalent(localEntry, normalizedEntry);
-        localEntry = normalizedEntry;
+    const setLocalEntries = (entries, source = '', { emit = true } = {}) => {
+        const normalizedEntries = normalizeTokenChipEntries(entries);
+        const nextSource = normalizedEntries.length ? String(source || '').trim() : '';
+        const didChange = localSource !== nextSource || !tokenEntriesEquivalent(localEntries, normalizedEntries);
+        localEntries = normalizedEntries;
         localSource = nextSource;
         if (didChange && emit) {
-            emitLocalEntry();
+            emitLocalEntries();
         }
         applyActiveState();
     };
@@ -103,14 +179,14 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
             applyActiveState();
             return;
         }
-        if (!localEntry && !localSource) {
+        if (!localEntries.length && !localSource) {
             applyActiveState();
             return;
         }
-        localEntry = null;
+        localEntries = [];
         localSource = '';
         if (emit) {
-            emitLocalEntry();
+            emitLocalEntries();
         }
         applyActiveState();
     };
@@ -125,7 +201,7 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
     const handlePointerOver = (event) => {
         const chip = resolveChipTarget(event?.target);
         if (!chip) return;
-        setLocalEntry(
+        setLocalEntries(
             extractTransformerView2dTokenChipEntry(chip),
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_STRIP,
             { emit: true }
@@ -137,7 +213,7 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
         if (!fromChip) return;
         const toChip = resolveChipTarget(event?.relatedTarget);
         if (toChip) {
-            setLocalEntry(
+            setLocalEntries(
                 extractTransformerView2dTokenChipEntry(toChip),
                 TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_STRIP,
                 { emit: true }
@@ -150,7 +226,8 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
     const handleFocusIn = (event) => {
         const chip = resolveChipTarget(event?.target);
         if (!chip) return;
-        setLocalEntry(
+        if (!matchesFocusVisibleTarget(chip)) return;
+        setLocalEntries(
             extractTransformerView2dTokenChipEntry(chip),
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_STRIP,
             { emit: true }
@@ -162,7 +239,7 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
         if (!fromChip) return;
         const toChip = resolveChipTarget(event?.relatedTarget);
         if (toChip) {
-            setLocalEntry(
+            setLocalEntries(
                 extractTransformerView2dTokenChipEntry(toChip),
                 TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_STRIP,
                 { emit: true }
@@ -175,7 +252,7 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
     const handleTokenChipHoverSync = (event) => {
         const detail = event?.detail || null;
         if (!detail || detail.source === TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE) return;
-        mirroredEntry = detail.active ? normalizeTokenChipEntry(detail) : null;
+        mirroredEntries = detail.active ? normalizeTokenChipEntries(detail) : [];
         applyActiveState();
     };
 
@@ -189,18 +266,18 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
 
     return {
         applyState: applyActiveState,
-        setCanvasEntry: (entry, options = {}) => setLocalEntry(
+        setCanvasEntry: (entry, options = {}) => setLocalEntries(
             entry,
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_CANVAS,
             options
         ),
-        setCanvasEntryFromResidualHoverPayload: (payload, options = {}) => setLocalEntry(
-            resolveTransformerView2dTokenEntryFromResidualHoverPayload(payload),
+        setCanvasEntryFromResidualHoverPayload: (payload, options = {}) => setLocalEntries(
+            resolveTransformerView2dTokenEntriesFromResidualHoverPayload(payload),
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_CANVAS,
             options
         ),
-        setCanvasEntryFromHoverPayload: (payload, options = {}) => setLocalEntry(
-            resolveTransformerView2dTokenEntryFromHoverPayload(payload),
+        setCanvasEntryFromHoverPayload: (payload, options = {}) => setLocalEntries(
+            resolveTransformerView2dTokenEntriesFromHoverPayload(payload),
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_CANVAS,
             options
         ),
@@ -208,7 +285,7 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_CANVAS,
             options
         ),
-        setStripEntry: (entry, options = {}) => setLocalEntry(
+        setStripEntry: (entry, options = {}) => setLocalEntries(
             entry,
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_STRIP,
             options
@@ -217,8 +294,12 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_STRIP,
             options
         ),
-        clear: ({ emit = true } = {}) => {
+        clear: ({ emit = true, resetMirrored = true } = {}) => {
             clearLocalEntry('', { emit });
+            if (resetMirrored && mirroredEntries.length) {
+                mirroredEntries = [];
+                applyActiveState();
+            }
         },
         dispose: ({ emit = true } = {}) => {
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
@@ -229,7 +310,7 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
             container?.removeEventListener?.('focusin', handleFocusIn);
             container?.removeEventListener?.('focusout', handleFocusOut);
             clearLocalEntry('', { emit });
-            mirroredEntry = null;
+            mirroredEntries = [];
             applyActiveState();
         }
     };
