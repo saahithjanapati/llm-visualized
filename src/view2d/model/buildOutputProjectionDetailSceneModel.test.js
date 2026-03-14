@@ -157,7 +157,8 @@ describe('buildOutputProjectionDetailSceneModel', () => {
             rows: D_MODEL,
             cols: D_MODEL
         });
-        expect(projectionWeightNode?.metadata?.caption?.sceneRelativeExtentExponent).toBeCloseTo(0.72, 5);
+        expect(projectionWeightNode?.metadata?.caption?.minScreenHeightPx).toBe(28);
+        expect(projectionWeightNode?.metadata?.caption?.preferStandardSizing).toBe(true);
         expect(projectionBiasNode?.label?.tex).toBe('b_{\\mathrm{O}}');
         expect(projectionBiasNode?.dimensions).toEqual({
             rows: 1,

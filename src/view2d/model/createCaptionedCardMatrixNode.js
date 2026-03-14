@@ -55,7 +55,9 @@ function createCaptionMetadata({
     scaleWithNode = false,
     labelScale = null,
     dimensionsScale = null,
-    sceneRelativeExtentExponent = null,
+    preferStandardSizing = false,
+    labelMinScreenFontPx = null,
+    dimensionsMinScreenFontPx = null,
     labelMaxScreenFontPx = null,
     fixedScreenFontPx = null
 } = {}) {
@@ -94,8 +96,14 @@ function createCaptionMetadata({
     if (Number.isFinite(dimensionsScale) && dimensionsScale > 0) {
         caption.dimensionsScale = Number(dimensionsScale);
     }
-    if (Number.isFinite(sceneRelativeExtentExponent) && sceneRelativeExtentExponent > 0) {
-        caption.sceneRelativeExtentExponent = Math.min(1, Number(sceneRelativeExtentExponent));
+    if (preferStandardSizing === true) {
+        caption.preferStandardSizing = true;
+    }
+    if (Number.isFinite(labelMinScreenFontPx) && labelMinScreenFontPx > 0) {
+        caption.labelMinScreenFontPx = Number(labelMinScreenFontPx);
+    }
+    if (Number.isFinite(dimensionsMinScreenFontPx) && dimensionsMinScreenFontPx > 0) {
+        caption.dimensionsMinScreenFontPx = Number(dimensionsMinScreenFontPx);
     }
     if (Number.isFinite(labelMaxScreenFontPx) && labelMaxScreenFontPx > 0) {
         caption.labelMaxScreenFontPx = Number(labelMaxScreenFontPx);
@@ -170,7 +178,9 @@ export function createCaptionedCardMatrixNode({
     captionScaleWithNode = false,
     captionLabelScale = null,
     captionDimensionsScale = null,
-    captionSceneRelativeExtentExponent = null,
+    captionPreferStandardSizing = false,
+    captionLabelMinScreenFontPx = null,
+    captionDimensionsMinScreenFontPx = null,
     captionLabelMaxScreenFontPx = null,
     captionFixedScreenFontPx = null,
     visualStyleKey = VIEW2D_STYLE_KEYS.MATRIX_WEIGHT,
@@ -229,7 +239,9 @@ export function createCaptionedCardMatrixNode({
                 scaleWithNode: captionScaleWithNode,
                 labelScale: captionLabelScale,
                 dimensionsScale: captionDimensionsScale,
-                sceneRelativeExtentExponent: captionSceneRelativeExtentExponent,
+                preferStandardSizing: captionPreferStandardSizing,
+                labelMinScreenFontPx: captionLabelMinScreenFontPx,
+                dimensionsMinScreenFontPx: captionDimensionsMinScreenFontPx,
                 labelMaxScreenFontPx: captionLabelMaxScreenFontPx,
                 fixedScreenFontPx: captionFixedScreenFontPx
             }),

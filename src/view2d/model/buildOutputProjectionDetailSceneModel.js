@@ -90,7 +90,6 @@ const OUTPUT_PROJECTION_CONNECTOR_SOURCE_GAP = 8;
 const OUTPUT_PROJECTION_CONNECTOR_TARGET_GAP = 12;
 const OUTPUT_PROJECTION_BIAS_LABEL_SCALE = 1.8;
 const OUTPUT_PROJECTION_MULTIPLY_OPERATOR_SCALE = 0.92;
-const OUTPUT_PROJECTION_WEIGHT_CAPTION_SCENE_RELATIVE_EXPONENT = 0.72;
 
 const HEAD_OUTPUT_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_V_COLOR, {
     valueMin: -2,
@@ -885,9 +884,10 @@ function createOutputProjectionStageNode({
         cardHeight: visualMetrics.weightCardSize.height,
         cardCornerRadius: 10,
         captionPosition: 'bottom',
+        captionMinScreenHeightPx: 28,
         captionLabelScale: 1.12,
         captionDimensionsScale: 0.94,
-        captionSceneRelativeExtentExponent: OUTPUT_PROJECTION_WEIGHT_CAPTION_SCENE_RELATIVE_EXPONENT,
+        captionPreferStandardSizing: true,
         visualStyleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION,
         disableCardSurfaceEffects: true,
         metadata: {

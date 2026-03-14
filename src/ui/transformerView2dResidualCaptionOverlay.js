@@ -143,8 +143,6 @@ export function resolveCaptionScreenExtent({
 export function resolveCaptionFontPx({
     useMatrixRelativeSizing = false,
     projectedContentHeight = 0,
-    sceneRelativeReferenceExtent = null,
-    sceneRelativeExtentExponent = 1,
     sizeProgress = 0,
     minFontPx = 12,
     maxFontPx = 14,
@@ -155,24 +153,9 @@ export function resolveCaptionFontPx({
     const safeProjectedContentHeight = Number.isFinite(projectedContentHeight)
         ? Math.max(0, Number(projectedContentHeight))
         : 0;
-    const safeSceneRelativeReferenceExtent = Number.isFinite(sceneRelativeReferenceExtent)
-        ? Math.max(0, Number(sceneRelativeReferenceExtent))
-        : safeProjectedContentHeight;
-    const safeSceneRelativeExtentExponent = Number.isFinite(sceneRelativeExtentExponent)
-        ? clamp(Number(sceneRelativeExtentExponent), 0.01, 1)
-        : 1;
     const safeScale = Number.isFinite(scale) && scale > 0 ? Number(scale) : 1;
     if (useMatrixRelativeSizing) {
-        const effectiveProjectedHeight = safeSceneRelativeExtentExponent === 1
-            ? safeProjectedContentHeight
-            : (
-                Math.pow(safeProjectedContentHeight, safeSceneRelativeExtentExponent)
-                * Math.pow(
-                    Math.max(0.0001, safeSceneRelativeReferenceExtent),
-                    1 - safeSceneRelativeExtentExponent
-                )
-            );
-        const relativeFontPx = effectiveProjectedHeight * heightRatio * safeScale;
+        const relativeFontPx = safeProjectedContentHeight * heightRatio * safeScale;
         return enforceMinFontPx
             ? Math.max(minFontPx, relativeFontPx)
             : relativeFontPx;
@@ -689,16 +672,10 @@ export function createTransformerView2dResidualCaptionOverlay({
                     )
                     : projectedContentHeight;
                 const dimensionsCaptionSizingExtent = captionSizingExtent;
-                const sceneRelativeExtentExponent = Number.isFinite(node?.metadata?.caption?.sceneRelativeExtentExponent)
-                    && node.metadata.caption.sceneRelativeExtentExponent > 0
-                    ? Number(node.metadata.caption.sceneRelativeExtentExponent)
-                    : 1;
                 const labelFontPx = fixedTextSizing?.captionLabelScreenFontPx
                     ?? resolveCaptionFontPx({
                         useMatrixRelativeSizing,
                         projectedContentHeight: captionSizingExtent,
-                        sceneRelativeReferenceExtent: minScreenHeightPx,
-                        sceneRelativeExtentExponent,
                         sizeProgress,
                         minFontPx: activeUniformCaptionState
                             ? MHSA_UNIFORM_CAPTION_LABEL_MIN_FONT_PX
@@ -714,8 +691,6 @@ export function createTransformerView2dResidualCaptionOverlay({
                     ?? resolveCaptionFontPx({
                         useMatrixRelativeSizing,
                         projectedContentHeight: dimensionsCaptionSizingExtent,
-                        sceneRelativeReferenceExtent: minScreenHeightPx,
-                        sceneRelativeExtentExponent,
                         sizeProgress,
                         minFontPx: activeUniformCaptionState
                             ? MHSA_UNIFORM_CAPTION_DIMENSIONS_MIN_FONT_PX
