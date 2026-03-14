@@ -27,13 +27,36 @@ export function extractTransformerView2dTokenChipEntry(chip) {
     });
 }
 
+function resolveTransformerView2dTokenEntryFromHoverInfo(info = null) {
+    return normalizeTokenChipEntry({
+        tokenIndex: info?.tokenIndex ?? info?.queryTokenIndex ?? info?.keyTokenIndex,
+        tokenId: info?.tokenId ?? info?.token_id,
+        tokenLabel: info?.tokenLabel
+            || info?.queryTokenLabel
+            || info?.keyTokenLabel
+            || info?.tokenText
+            || info?.token
+    });
+}
+
+export function resolveTransformerView2dTokenEntryFromHoverPayload(payload = null) {
+    const sources = [
+        payload?.tokenEntry,
+        payload?.info?.activationData,
+        payload?.activationData,
+        payload?.info,
+        payload
+    ];
+    for (const source of sources) {
+        const entry = resolveTransformerView2dTokenEntryFromHoverInfo(source);
+        if (entry) return entry;
+    }
+    return null;
+}
+
 export function resolveTransformerView2dTokenEntryFromResidualHoverPayload(payload = null) {
     const info = payload?.info || payload || null;
-    return normalizeTokenChipEntry({
-        tokenIndex: info?.tokenIndex,
-        tokenId: info?.tokenId,
-        tokenLabel: info?.tokenLabel
-    });
+    return resolveTransformerView2dTokenEntryFromHoverInfo(info);
 }
 
 export function createTransformerView2dTokenHoverSync({ container = null } = {}) {
@@ -173,6 +196,11 @@ export function createTransformerView2dTokenHoverSync({ container = null } = {})
         ),
         setCanvasEntryFromResidualHoverPayload: (payload, options = {}) => setLocalEntry(
             resolveTransformerView2dTokenEntryFromResidualHoverPayload(payload),
+            TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_CANVAS,
+            options
+        ),
+        setCanvasEntryFromHoverPayload: (payload, options = {}) => setLocalEntry(
+            resolveTransformerView2dTokenEntryFromHoverPayload(payload),
             TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE_CANVAS,
             options
         ),

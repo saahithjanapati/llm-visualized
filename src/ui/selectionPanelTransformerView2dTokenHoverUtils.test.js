@@ -6,6 +6,7 @@ import { TOKEN_CHIP_HOVER_SYNC_EVENT } from './tokenChipHoverSync.js';
 import {
     createTransformerView2dTokenHoverSync,
     TRANSFORMER_VIEW2D_TOKEN_HOVER_SOURCE,
+    resolveTransformerView2dTokenEntryFromHoverPayload,
     resolveTransformerView2dTokenEntryFromResidualHoverPayload
 } from './selectionPanelTransformerView2dTokenHoverUtils.js';
 
@@ -45,6 +46,21 @@ describe('selectionPanelTransformerView2dTokenHoverUtils', () => {
             tokenIndex: 4,
             tokenId: 99,
             tokenLabel: 'world'
+        });
+    });
+
+    it('normalizes token metadata from detailed hover payloads', () => {
+        expect(resolveTransformerView2dTokenEntryFromHoverPayload({
+            info: {
+                activationData: {
+                    queryTokenIndex: 2,
+                    queryTokenLabel: 'Token C'
+                }
+            }
+        })).toEqual({
+            tokenIndex: 2,
+            tokenId: null,
+            tokenLabel: 'Token C'
         });
     });
 
@@ -103,6 +119,37 @@ describe('selectionPanelTransformerView2dTokenHoverUtils', () => {
 
         hoverSync.dispose({ emit: false });
         window.removeEventListener(TOKEN_CHIP_HOVER_SYNC_EVENT, onSync);
+    });
+
+    it('highlights the matching 2D token chip when the canvas hovers a detailed-view row', () => {
+        const container = document.createElement('div');
+        const firstChip = buildTokenChip({
+            tokenText: 'Token A',
+            tokenIndex: 0,
+            tokenId: 11
+        });
+        const secondChip = buildTokenChip({
+            tokenText: 'Token B',
+            tokenIndex: 1,
+            tokenId: 12
+        });
+        container.append(firstChip, secondChip);
+        document.body.appendChild(container);
+
+        const hoverSync = createTransformerView2dTokenHoverSync({ container });
+        hoverSync.setCanvasEntryFromHoverPayload({
+            info: {
+                activationData: {
+                    tokenIndex: 1,
+                    tokenLabel: 'Token B'
+                }
+            }
+        });
+
+        expect(firstChip.classList.contains('is-token-chip-active')).toBe(false);
+        expect(secondChip.classList.contains('is-token-chip-active')).toBe(true);
+
+        hoverSync.dispose({ emit: false });
     });
 
     it('does not clear an active strip hover when the canvas hover path clears', () => {

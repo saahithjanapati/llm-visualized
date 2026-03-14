@@ -61,8 +61,8 @@ export function buildPositionEmbeddingModule({
         semantic,
         title,
         role: 'position-embedding-card',
-        stageLabel: 'Position Embedding',
-        labelTex: 'W_{pos}',
+        labelText: 'W position',
+        labelTex: 'W_{position}',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM,
         cardWidth: 148,
         cardHeight: 108
@@ -77,8 +77,8 @@ export function buildVocabularyEmbeddingModule({
         semantic,
         title,
         role: 'vocabulary-embedding-card',
-        stageLabel: 'Vocabulary Embedding',
-        labelTex: 'W_E',
+        labelText: 'W vocabulary',
+        labelTex: 'W_{vocabulary}',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
         cardWidth: 196,
         cardHeight: 144
@@ -89,7 +89,7 @@ function buildEmbeddingStreamModule({
     semantic = {},
     title = '',
     role = 'embedding-stream-card',
-    stageLabel = '',
+    labelText = '',
     labelTex = '',
     styleKey = VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
     cardWidth = 180,
@@ -100,7 +100,6 @@ function buildEmbeddingStreamModule({
     const cardNode = createMatrixNode({
         role,
         semantic: mergeSemantic(semantic, { role }),
-        label: buildLabel(labelTex, stageLabel),
         dimensions: {
             rows: CONTEXT_LEN,
             cols: D_MODEL
@@ -125,7 +124,8 @@ function buildEmbeddingStreamModule({
     const titleNode = createTextNode({
         role: 'module-title',
         semantic: mergeSemantic(semantic, { role: 'module-title' }),
-        text: title,
+        text: labelText,
+        tex: labelTex,
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.LABEL
         },
