@@ -8,7 +8,10 @@ import {
     isValueSelection,
     isWeightedSumSelection
 } from '../ui/selectionPanelSelectionUtils.js';
-import { resolveLayerNormKind } from '../utils/layerNormLabels.js';
+import {
+    resolveLayerNormKind,
+    resolvePostLayerNormResidualLabel
+} from '../utils/layerNormLabels.js';
 import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
 export function normalizeOptionalIndex(value) {
@@ -111,7 +114,9 @@ export function buildResidualRowHoverPayload(rowHit = null, activationSource = n
     });
     const isPostLayerNormResidual = activationStage === 'ln1.shift' || activationStage === 'ln2.shift';
     const headIndex = normalizeOptionalIndex(semantic.headIndex);
-    const label = isPostLayerNormResidual ? 'Post LayerNorm Residual Vector' : 'Residual Stream Vector';
+    const label = isPostLayerNormResidual
+        ? resolvePostLayerNormResidualLabel({ stage: activationStage })
+        : 'Residual Stream Vector';
     const info = {
         ...(Number.isFinite(layerIndex) ? { layerIndex } : {}),
         ...(Number.isFinite(headIndex) ? { headIndex } : {}),
@@ -202,6 +207,8 @@ export function buildSemanticNodeHoverPayload(hit = null) {
             role === 'projection-weight'
             || role === 'module-card'
             || role === 'module-title'
+            || role === 'module-title-top'
+            || role === 'module-title-bottom'
             || role === 'module'
         )
     ) {
@@ -451,7 +458,7 @@ export function resolveDetailTargetsFromSemanticTarget(target = null) {
     )
         ? resolveHeadDetailTarget(safeTarget)
         : null;
-    const concatDetailTarget = (
+    const redirectedConcatDetailTarget = (
         !headDetailTarget
         && safeTarget?.componentKind === 'mhsa'
         && safeTarget?.stage === 'concatenate'
@@ -460,14 +467,19 @@ export function resolveDetailTargetsFromSemanticTarget(target = null) {
         : null;
     const outputProjectionDetailTarget = (
         !headDetailTarget
-        && !concatDetailTarget
-        && safeTarget?.componentKind === 'output-projection'
+        && (
+            redirectedConcatDetailTarget
+            || safeTarget?.componentKind === 'output-projection'
+        )
     )
-        ? resolveOutputProjectionDetailTarget(safeTarget)
+        ? resolveOutputProjectionDetailTarget(
+            redirectedConcatDetailTarget
+                ? { layerIndex: redirectedConcatDetailTarget.layerIndex }
+                : safeTarget
+        )
         : null;
     const mlpDetailTarget = (
         !headDetailTarget
-        && !concatDetailTarget
         && !outputProjectionDetailTarget
         && safeTarget?.componentKind === 'mlp'
     )
@@ -476,10 +488,30 @@ export function resolveDetailTargetsFromSemanticTarget(target = null) {
 
     return {
         headDetailTarget,
-        concatDetailTarget,
+        concatDetailTarget: null,
         outputProjectionDetailTarget,
         mlpDetailTarget
     };
+}
+
+export function resolveTransformerView2dOpenTransitionMode({
+    semanticTarget = null
+} = {}) {
+    const safeTarget = buildSemanticTarget(semanticTarget);
+    if (!safeTarget) return '';
+
+    const detailTargets = resolveDetailTargetsFromSemanticTarget(safeTarget);
+    if (detailTargets.headDetailTarget) {
+        return 'staged-head-detail';
+    }
+    if (
+        detailTargets.concatDetailTarget
+        || detailTargets.outputProjectionDetailTarget
+        || detailTargets.mlpDetailTarget
+    ) {
+        return '';
+    }
+    return 'staged-focus';
 }
 
 export function hasActiveDetailTarget({
@@ -499,7 +531,11 @@ export function resolveActiveSemanticTarget({
     mlpDetailTarget = null
 } = {}) {
     if (headDetailTarget) return buildHeadDetailSemanticTarget(headDetailTarget);
-    if (concatDetailTarget) return buildConcatDetailSemanticTarget(concatDetailTarget);
+    if (concatDetailTarget) {
+        return buildOutputProjectionDetailSemanticTarget({
+            layerIndex: resolveConcatDetailTarget(concatDetailTarget)?.layerIndex
+        });
+    }
     if (outputProjectionDetailTarget) return buildOutputProjectionDetailSemanticTarget(outputProjectionDetailTarget);
     if (mlpDetailTarget) return buildMlpDetailSemanticTarget(mlpDetailTarget);
     return buildSemanticTarget(baseSemanticTarget);
@@ -541,9 +577,10 @@ export function resolveFocusSemanticTargets({
             buildHeadDetailSemanticTarget(headDetailTarget)
         );
     } else if (concatDetailTarget) {
+        const redirectedTarget = resolveConcatDetailTarget(concatDetailTarget);
         candidates.push(
-            buildConcatDetailSemanticTarget(concatDetailTarget, 'concat-card'),
-            buildConcatDetailSemanticTarget(concatDetailTarget, 'concat')
+            buildOutputProjectionDetailSemanticTarget(redirectedTarget, 'projection-weight'),
+            buildOutputProjectionDetailSemanticTarget(redirectedTarget, 'module')
         );
     } else if (outputProjectionDetailTarget) {
         candidates.push(
@@ -557,16 +594,32 @@ export function resolveFocusSemanticTargets({
             buildMlpDetailSemanticTarget(mlpDetailTarget, 'module')
         );
     } else {
-        candidates.push(
-            buildSemanticTarget(semanticTarget)
+        const activeTarget = buildSemanticTarget(semanticTarget)
             || resolveActiveSemanticTarget({
                 baseSemanticTarget,
                 headDetailTarget,
                 concatDetailTarget,
                 outputProjectionDetailTarget,
                 mlpDetailTarget
-            })
-        );
+            });
+        if (activeTarget?.componentKind === 'layer-norm') {
+            candidates.push(
+                buildSemanticTarget({
+                    ...activeTarget,
+                    role: 'module-card'
+                }),
+                buildSemanticTarget({
+                    ...activeTarget,
+                    role: 'module-title'
+                }),
+                buildSemanticTarget({
+                    ...activeTarget,
+                    role: 'module'
+                })
+            );
+        } else {
+            candidates.push(activeTarget);
+        }
     }
 
     const seen = new Set();
@@ -602,7 +655,9 @@ export function isOutputProjectionOverviewEntry(entry = null) {
     if (!semantic || semantic.componentKind !== 'output-projection') return false;
     if (!Number.isFinite(semantic.layerIndex)) return false;
     return entry.role === 'projection-weight'
-        || entry.role === 'module-title';
+        || entry.role === 'module-title'
+        || entry.role === 'module-title-top'
+        || entry.role === 'module-title-bottom';
 }
 
 export function isMlpOverviewEntry(entry = null) {
@@ -612,6 +667,8 @@ export function isMlpOverviewEntry(entry = null) {
     if (semantic.stage !== 'mlp') return false;
     return entry.role === 'module-card'
         || entry.role === 'module-title'
+        || entry.role === 'module-title-top'
+        || entry.role === 'module-title-bottom'
         || entry.role === 'module';
 }
 
@@ -653,7 +710,7 @@ export function describeTransformerView2dTarget(target = null) {
             return layerLabel ? `${layerLabel} ${headLabel}` : headLabel;
         }
         if (target.stage === 'concatenate') {
-            return layerLabel ? `${layerLabel} Concatenate Heads` : 'Concatenate Heads';
+            return layerLabel ? `${layerLabel} Output Projection` : 'Output Projection';
         }
         return layerLabel ? `${layerLabel} Self-Attention` : 'Self-Attention';
     }
@@ -768,10 +825,10 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     ) {
         if (Number.isFinite(layerIndex)) {
             semanticTarget = buildSemanticTarget({
-                componentKind: 'mhsa',
+                componentKind: 'output-projection',
                 layerIndex,
-                stage: 'concatenate',
-                role: 'concat'
+                stage: 'attn-out',
+                role: 'projection-weight'
             });
         }
     } else if (
@@ -916,12 +973,15 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     const detailFocusLabel = detailSemanticTargets.length
         ? resolveMhsaDetailFocusLabel(label, stageLower)
         : '';
+    const transitionMode = resolveTransformerView2dOpenTransitionMode({
+        semanticTarget
+    });
     return {
         semanticTarget,
         focusLabel: describeTransformerView2dTarget(semanticTarget),
         ...(detailSemanticTargets.length ? { detailSemanticTargets } : {}),
         ...(detailFocusLabel.length ? { detailFocusLabel } : {}),
-        ...(detailSemanticTargets.length ? { transitionMode: 'staged-head-detail' } : {}),
+        ...(transitionMode ? { transitionMode } : {}),
         actionLabel: 'View in 2D / matrix form'
     };
 }

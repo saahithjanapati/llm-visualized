@@ -22,6 +22,7 @@ function createController() {
     controller._autoCameraCenter = new THREE.Vector3(10, 20, 30);
     controller._autoCameraCurrentCameraOffset = new THREE.Vector3(1, 2, 3);
     controller._autoCameraCurrentTargetOffset = new THREE.Vector3(4, 5, 6);
+    controller._autoCameraInspectorRef = new THREE.Vector3();
     controller._autoCameraViewFromCameraOffset = new THREE.Vector3();
     controller._autoCameraViewFromTargetOffset = new THREE.Vector3();
     controller._autoCameraViewToCameraOffset = new THREE.Vector3();
@@ -30,6 +31,8 @@ function createController() {
     controller._autoCameraDefaultTargetOffset = new THREE.Vector3(0, 100, 0);
     controller._autoCameraLnCameraOffset = new THREE.Vector3(7, 8, 9);
     controller._autoCameraLnTargetOffset = new THREE.Vector3(10, 11, 12);
+    controller._autoCameraTravelCameraOffset = new THREE.Vector3(13, 14, 15);
+    controller._autoCameraTravelTargetOffset = new THREE.Vector3(16, 17, 18);
 
     controller._syncAutoCameraSemanticView = vi.fn();
     controller._resetAutoCameraReferenceMotion = vi.fn();
@@ -45,6 +48,12 @@ function createController() {
             return {
                 cameraOffset: controller._autoCameraLnCameraOffset,
                 targetOffset: controller._autoCameraLnTargetOffset
+            };
+        }
+        if (key === 'travel') {
+            return {
+                cameraOffset: controller._autoCameraTravelCameraOffset,
+                targetOffset: controller._autoCameraTravelTargetOffset
             };
         }
         return {
@@ -80,6 +89,42 @@ describe('AutoCameraController follow re-enable', () => {
         expect(controller._autoCameraViewKey).toBe('ln');
         expect(controller._autoCameraViewPendingKey).toBe('default');
         expect(controller._autoCameraViewPendingSinceMs).toBe(123);
+    });
+
+    it('jumps straight to the live semantic view when reset follow is re-enabled', () => {
+        const controller = createController();
+
+        controller._resolveAutoCameraViewKey = vi.fn(() => 'travel');
+
+        controller._applyFollowReset({
+            smoothReset: true,
+            preferLiveSemanticView: true
+        });
+
+        expect(controller._resolveStableAutoCameraViewKey).not.toHaveBeenCalled();
+        expect(controller._resolveAutoCameraOffsetsForViewKey).toHaveBeenCalledWith('travel', {});
+        expect(controller._autoCameraViewKey).toBe('travel');
+        expect(controller._autoCameraViewPendingKey).toBe('travel');
+        expect(controller._autoCameraViewPendingSinceMs).toBe(0);
+    });
+
+    it('does not re-arm the startup overview when a live follow target already exists', () => {
+        const controller = createController();
+
+        controller._startupCameraIntroPlayed = false;
+        controller._applyFollowReset = vi.fn();
+        controller._resolveActiveLanePosition = vi.fn((ref) => {
+            ref.set(10, 20, 30);
+            return { laneIndex: 0, laneCount: 1 };
+        });
+
+        controller.setEnabled(true, { resetView: true, smoothReset: true });
+
+        expect(controller._startupCameraOverviewPending).toBe(false);
+        expect(controller._applyFollowReset).toHaveBeenCalledWith({
+            smoothReset: true,
+            preferLiveSemanticView: true
+        });
     });
 });
 

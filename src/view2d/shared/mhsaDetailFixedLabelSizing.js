@@ -1,4 +1,6 @@
 const MHSA_DETAIL_VISUAL_CONTRACT = 'selection-panel-mhsa-v1';
+const OUTPUT_PROJECTION_DETAIL_VISUAL_CONTRACT = 'selection-panel-output-projection-v1';
+const MLP_DETAIL_VISUAL_CONTRACT = 'selection-panel-mlp-v1';
 
 export const MHSA_DETAIL_FIXED_SHARED_SCREEN_FONT_PX = 14;
 export const MHSA_DETAIL_FIXED_TEXT_SCREEN_FONT_PX = MHSA_DETAIL_FIXED_SHARED_SCREEN_FONT_PX;
@@ -40,7 +42,10 @@ const MHSA_DETAIL_VIEW2D_SCENE_TEXT_ZOOM_POLICY = Object.freeze({
 });
 
 export function isMhsaDetailScene(scene = null) {
-    return String(scene?.metadata?.visualContract || '').trim().toLowerCase() === MHSA_DETAIL_VISUAL_CONTRACT;
+    const visualContract = String(scene?.metadata?.visualContract || '').trim().toLowerCase();
+    return visualContract === MHSA_DETAIL_VISUAL_CONTRACT
+        || visualContract === OUTPUT_PROJECTION_DETAIL_VISUAL_CONTRACT
+        || visualContract === MLP_DETAIL_VISUAL_CONTRACT;
 }
 
 export function resolveView2dSceneTextZoomPolicy(scene = null) {

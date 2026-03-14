@@ -156,6 +156,12 @@ const ATTENTION_LEFT_HAND_SIDE_GAP_BASE = 10;
 const ATTENTION_LEFT_HAND_SIDE_GAP_BASE_SMALL = 8;
 const ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_RATIO = 0.1;
 const ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_MAX = 8;
+const INCOMING_ARROW_SPACER_WIDTH = 60;
+const INCOMING_ARROW_SPACER_WIDTH_SMALL = 52;
+const OUTGOING_ARROW_SPACER_WIDTH = 44;
+const OUTGOING_ARROW_SPACER_WIDTH_SMALL = 38;
+const EDGE_CONNECTOR_STROKE_WIDTH_SCALE = 0.88;
+const HEAD_OUTPUT_EDGE_SOURCE_GAP = 8;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -198,6 +204,23 @@ function resolveAttentionLeftHandSideGap(layoutMetrics = null, isSmallScreen = f
         Math.round(safeBoost * ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_RATIO)
     );
     return baseGap + resolvedBoost;
+}
+
+function findNestedNodeByRole(rootNode = null, role = '') {
+    const safeRole = String(role || '').trim();
+    if (!rootNode || !safeRole.length) return null;
+    const queue = Array.isArray(rootNode?.children) ? [...rootNode.children] : [];
+    while (queue.length) {
+        const node = queue.shift();
+        if (!node || typeof node !== 'object') continue;
+        if (node.role === safeRole) {
+            return node;
+        }
+        if (Array.isArray(node.children) && node.children.length) {
+            queue.unshift(...node.children);
+        }
+    }
+    return null;
 }
 
 function buildLabel(labelTex = '', fallbackText = '') {
@@ -789,8 +812,8 @@ function buildProjectionSourceNode({
             stage: 'projection-source',
             role: 'projection-source-xln'
         }),
-        labelTex: 'X_{\\ln}',
-        labelText: 'X_ln',
+        labelTex: 'x_{\\ln}',
+        labelText: 'x_ln',
         rowItems: buildProjectionInputRowItems(previewData?.rows, baseSemantic),
         rowCount,
         columnCount: previewData?.columnCount,
@@ -800,7 +823,10 @@ function buildProjectionSourceNode({
         captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
         captionDimensionsTex: dimensionCaption.tex,
         captionDimensionsText: dimensionCaption.text,
-        visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+        visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+        metadata: {
+            disableEdgeOrnament: true
+        }
     });
 }
 
@@ -848,8 +874,8 @@ function buildProjectionStageNode({
             role: 'x-ln-copy',
             branchKey: projectionKind
         }),
-        labelTex: 'X_{\\ln}',
-        labelText: 'X_ln',
+        labelTex: 'x_{\\ln}',
+        labelText: 'x_ln',
         rowItems: buildProjectionInputRowItems(previewData.rows, baseSemantic, projectionKind),
         rowCount: previewData.rowCount,
         compactWidth: xLnDimensions.compactWidth,
@@ -1209,7 +1235,42 @@ function buildAttentionStageNode({
         }
     });
 
-    const headOutputStageNode = Array.isArray(scoreStage.valueRows) && Array.isArray(scoreStage.headOutputRows)
+    const headOutputNode = Array.isArray(scoreStage.valueRows) && Array.isArray(scoreStage.headOutputRows)
+        ? createVectorStripMatrixNode({
+            role: 'attention-head-output',
+            semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output', stage: 'head-output' }),
+            labelTex: scoreStage.headOutputLabelTex,
+            labelText: scoreStage.headOutputLabelTex,
+            rowItems: buildGradientRowItems(
+                scoreStage.headOutputRows,
+                buildSemantic(attentionSemantic, { stage: 'attention-head-output' }),
+                'attention-head-output-row'
+            ),
+            rowCount: scoreStage.headOutputRowCount,
+            columnCount: scoreStage.headOutputColumnCount,
+            compactWidth: attentionVectorDimensions.compactWidth,
+            rowHeight: attentionVectorDimensions.rowHeight,
+            captionPosition: 'bottom',
+            captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+            visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT,
+            metadata: {
+                disableEdgeOrnament: true
+            }
+        })
+        : null;
+    const headOutputOutgoingSpacerNode = headOutputNode
+        ? createHiddenSpacer({
+            semantic: buildSemantic(attentionSemantic, {
+                stage: 'head-output',
+                role: 'outgoing-arrow-spacer'
+            }),
+            role: 'outgoing-arrow-spacer',
+            width: isSmallScreen ? OUTGOING_ARROW_SPACER_WIDTH_SMALL : OUTGOING_ARROW_SPACER_WIDTH,
+            height: 1
+        })
+        : null;
+
+    const headOutputStageNode = headOutputNode
         ? createGroupNode({
             role: 'attention-head-output-stage',
             semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output-stage', stage: 'head-output' }),
@@ -1281,24 +1342,8 @@ function buildAttentionStageNode({
                     text: '=',
                     visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
                 }),
-                createVectorStripMatrixNode({
-                    role: 'attention-head-output',
-                    semantic: buildSemantic(attentionSemantic, { role: 'attention-head-output', stage: 'head-output' }),
-                    labelTex: scoreStage.headOutputLabelTex,
-                    labelText: scoreStage.headOutputLabelTex,
-                    rowItems: buildGradientRowItems(
-                        scoreStage.headOutputRows,
-                        buildSemantic(attentionSemantic, { stage: 'attention-head-output' }),
-                        'attention-head-output-row'
-                    ),
-                    rowCount: scoreStage.headOutputRowCount,
-                    columnCount: scoreStage.headOutputColumnCount,
-                    compactWidth: attentionVectorDimensions.compactWidth,
-                    rowHeight: attentionVectorDimensions.rowHeight,
-                    captionPosition: 'bottom',
-                    captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
-                    visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT
-                })
+                headOutputNode,
+                headOutputOutgoingSpacerNode
             ],
             metadata: {
                 gapOverride: isSmallScreen
@@ -1659,6 +1704,67 @@ function buildProjectionIngressConnectorNodes({
     }).filter(Boolean);
 }
 
+function buildEdgeConnectorNodes({
+    baseSemantic,
+    projectionSourceNode = null,
+    incomingArrowSpacerNode = null,
+    headOutputNode = null,
+    outgoingArrowSpacerNode = null
+} = {}) {
+    const connectorNodes = [];
+
+    if (incomingArrowSpacerNode && projectionSourceNode) {
+        connectorNodes.push(
+            createConnectorNode({
+                role: 'connector-source-xln',
+                semantic: buildSemantic(baseSemantic, {
+                    stage: 'connector-source-xln',
+                    role: 'connector-source-xln'
+                }),
+                source: createAnchorRef(incomingArrowSpacerNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+                target: createAnchorRef(projectionSourceNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+                route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+                gap: 0,
+                targetGap: PROJECTION_XLN_TARGET_GAP,
+                visual: {
+                    styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                    stroke: MHSA_CONNECTOR_STROKE
+                },
+                metadata: {
+                    preserveColor: true,
+                    strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE
+                }
+            })
+        );
+    }
+
+    if (headOutputNode && outgoingArrowSpacerNode) {
+        connectorNodes.push(
+            createConnectorNode({
+                role: 'connector-head-output-outgoing',
+                semantic: buildSemantic(baseSemantic, {
+                    stage: 'connector-head-output-outgoing',
+                    role: 'connector-head-output-outgoing'
+                }),
+                source: createAnchorRef(headOutputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+                target: createAnchorRef(outgoingArrowSpacerNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+                route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+                gap: 0,
+                sourceGap: HEAD_OUTPUT_EDGE_SOURCE_GAP,
+                visual: {
+                    styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                    stroke: MHSA_CONNECTOR_STROKE
+                },
+                metadata: {
+                    preserveColor: true
+                }
+            })
+        );
+    }
+
+    return connectorNodes;
+}
+
 function buildConnectorNodes({
     baseSemantic,
     layoutMetrics,
@@ -1936,12 +2042,23 @@ export function buildMhsaSceneModel({
         })
         : null;
 
+    const incomingArrowSpacerNode = createHiddenSpacer({
+        semantic: buildSemantic(baseSemantic, {
+            stage: 'projection-sidecar',
+            role: 'incoming-arrow-spacer'
+        }),
+        role: 'incoming-arrow-spacer',
+        width: isSmallScreen ? INCOMING_ARROW_SPACER_WIDTH_SMALL : INCOMING_ARROW_SPACER_WIDTH,
+        height: 1
+    });
+
     const projectionSidecarNode = createGroupNode({
         role: 'projection-sidecar',
         semantic: buildSemantic(baseSemantic, { stage: 'projection-sidecar', role: 'projection-sidecar' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
         gapKey: 'projection',
         children: [
+            incomingArrowSpacerNode,
             projectionSourceNode,
             projectionStackNode
         ],
@@ -1969,12 +2086,21 @@ export function buildMhsaSceneModel({
         })
     ];
 
+    const edgeHeadOutputNode = findNestedNodeByRole(attentionNode, 'attention-head-output');
+    const edgeHeadOutputOutgoingSpacerNode = findNestedNodeByRole(attentionNode, 'outgoing-arrow-spacer');
     const connectorNodes = buildProjectionIngressConnectorNodes({
         baseSemantic,
         layoutMetrics: resolvedLayoutMetrics,
         projectionNodes,
         sourceNode: projectionSourceNode
     });
+    connectorNodes.unshift(...buildEdgeConnectorNodes({
+        baseSemantic,
+        projectionSourceNode,
+        incomingArrowSpacerNode,
+        headOutputNode: edgeHeadOutputNode,
+        outgoingArrowSpacerNode: edgeHeadOutputOutgoingSpacerNode
+    }));
     if (attentionRootNode) {
         connectorNodes.push(...buildConnectorNodes({
             baseSemantic,

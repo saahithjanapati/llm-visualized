@@ -25,6 +25,7 @@ import {
     KV_CACHE_INFO_REQUEST_EVENT,
     buildKvCacheOverlayBadgeText,
 } from './kvCacheInfoUtils.js';
+import { initTouchClickFallback } from './touchClickFallback.js';
 import { getTopEmbeddingActivationEasedProgress } from '../utils/topEmbeddingTimingUtils.js';
 
 // Initializes status overlay and equations panel updates.
@@ -64,6 +65,12 @@ export function initStatusOverlay(pipeline, NUM_LAYERS) {
             }));
         });
         statusDiv.append(statusTextEl, statusKvCacheLink);
+        // Touchscreens occasionally miss the synthetic click on this HUD link,
+        // so mirror the panel/modal fallback path and activate on pointerdown.
+        initTouchClickFallback(statusDiv, {
+            selector: '.status-overlay__kv-link',
+            activateOnPointerDownSelector: '.status-overlay__kv-link'
+        });
     }
 
     const colorHex = (hex) => `#${Number(hex).toString(16).padStart(6, '0')}`;

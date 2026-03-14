@@ -35,6 +35,7 @@ import {
     resolveAttentionStageKeyForRole,
     resolveProjectionLabel
 } from './mhsaDetailHoverInfo.js';
+import { resolvePostLayerNormResidualLabel } from '../utils/layerNormLabels.js';
 import { resolveMhsaDetailHoverEntity } from './mhsaDetailHoverEntity.js';
 
 const PROJECTION_STAGE_PATH_PRESETS = Object.freeze({
@@ -277,10 +278,11 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
         columnSelections
     }, options);
     if (role === 'x-ln-copy') {
+        const info = buildPostLayerNormResidualHoverInfo(node, rowHit.rowItem);
         return {
             ...result,
-            label: 'Post LayerNorm Residual Vector',
-            info: buildPostLayerNormResidualHoverInfo(node, rowHit.rowItem)
+            label: info?.activationData?.label || result.label,
+            info
         };
     }
     if (role === 'projection-output' || role === 'attention-query-source') {
@@ -364,16 +366,50 @@ function buildWeightedOutputRowResult(index = null, node = null, rowHit = null, 
     }, options);
 }
 
+function findOutputProjectionHeadConnectorId(index = null, headIndex = null) {
+    const safeHeadIndex = Number.isFinite(headIndex) ? Math.max(0, Math.floor(headIndex)) : null;
+    if (!index?.nodesById || !Number.isFinite(safeHeadIndex)) return '';
+    for (const node of index.nodesById.values()) {
+        if (node?.role !== 'head-output-connector') continue;
+        const nodeHeadIndex = Number.isFinite(node?.semantic?.headIndex)
+            ? Math.max(0, Math.floor(node.semantic.headIndex))
+            : null;
+        if (nodeHeadIndex === safeHeadIndex) {
+            return node.id;
+        }
+    }
+    return '';
+}
+
+function buildOutputProjectionHeadOutputRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    if (!Number.isFinite(rowIndex)) return null;
+    const connectorId = findOutputProjectionHeadConnectorId(index, node?.semantic?.headIndex);
+    return buildPathFocusResult(index, {
+        label: 'Attention Weighted Sum',
+        info: buildWeightedSumHoverInfo(node, rowHit.rowItem),
+        extraConnectorIds: connectorId ? [connectorId] : [],
+        rowSelections: [{
+            nodeId: node.id,
+            rowIndex
+        }]
+    }, options);
+}
+
 function buildProjectionSourceRowResult(index = null, rowHit = null, options = null) {
     if (!index || !rowHit) return null;
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
     const transposeSelections = buildAttentionKeyTransposeSelections(index, rowIndex);
+    const info = buildPostLayerNormResidualHoverInfo(
+        index?.nodesById?.get(index?.singleNodeIds?.projectionSourceXln || ''),
+        rowHit.rowItem
+    );
     return buildPathFocusResult(index, {
-        label: 'Post LayerNorm Residual Vector',
-        info: buildPostLayerNormResidualHoverInfo(
-            index?.nodesById?.get(index?.singleNodeIds?.projectionSourceXln || ''),
-            rowHit.rowItem
-        ),
+        label: info?.activationData?.label || resolvePostLayerNormResidualLabel({
+            stage: info?.activationData?.stage || rowHit?.rowItem?.semantic?.stage || ''
+        }),
+        info,
         descriptors: ['projectionSourceAll'],
         rowSelections: [
             ...buildProjectionSourceRowSelections(index, rowIndex),
@@ -606,6 +642,10 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
             label: 'Attention Weighted Sum',
             info: buildWeightedSumHoverInfo(entity.node, entity.rowHit.rowItem)
         }, options);
+    }
+
+    if (entity.type === 'output-projection-head-output-row') {
+        return buildOutputProjectionHeadOutputRowResult(index, entity.node, entity.rowHit, options);
     }
 
     if (entity.type === 'projection-weight') {

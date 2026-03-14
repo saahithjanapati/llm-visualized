@@ -1,7 +1,9 @@
 import {
     expandLayerNormLabel,
     formatLayerNormParamLabel,
+    isPostLayerNormResidualSelection,
     resolveLayerNormKind,
+    resolvePostLayerNormResidualLabel,
     resolveLayerNormParamSpec
 } from '../utils/layerNormLabels.js';
 
@@ -48,14 +50,15 @@ export function normalizeSelectionLabel(label, selectionInfo = null) {
     const stageLower = String(activation?.stage || '').toLowerCase();
     const explicitQkvLabel = hasExplicitQkvVectorLabel(lower);
 
-    const isPostLayerNormResidual = !explicitQkvLabel && (
-        lower.includes('post-layernorm residual')
-        || lower.includes('post layernorm residual')
-        || stageLower === 'ln1.shift'
-        || stageLower === 'ln2.shift'
-    );
+    const isPostLayerNormResidual = !explicitQkvLabel && isPostLayerNormResidualSelection({
+        label: raw,
+        stage: activation?.stage || ''
+    });
     if (isPostLayerNormResidual) {
-        return 'Post LayerNorm Residual Vector';
+        return resolvePostLayerNormResidualLabel({
+            label: raw,
+            stage: activation?.stage || ''
+        });
     }
 
     const isEmbeddingSum = lower.includes('embedding sum') || stageLower.startsWith('embedding.sum');
@@ -86,8 +89,13 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
     const raw = String(label || '');
     const lower = raw.toLowerCase();
     const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
-    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
-        return raw;
+    const activationStage = getActivationDataFromSelection(selectionInfo)?.stage || '';
+    if (isPostLayerNormResidualSelection({ label: raw, stage: activationStage })) {
+        return resolvePostLayerNormResidualLabel({
+            label: raw,
+            stage: activationStage,
+            explicitKind: findUserDataString(selectionInfo, 'layerNormKind')
+        });
     }
     const explicitKind = findUserDataString(selectionInfo, 'layerNormKind');
     const paramSpec = resolveLayerNormParamSpec({
@@ -335,7 +343,10 @@ export function isSelfAttentionSelection(label, selectionInfo) {
     if (isAttentionScoreSelection(label, selectionInfo)) return true;
     if (selectionInfo?.kind === 'mergedKV') return true;
     // Keep pre-QKV residual copies out of the attention score panel while they travel to Q/K/V.
-    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) return false;
+    if (isPostLayerNormResidualSelection({
+        label,
+        stage: getActivationDataFromSelection(selectionInfo)?.stage || ''
+    })) return false;
     if (lower.includes('query vector') || lower.includes('key vector') || lower.includes('value vector')) return true;
     if (lower.includes('query weight matrix') || lower.includes('key weight matrix') || lower.includes('value weight matrix')) return true;
     if (lower.includes('merged key vectors') || lower.includes('merged value vectors')) return true;

@@ -40,6 +40,7 @@ import {
 import { buildHeadDetailSceneModel } from './buildHeadDetailSceneModel.js';
 import { buildMlpDetailSceneModel } from './buildMlpDetailSceneModel.js';
 import { buildMhsaSceneModel } from './buildMhsaSceneModel.js';
+import { buildOutputProjectionDetailSceneModel } from './buildOutputProjectionDetailSceneModel.js';
 import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
@@ -324,18 +325,6 @@ function buildHeadDetailPreview({
     };
 }
 
-function buildConcatenateDetailPreview({
-    concatDetailTarget = null
-} = {}) {
-    const resolvedTarget = normalizeConcatDetailTarget(concatDetailTarget);
-    if (!resolvedTarget) {
-        return null;
-    }
-    return {
-        arrowCount: NUM_HEAD_SETS_LAYER
-    };
-}
-
 function buildOutputProjectionDetailPreview({
     outputProjectionDetailTarget = null
 } = {}) {
@@ -344,7 +333,7 @@ function buildOutputProjectionDetailPreview({
         return null;
     }
     return {
-        arrowCount: 1
+        arrowCount: NUM_HEAD_SETS_LAYER
     };
 }
 
@@ -788,48 +777,71 @@ function buildMhsaModule({
 function buildOutputProjectionModule({
     layerIndex = 0
 } = {}) {
-    return createModuleCardGroup({
-        semantic: {
-            componentKind: 'output-projection',
-            layerIndex,
-            stage: 'attn-out',
-            role: 'module'
-        },
-        title: 'Output Projection',
-        styleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION,
-        cardRole: 'projection-weight',
-        cardWidth: 110,
-        cardHeight: 86,
-        cardCornerRadius: 14,
+    const semantic = {
+        componentKind: 'output-projection',
+        layerIndex,
+        stage: 'attn-out',
+        role: 'module'
+    };
+    const cardWidth = 110;
+    const cardHeight = 86;
+    const titleMaxWidth = Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2));
+    const cardNode = createMatrixNode({
+        role: 'projection-weight',
+        semantic: buildSemantic(semantic, { role: 'projection-weight' }),
         dimensions: {
             rows: D_MODEL,
             cols: D_MODEL
-        }
-    });
-}
-
-function buildConcatenateModule({
-    layerIndex = 0
-} = {}) {
-    return createModuleCardGroup({
-        semantic: {
-            componentKind: 'mhsa',
-            layerIndex,
-            stage: 'concatenate',
-            role: 'concat'
         },
-        title: 'Concatenate',
-        styleKey: VIEW2D_STYLE_KEYS.CONCATENATE,
-        cardRole: 'concat-card',
-        cardWidth: 124,
-        cardHeight: 38,
-        cardCornerRadius: 10,
-        textStyleKey: VIEW2D_STYLE_KEYS.LABEL,
-        dimensions: {
-            rows: NUM_HEAD_SETS_LAYER,
-            cols: D_HEAD
-        }
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.OUTPUT_PROJECTION
+        },
+        metadata: mergeMetadata(
+            createCardMetadata(cardWidth, cardHeight, {
+                cornerRadius: 14
+            })
+        )
     });
+
+    return {
+        node: createGroupNode({
+            role: semantic.role || 'module',
+            semantic,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            children: [
+                cardNode,
+                createGroupNode({
+                    role: 'module-title-stack',
+                    semantic: buildSemantic(semantic, { role: 'module-title-stack' }),
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+                    gapKey: 'default',
+                    children: [
+                        createFittedLabelNode({
+                            role: 'module-title-top',
+                            semantic: buildSemantic(semantic, { role: 'module-title-top' }),
+                            text: 'Output',
+                            styleKey: VIEW2D_STYLE_KEYS.LABEL,
+                            maxWidth: titleMaxWidth
+                        }),
+                        createFittedLabelNode({
+                            role: 'module-title-bottom',
+                            semantic: buildSemantic(semantic, { role: 'module-title-bottom' }),
+                            text: 'Projection',
+                            styleKey: VIEW2D_STYLE_KEYS.LABEL,
+                            maxWidth: titleMaxWidth
+                        })
+                    ],
+                    metadata: {
+                        gapOverride: 0
+                    }
+                })
+            ]
+        }),
+        cardNode
+    };
 }
 
 function buildResidualAddModule({
@@ -849,23 +861,71 @@ function buildResidualAddModule({
 function buildMlpModule({
     layerIndex = 0
 } = {}) {
-    return createModuleCardGroup({
-        semantic: {
-            componentKind: 'mlp',
-            layerIndex,
-            stage: 'mlp',
-            role: 'module'
-        },
-        title: 'Multilayer Perceptron',
-        styleKey: VIEW2D_STYLE_KEYS.MLP,
-        cardWidth: 148,
-        cardHeight: 92,
-        cardCornerRadius: 14,
+    const semantic = {
+        componentKind: 'mlp',
+        layerIndex,
+        stage: 'mlp',
+        role: 'module'
+    };
+    const cardWidth = 148;
+    const cardHeight = 92;
+    const titleMaxWidth = Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2));
+    const cardNode = createMatrixNode({
+        role: 'module-card',
+        semantic: buildSemantic(semantic, { role: 'module-card' }),
         dimensions: {
             rows: D_MODEL,
             cols: D_MODEL * 4
-        }
+        },
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.MLP
+        },
+        metadata: mergeMetadata(
+            createCardMetadata(cardWidth, cardHeight, {
+                cornerRadius: 14
+            })
+        )
     });
+
+    return {
+        node: createGroupNode({
+            role: semantic.role || 'module',
+            semantic,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            children: [
+                cardNode,
+                createGroupNode({
+                    role: 'module-title-stack',
+                    semantic: buildSemantic(semantic, { role: 'module-title-stack' }),
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+                    gapKey: 'default',
+                    children: [
+                        createFittedLabelNode({
+                            role: 'module-title-top',
+                            semantic: buildSemantic(semantic, { role: 'module-title-top' }),
+                            text: 'Multilayer',
+                            styleKey: VIEW2D_STYLE_KEYS.LABEL,
+                            maxWidth: titleMaxWidth
+                        }),
+                        createFittedLabelNode({
+                            role: 'module-title-bottom',
+                            semantic: buildSemantic(semantic, { role: 'module-title-bottom' }),
+                            text: 'Perceptron',
+                            styleKey: VIEW2D_STYLE_KEYS.LABEL,
+                            maxWidth: titleMaxWidth
+                        })
+                    ],
+                    metadata: {
+                        gapOverride: 0
+                    }
+                })
+            ]
+        }),
+        cardNode
+    };
 }
 
 function buildLayerGroup({
@@ -885,7 +945,6 @@ function buildLayerGroup({
     const COLUMN_WIDTHS = {
         residual: 136,
         heads: 200,
-        concat: 144,
         outProj: 152,
         addIn: 80,
         ln2: 148,
@@ -917,9 +976,6 @@ function buildLayerGroup({
         title: 'LayerNorm 1'
     });
     const mhsaModule = buildMhsaModule({
-        layerIndex
-    });
-    const concatenateModule = buildConcatenateModule({
         layerIndex
     });
     const outputProjectionModule = buildOutputProjectionModule({
@@ -977,11 +1033,6 @@ function buildLayerGroup({
                 height: TOP_ROW_HEIGHT
             }),
             createFixedWidthColumn({
-                semantic: buildSemantic(layerSemantic, { stage: 'top-concat-space', role: 'top-concat-space' }),
-                width: COLUMN_WIDTHS.concat,
-                height: TOP_ROW_HEIGHT
-            }),
-            createFixedWidthColumn({
                 semantic: buildSemantic(layerSemantic, { stage: 'top-outproj-space', role: 'top-outproj-space' }),
                 width: COLUMN_WIDTHS.outProj,
                 height: TOP_ROW_HEIGHT
@@ -1032,13 +1083,6 @@ function buildLayerGroup({
                 height: 360,
                 align: 'top',
                 child: mhsaModule.node
-            }),
-            createFixedWidthColumn({
-                semantic: buildSemantic(layerSemantic, { stage: 'bottom-concat', role: 'bottom-concat' }),
-                width: COLUMN_WIDTHS.concat,
-                height: 96,
-                align: 'center',
-                child: concatenateModule.node
             }),
             createFixedWidthColumn({
                 semantic: buildSemantic(layerSemantic, { stage: 'bottom-outproj', role: 'bottom-outproj' }),
@@ -1123,14 +1167,9 @@ function buildLayerGroup({
         })),
         ...mhsaModule.headCardNodes.map((headCardNode, headIndex) => ({
             from: headCardNode,
-            to: concatenateModule.cardNode,
-            key: `layer-${layerIndex}-head-${headIndex}-concat`
-        })),
-        {
-            from: concatenateModule.cardNode,
             to: outputProjectionModule.cardNode,
-            key: `layer-${layerIndex}-concat-outproj`
-        },
+            key: `layer-${layerIndex}-head-${headIndex}-outproj`
+        })),
         {
             from: outputProjectionModule.cardNode,
             to: postAttentionAdd.cardNode,
@@ -1374,16 +1413,19 @@ export function buildTransformerSceneModel({
     const resolvedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : NUM_LAYERS;
     const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
     const resolvedTokens = visualTokens || resolveView2dVisualTokens();
-    const requestedOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget);
-    const requestedConcatDetailTarget = requestedOutputProjectionDetailTarget
-        ? null
-        : normalizeConcatDetailTarget(concatDetailTarget);
-    const requestedMlpDetailTarget = (requestedOutputProjectionDetailTarget || requestedConcatDetailTarget)
+    const redirectedConcatDetailTarget = normalizeConcatDetailTarget(concatDetailTarget);
+    const requestedOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget)
+        || (
+            redirectedConcatDetailTarget
+                ? { layerIndex: redirectedConcatDetailTarget.layerIndex }
+                : null
+        );
+    const requestedConcatDetailTarget = null;
+    const requestedMlpDetailTarget = requestedOutputProjectionDetailTarget
         ? null
         : normalizeMlpDetailTarget(mlpDetailTarget);
     const requestedHeadDetailTarget = (
         requestedOutputProjectionDetailTarget
-        || requestedConcatDetailTarget
         || requestedMlpDetailTarget
     )
         ? null
@@ -1414,12 +1456,19 @@ export function buildTransformerSceneModel({
         visualTokens: resolvedTokens,
         isSmallScreen
     });
-    const concatDetailPreview = buildConcatenateDetailPreview({
-        concatDetailTarget: resolvedConcatDetailTarget
-    });
+    const concatDetailPreview = null;
     const outputProjectionDetailPreview = buildOutputProjectionDetailPreview({
         outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget
     });
+    const outputProjectionDetailScene = resolvedOutputProjectionDetailTarget
+        ? buildOutputProjectionDetailSceneModel({
+            activationSource,
+            outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget,
+            tokenRefs,
+            visualTokens: resolvedTokens,
+            isSmallScreen
+        })
+        : null;
     const mlpDetailScene = resolvedMlpDetailTarget
         ? buildMlpDetailSceneModel({
             activationSource,
@@ -1525,6 +1574,7 @@ export function buildTransformerSceneModel({
             concatDetailPreview,
             outputProjectionDetailTarget: resolvedOutputProjectionDetailTarget,
             outputProjectionDetailPreview,
+            outputProjectionDetailScene,
             mlpDetailTarget: resolvedMlpDetailTarget,
             mlpDetailScene
         }

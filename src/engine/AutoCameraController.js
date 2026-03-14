@@ -107,15 +107,22 @@ export class AutoCameraController {
         const nextValue = !!enabled;
         if (nextValue === this._autoCameraFollow) {
             if (nextValue) {
-                if (this._startupCameraOverviewPending) {
+                const hasLiveFollowReference = resetView && this._hasActiveFollowReference();
+                if (this._startupCameraOverviewPending && !hasLiveFollowReference) {
                     if (immediate) {
                         this._applyAbsoluteCameraPose(this._overviewCameraPosition, this._overviewCameraTarget);
                     }
                     this._updateCameraOffsetOverlay();
                     return;
                 }
+                if (hasLiveFollowReference) {
+                    this._startupCameraOverviewPending = false;
+                }
                 if (resetView) {
-                    this._applyFollowReset({ smoothReset });
+                    this._applyFollowReset({
+                        smoothReset,
+                        preferLiveSemanticView: hasLiveFollowReference
+                    });
                 }
                 if (immediate) {
                     this._updateAutoCameraFollow();
@@ -133,13 +140,20 @@ export class AutoCameraController {
             this._resetAutoCameraReferenceMotion();
             this._autoCameraPostAddLockActive = false;
             this._autoCameraPostAddLockUntilMs = 0;
+            const hasLiveFollowReference = resetView && this._hasActiveFollowReference();
             if (!this._startupCameraIntroPlayed
                 && isFiniteVector3(this._overviewCameraPosition)
-                && isFiniteVector3(this._overviewCameraTarget)) {
+                && isFiniteVector3(this._overviewCameraTarget)
+                && !hasLiveFollowReference) {
                 this._startupCameraOverviewPending = true;
+            } else {
+                this._startupCameraOverviewPending = false;
             }
             if (resetView) {
-                this._applyFollowReset({ smoothReset });
+                this._applyFollowReset({
+                    smoothReset,
+                    preferLiveSemanticView: hasLiveFollowReference
+                });
             }
         }
         if (this._autoCameraFollow) {
@@ -166,7 +180,7 @@ export class AutoCameraController {
         return this._autoCameraViewKey || 'default';
     }
 
-    _applyFollowReset({ smoothReset = false } = {}) {
+    _applyFollowReset({ smoothReset = false, preferLiveSemanticView = false } = {}) {
         this._updateAutoCameraScaledOffsets();
         this._autoCameraSmoothValid = false;
         this._resetAutoCameraReferenceMotion();
@@ -188,16 +202,22 @@ export class AutoCameraController {
             // right now, then blend from the live camera pose to that target.
             this._autoCameraForceEmbedVocabStartLock = false;
             const resetRawViewKey = this._resolveAutoCameraViewKey() || fallbackViewKey;
-            const resetViewKey = this._resolveStableAutoCameraViewKey(
-                resetRawViewKey,
-                this._autoCameraViewContext
-            ) || fallbackViewKey;
+            const resetViewKey = preferLiveSemanticView
+                ? resetRawViewKey
+                : (this._resolveStableAutoCameraViewKey(
+                    resetRawViewKey,
+                    this._autoCameraViewContext
+                ) || fallbackViewKey);
             const {
                 cameraOffset: resetCameraOffset,
                 targetOffset: resetTargetOffset
             } = this._resolveAutoCameraOffsetsForViewKey(resetViewKey, {});
 
             this._autoCameraViewKey = resetViewKey;
+            if (preferLiveSemanticView) {
+                this._autoCameraViewPendingKey = resetViewKey;
+                this._autoCameraViewPendingSinceMs = 0;
+            }
             this._autoCameraViewBlendAlphaActive = this._autoCameraViewBlendAlphaTransition;
 
             if (capturedFromCurrentView && this._hasAutoCameraOffsets) {
@@ -221,7 +241,10 @@ export class AutoCameraController {
             return;
         }
 
-        const resetViewKey = fallbackViewKey;
+        this._autoCameraForceEmbedVocabStartLock = useEmbedVocabStart && !preferLiveSemanticView;
+        const resetViewKey = preferLiveSemanticView
+            ? (this._resolveAutoCameraViewKey() || fallbackViewKey)
+            : fallbackViewKey;
         const {
             cameraOffset: resetCameraOffset,
             targetOffset: resetTargetOffset
@@ -234,7 +257,6 @@ export class AutoCameraController {
         this._autoCameraViewFromTargetOffset.copy(resetTargetOffset);
         this._autoCameraViewToCameraOffset.copy(resetCameraOffset);
         this._autoCameraViewToTargetOffset.copy(resetTargetOffset);
-        this._autoCameraForceEmbedVocabStartLock = useEmbedVocabStart;
         this._setAutoCameraOffsets(
             resetCameraOffset,
             resetTargetOffset,
@@ -425,6 +447,11 @@ export class AutoCameraController {
         }
         this._updateAutoCameraFollow();
         this._updateCameraOffsetOverlay();
+    }
+
+    _hasActiveFollowReference(out = this._autoCameraInspectorRef) {
+        const { laneIndex } = this._resolveActiveLanePosition(out);
+        return laneIndex >= 0 && isFiniteVector3(out);
     }
 
     setDevMode(enabled) {

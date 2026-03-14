@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveHoverTokenContext } from './coreHoverTokenContext.js';
+import {
+    resolveHoverLabelSubtitle,
+    resolveHoverTokenContext
+} from './coreHoverTokenContext.js';
 
 function buildAttentionInfo({
     stage,
@@ -69,5 +72,20 @@ describe('resolveHoverTokenContext attention metrics', () => {
             roleLabel: 'Causal mask',
             valueText: '-∞'
         }]);
+    });
+
+    it('keeps post-layernorm residual subtitles for layernorm-specific labels', () => {
+        const subtitle = resolveHoverLabelSubtitle({
+            label: 'Post LayerNorm 2 Residual Vector',
+            info: {
+                activationData: {
+                    stage: 'ln2.shift',
+                    tokenIndex: 1,
+                    layerIndex: 3
+                }
+            }
+        });
+
+        expect(subtitle).toBe('Position 2 • Layer 4');
     });
 });

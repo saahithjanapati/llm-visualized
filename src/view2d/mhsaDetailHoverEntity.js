@@ -97,6 +97,13 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
                 rowHit: hit.rowHit
             };
         }
+        if (node.role === 'head-output-matrix') {
+            return {
+                type: 'output-projection-head-output-row',
+                node,
+                rowHit: hit.rowHit
+            };
+        }
     }
 
     if (projectionKind) {

@@ -10,6 +10,8 @@ import { resolveLogitEntryText } from '../utils/logitTokenText.js';
 import {
     formatLayerNormLabel,
     formatLayerNormParamLabel,
+    isPostLayerNormResidualSelection,
+    resolvePostLayerNormResidualLabel,
     resolveLayerNormParamSpec
 } from '../utils/layerNormLabels.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
@@ -591,7 +593,10 @@ function resolveVectorLength(label, selectionInfo) {
     if (Number.isFinite(qkvOutputLength) && qkvOutputLength > 0) {
         return Math.max(1, Math.floor(qkvOutputLength));
     }
-    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+    if (isPostLayerNormResidualSelection({
+        label,
+        stage: getActivationDataFromSelection(selectionInfo)?.stage || ''
+    })) {
         return D_MODEL;
     }
     if (isMlpMiddleVectorSelection(label, selectionInfo)) {
@@ -5340,7 +5345,7 @@ class SelectionPanel {
             tokenIndex,
             tokenId,
             tokenLabel,
-            defaultLabel: 'Post LayerNorm Residual Vector'
+            defaultLabel: resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' })
         });
         if (instancedSelection) return instancedSelection;
 
@@ -5388,8 +5393,11 @@ class SelectionPanel {
             if (score <= bestScore) return;
 
             const label = typeof node.userData.label === 'string' && node.userData.label.trim().length
-                ? node.userData.label
-                : 'Post LayerNorm Residual Vector';
+                ? resolvePostLayerNormResidualLabel({
+                    label: node.userData.label,
+                    stage: stageLower
+                })
+                : resolvePostLayerNormResidualLabel({ stage: stageLower || 'ln1.shift' });
             const info = {};
             if (node.userData.activationData && typeof node.userData.activationData === 'object') {
                 info.activationData = node.userData.activationData;
@@ -5852,7 +5860,7 @@ class SelectionPanel {
         tokenId = null,
         tokenLabel = ''
     } = {}) {
-        const label = 'Post LayerNorm Residual Vector';
+        const label = resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' });
         const info = {};
         if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
         if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
@@ -12024,7 +12032,10 @@ class SelectionPanel {
         }
 
         const isResidualStreamSelection = lower.includes('residual stream vector')
-            || lower.includes('post layernorm residual vector')
+            || isPostLayerNormResidualSelection({
+                label,
+                stage: activationStage
+            })
             || activationStage.startsWith('embedding.sum')
             || activationStage.startsWith('layer.incoming')
             || activationStage === 'residual.post_attention'

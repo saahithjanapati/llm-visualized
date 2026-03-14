@@ -135,8 +135,8 @@ function buildResidualCopyNode(copyDef, rows = [], {
     return createVectorStripMatrixNode({
         role: 'x-ln-copy',
         semantic,
-        labelTex: branchLabel ? `X_{\\ln}^{${branchLabel}}` : 'X_{\\ln}',
-        labelText: branchLabel ? `X_ln^${branchLabel}` : 'X_ln',
+        labelTex: branchLabel ? `x_{\\ln}^{${branchLabel}}` : 'x_{\\ln}',
+        labelText: branchLabel ? `x_ln^${branchLabel}` : 'x_ln',
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
         captionDimensionsTex: dimensionCaption.tex,
         captionDimensionsText: dimensionCaption.text,

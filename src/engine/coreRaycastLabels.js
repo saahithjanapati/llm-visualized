@@ -1,7 +1,9 @@
 import {
     expandLayerNormLabel,
     formatLayerNormParamLabel,
-    resolveLayerNormKind
+    isPostLayerNormResidualSelection,
+    resolveLayerNormKind,
+    resolvePostLayerNormResidualLabel
 } from '../utils/layerNormLabels.js';
 
 function hasExplicitQkvVectorLabel(lower = '') {
@@ -31,14 +33,12 @@ export function normalizeRaycastLabel(label, info = null, object = null) {
     const stageLower = String(stage).toLowerCase();
     const explicitQkvLabel = hasExplicitQkvVectorLabel(lower);
 
-    const isPostLayerNormResidual = !explicitQkvLabel && (
-        lower.includes('post-layernorm residual')
-        || lower.includes('post layernorm residual')
-        || stageLower === 'ln1.shift'
-        || stageLower === 'ln2.shift'
-    );
+    const isPostLayerNormResidual = !explicitQkvLabel && isPostLayerNormResidualSelection({
+        label: raw,
+        stage
+    });
     if (isPostLayerNormResidual) {
-        return 'Post LayerNorm Residual Vector';
+        return resolvePostLayerNormResidualLabel({ label: raw, stage });
     }
 
     const isEmbeddingSum = lower.includes('embedding sum') || stageLower.startsWith('embedding.sum');
@@ -62,8 +62,14 @@ export function simplifyLayerNormParamHoverLabel(label, info = null, object = nu
         || object?.userData?.activationData?.stage
         || '';
     const stageLower = String(stage).toLowerCase();
-    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
-        return raw;
+    if (isPostLayerNormResidualSelection({ label: raw, stage })) {
+        return resolvePostLayerNormResidualLabel({
+            label: raw,
+            stage,
+            explicitKind: info?.layerNormKind
+                || info?.activationData?.layerNormKind
+                || findObjectUserDataValue(object, 'layerNormKind')
+        });
     }
     const layerNormKind = resolveLayerNormKind({
         label: raw,

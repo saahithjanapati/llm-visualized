@@ -8,6 +8,8 @@ import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
 import { createMhsaDetailSceneIndex, resolveMhsaDetailHoverState } from '../view2d/mhsaDetailInteraction.js';
 import { buildMhsaSceneModel } from '../view2d/model/buildMhsaSceneModel.js';
 import { buildHeadDetailSceneModel } from '../view2d/model/buildHeadDetailSceneModel.js';
+import { buildMlpDetailSceneModel } from '../view2d/model/buildMlpDetailSceneModel.js';
+import { buildOutputProjectionDetailSceneModel } from '../view2d/model/buildOutputProjectionDetailSceneModel.js';
 import { flattenSceneNodes } from '../view2d/schema/sceneTypes.js';
 
 const DEFAULT_TOKEN_LABELS = ['Token A', 'Token B'];
@@ -16,6 +18,10 @@ const ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX = 14;
 const BIAS_LABEL_MIN_SCREEN_FONT_PX = 13;
 function createVectorValues(seed = 0) {
     return Array.from({ length: D_HEAD }, (_, index) => Number((seed + (index * 0.01)).toFixed(4)));
+}
+
+function createResidualValues(seed = 0) {
+    return Array.from({ length: D_MODEL }, (_, index) => Number((seed + (index * 0.004)).toFixed(4)));
 }
 
 function createBaseRows(tokenLabels = DEFAULT_TOKEN_LABELS) {
@@ -283,6 +289,123 @@ function buildHeadDetailFixtures({
         scene,
         layout,
         qCopyNode,
+        canvas,
+        overlay,
+        cleanup() {
+            overlay.destroy();
+            parent.remove();
+        }
+    };
+}
+
+function buildOutputProjectionFixtures({
+    tokenLabels = DEFAULT_TOKEN_LABELS,
+    canvasWidth = 2200,
+    canvasHeight = 1400
+} = {}) {
+    const tokenRefs = tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel
+    }));
+    const scene = buildOutputProjectionDetailSceneModel({
+        activationSource: {
+            getAttentionWeightedSum(_layerIndex = 0, headIndex = 0, tokenIndex = 0, targetLength = D_HEAD) {
+                return Array.from({ length: targetLength }, (_, index) => Number(
+                    ((headIndex * 0.15) + (tokenIndex * 0.07) + (index * 0.01)).toFixed(4)
+                ));
+            }
+        },
+        outputProjectionDetailTarget: {
+            layerIndex: 2
+        },
+        tokenRefs
+    });
+    const layout = buildSceneLayout(scene);
+    const nodes = flattenSceneNodes(scene);
+    const headMatrixNode = nodes.find((node) => (
+        node.role === 'head-output-matrix'
+        && Number(node.semantic?.headIndex) === 0
+    )) || null;
+
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const canvas = document.createElement('canvas');
+    parent.appendChild(canvas);
+    Object.defineProperties(canvas, {
+        clientWidth: { configurable: true, value: canvasWidth },
+        clientHeight: { configurable: true, value: canvasHeight },
+        offsetLeft: { configurable: true, value: 0 },
+        offsetTop: { configurable: true, value: 0 }
+    });
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    const overlay = createTransformerView2dResidualCaptionOverlay({
+        documentRef: document,
+        parent
+    });
+
+    return {
+        scene,
+        layout,
+        headMatrixNode,
+        canvas,
+        overlay,
+        cleanup() {
+            overlay.destroy();
+            parent.remove();
+        }
+    };
+}
+
+function buildMlpDetailFixtures({
+    tokenLabels = DEFAULT_TOKEN_LABELS,
+    canvasWidth = 2200,
+    canvasHeight = 1400
+} = {}) {
+    const tokenRefs = tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel
+    }));
+    const scene = buildMlpDetailSceneModel({
+        activationSource: {
+            getLayerLn2(_layerIndex = 0, _kind = 'shift', tokenIndex = 0, targetLength = D_MODEL) {
+                return createResidualValues(tokenIndex * 0.1).slice(0, targetLength);
+            }
+        },
+        mlpDetailTarget: {
+            layerIndex: 2
+        },
+        tokenRefs
+    });
+    const layout = buildSceneLayout(scene);
+    const nodes = flattenSceneNodes(scene);
+    const inputNode = nodes.find((node) => node.role === 'projection-source-xln') || null;
+
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const canvas = document.createElement('canvas');
+    parent.appendChild(canvas);
+    Object.defineProperties(canvas, {
+        clientWidth: { configurable: true, value: canvasWidth },
+        clientHeight: { configurable: true, value: canvasHeight },
+        offsetLeft: { configurable: true, value: 0 },
+        offsetTop: { configurable: true, value: 0 }
+    });
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    const overlay = createTransformerView2dResidualCaptionOverlay({
+        documentRef: document,
+        parent
+    });
+
+    return {
+        scene,
+        layout,
+        inputNode,
         canvas,
         overlay,
         cleanup() {
@@ -1128,6 +1251,66 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
+    it('scales the MLP x_ln caption with zoom like the MHSA detail captions', () => {
+        const fixtures = buildMlpDetailFixtures();
+        const {
+            scene,
+            layout,
+            inputNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const projectBounds = (scale) => (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * scale,
+                height: bounds.height * scale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(0.34),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutLabelSize = Number.parseFloat(
+                queryCaptionItem(inputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutDimensionsSize = Number.parseFloat(
+                queryCaptionItem(inputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(1.42),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInLabelSize = Number.parseFloat(
+                queryCaptionItem(inputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInDimensionsSize = Number.parseFloat(
+                queryCaptionItem(inputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            expect(zoomedOutLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutDimensionsSize).toBeGreaterThan(0);
+            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(zoomedInDimensionsSize).toBeGreaterThan(zoomedOutDimensionsSize);
+        } finally {
+            cleanup();
+        }
+    });
+
     it('keeps the attention query and transpose captions on the same visual scale', () => {
         const fixtures = buildMhsaFixtures();
         const {
@@ -1305,6 +1488,54 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(zoomedOutLabelSizes.some((labelSize) => (
                 labelSize < ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX
             ))).toBe(true);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps output-projection H_i captions visible even when zoomed far out', () => {
+        const fixtures = buildOutputProjectionFixtures({
+            canvasWidth: 1280,
+            canvasHeight: 840
+        });
+        const {
+            scene,
+            layout,
+            headMatrixNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const projectedScale = 0.06;
+            const headEntry = layout.registry.getNodeEntry(headMatrixNode.id);
+            const targetX = 40;
+            const targetY = 48;
+            const offsetX = targetX - ((Number(headEntry?.contentBounds?.x) || 0) * projectedScale);
+            const offsetY = targetY - ((Number(headEntry?.contentBounds?.y) || 0) * projectedScale);
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: (bounds) => ({
+                    x: (bounds.x * projectedScale) + offsetX,
+                    y: (bounds.y * projectedScale) + offsetY,
+                    width: bounds.width * projectedScale,
+                    height: bounds.height * projectedScale
+                }),
+                visible: true,
+                enabled: true
+            });
+
+            const captionItem = queryCaptionItem(headMatrixNode?.id || '');
+            const labelSize = Number.parseFloat(
+                captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            expect(captionItem).toBeTruthy();
+            expect(captionItem?.hidden).toBe(false);
+            expect(labelSize).toBeGreaterThan(0);
         } finally {
             cleanup();
         }

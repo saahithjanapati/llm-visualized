@@ -1,7 +1,6 @@
-import { buildHueRangeOptions, mapValueToColor, mapValueToHueRange } from '../../utils/colors.js';
+import { mapValueToColor } from '../../utils/colors.js';
 import {
     D_MODEL,
-    FINAL_MLP_COLOR,
     RESIDUAL_COLOR_CLAMP
 } from '../../ui/selectionPanelConstants.js';
 import {
@@ -9,53 +8,33 @@ import {
     createAnchorRef,
     createConnectorNode,
     createGroupNode,
-    createOperatorNode,
+    createMatrixNode,
     createSceneModel,
-    createTextNode,
     VIEW2D_ANCHOR_SIDES,
     VIEW2D_CONNECTOR_ROUTES,
-    VIEW2D_LAYOUT_DIRECTIONS
+    VIEW2D_LAYOUT_DIRECTIONS,
+    VIEW2D_MATRIX_PRESENTATIONS,
+    VIEW2D_MATRIX_SHAPES
 } from '../schema/sceneTypes.js';
 import {
     resolveView2dVisualTokens,
     VIEW2D_STYLE_KEYS
 } from '../theme/visualTokens.js';
-import { createCaptionedCardMatrixNode, resolveRelativeCardSize } from './createCaptionedCardMatrixNode.js';
 import { createVectorStripMatrixNode } from './createResidualVectorMatrixNode.js';
 import { createView2dVectorStripMetadata } from '../shared/vectorStrip.js';
 import { resolveMhsaDimensionVisualExtent } from '../shared/mhsaDimensionSizing.js';
 
-const MLP_HIDDEN_WIDTH = D_MODEL * 4;
 const INPUT_MEASURE_COLS = 12;
 const BASE_VECTOR_ROW_HEIGHT = 8;
 const BASE_VECTOR_ROW_HEIGHT_SMALL = 7;
-const BASE_VECTOR_ROW_GAP = 2;
-const BASE_VECTOR_PADDING_Y = 1;
-const BASE_VECTOR_PADDING_X = 1;
-const GELU_LABEL_FONT_SCALE = 1.16;
-const GELU_LABEL_FONT_SCALE_SMALL = 1.08;
-const PAREN_MIN_FONT_SCALE = 1.85;
-const PAREN_MIN_FONT_SCALE_SMALL = 1.68;
-const PAREN_MAX_FONT_SCALE = 3.1;
-const PAREN_HEIGHT_RATIO = 0.034;
-const COPY_MATRIX_SCALE = 0.92;
-const DOWNSTREAM_COPY_SCALE = 0.9;
-const SCENE_GAP_Y = 68;
-const SCENE_GAP_Y_SMALL = 52;
-const FLOW_GAP = 32;
-const FLOW_GAP_SMALL = 24;
-const INLINE_GAP = 10;
-const INLINE_GAP_SMALL = 8;
-const STAGE_ALIGNMENT_OFFSET = 18;
-const STAGE_ALIGNMENT_OFFSET_SMALL = 14;
-const CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
-
-const MLP_RANGE_OPTIONS = buildHueRangeOptions(FINAL_MLP_COLOR, {
-    valueMin: -2,
-    valueMax: 2,
-    minLightness: 0.34,
-    maxLightness: 0.72
-});
+const BASE_VECTOR_ROW_GAP = 0;
+const BASE_VECTOR_PADDING_Y = 0;
+const BASE_VECTOR_PADDING_X = 0;
+const INPUT_CAPTION_LABEL_SCALE = 0.9;
+const INCOMING_ARROW_SPACER_WIDTH = 60;
+const INCOMING_ARROW_SPACER_WIDTH_SMALL = 52;
+const EDGE_CONNECTOR_STROKE_WIDTH_SCALE = 0.88;
+const INPUT_CONNECTOR_TARGET_GAP = 8;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -97,22 +76,12 @@ function colorToCss(color) {
     return color?.isColor ? `#${color.getHexString()}` : 'transparent';
 }
 
-function buildValueColors(values = [], {
-    clampMax = RESIDUAL_COLOR_CLAMP,
-    rangeOptions = null
-} = {}) {
+function buildGradientCss(values = []) {
     const safeValues = cleanNumberArray(values);
-    if (!safeValues.length) return [];
-    return safeValues.map((value) => colorToCss(
-        rangeOptions
-            ? mapValueToHueRange(value, rangeOptions)
-            : mapValueToColor(value, { clampMax })
-    ));
-}
-
-function buildGradientCss(values = [], options = {}) {
-    const fillColors = buildValueColors(values, options);
-    if (!fillColors.length) return 'none';
+    if (!safeValues.length) return 'none';
+    const fillColors = safeValues.map((value) => colorToCss(mapValueToColor(value, {
+        clampMax: RESIDUAL_COLOR_CLAMP
+    })));
     const stops = fillColors.map((fillColor, index) => {
         const ratio = fillColors.length > 1 ? index / (fillColors.length - 1) : 0;
         return `${fillColor} ${(ratio * 100).toFixed(4)}%`;
@@ -132,171 +101,97 @@ function resolveMeasureCols(columnCount = D_MODEL) {
 }
 
 function resolveCompactWidth(columnCount = D_MODEL, {
-    isSmallScreen = false,
-    scale = 1
+    isSmallScreen = false
 } = {}) {
     const baseExtentPx = isSmallScreen ? 112 : 126;
     const minExtentPx = isSmallScreen ? 84 : 96;
     const maxExtentPx = isSmallScreen ? 196 : 232;
     return Math.max(
         68,
-        Math.round(
-            resolveMhsaDimensionVisualExtent(columnCount, {
-                isSmallScreen,
-                baseDimensionCount: D_MODEL,
-                exponent: 0.34,
-                baseExtentPx,
-                minExtentPx,
-                maxExtentPx
-            }) * Math.max(0.5, Number(scale) || 1)
-        )
+        Math.round(resolveMhsaDimensionVisualExtent(columnCount, {
+            isSmallScreen,
+            baseDimensionCount: D_MODEL,
+            exponent: 0.34,
+            baseExtentPx,
+            minExtentPx,
+            maxExtentPx
+        }))
     );
 }
 
 function resolveVectorMetrics(rowCount = 1, {
     isSmallScreen = false,
-    columnCount = D_MODEL,
-    scale = 1
+    columnCount = D_MODEL
 } = {}) {
-    const baseRowHeight = isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL : BASE_VECTOR_ROW_HEIGHT;
-    const rowHeight = Math.max(4, Math.round(baseRowHeight * Math.max(0.75, Number(scale) || 1)));
-    const rowGap = Math.max(0, Math.round(BASE_VECTOR_ROW_GAP * Math.max(0.75, Number(scale) || 1)));
-    const paddingX = BASE_VECTOR_PADDING_X;
-    const paddingY = BASE_VECTOR_PADDING_Y;
-    const compactWidth = resolveCompactWidth(columnCount, {
-        isSmallScreen,
-        scale
-    });
-    const measureCols = Math.max(
-        8,
-        Math.round(resolveMeasureCols(columnCount) * Math.max(0.78, Number(scale) || 1))
-    );
-    const estimatedHeight = (Math.max(1, rowCount) * rowHeight)
-        + (Math.max(0, rowCount - 1) * rowGap)
-        + (paddingY * 2);
+    const rowHeight = isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL : BASE_VECTOR_ROW_HEIGHT;
     return {
         rowHeight,
-        rowGap,
-        paddingX,
-        paddingY,
-        compactWidth,
-        measureCols,
-        estimatedHeight
+        rowGap: BASE_VECTOR_ROW_GAP,
+        paddingX: BASE_VECTOR_PADDING_X,
+        paddingY: BASE_VECTOR_PADDING_Y,
+        compactWidth: resolveCompactWidth(columnCount, {
+            isSmallScreen
+        }),
+        measureCols: resolveMeasureCols(columnCount),
+        rowCount: Math.max(1, Math.floor(rowCount || 1))
     };
 }
 
-function buildActivationRowItems(tokenRefs = [], {
-    baseSemantic = {},
-    role = 'row',
-    columnCount = D_MODEL,
+function buildResidualRowItems(tokenRefs = [], {
+    layerIndex = null,
     measureCols = INPUT_MEASURE_COLS,
-    clampMax = RESIDUAL_COLOR_CLAMP,
-    rangeOptions = null,
     getVector = () => null
 } = {}) {
     return tokenRefs.map((tokenRef) => {
         const values = sampleVector(getVector(tokenRef) || [], measureCols);
-        const semantic = buildSemantic(baseSemantic, {
-            role,
+        const semantic = {
+            componentKind: 'residual',
+            layerIndex,
+            stage: 'ln2.shift',
+            role: 'x-ln-row',
             rowIndex: tokenRef.rowIndex,
             tokenIndex: tokenRef.tokenIndex
-        });
+        };
+        const label = typeof tokenRef?.tokenLabel === 'string' && tokenRef.tokenLabel.length
+            ? tokenRef.tokenLabel
+            : `Token ${tokenRef.rowIndex + 1}`;
         return {
             id: buildSceneNodeId(semantic),
             index: tokenRef.rowIndex,
-            label: typeof tokenRef?.tokenLabel === 'string' && tokenRef.tokenLabel.length
-                ? tokenRef.tokenLabel
-                : `Token ${tokenRef.rowIndex + 1}`,
+            label,
             semantic,
             rawValues: values,
-            gradientCss: buildGradientCss(values, {
-                clampMax,
-                rangeOptions
-            }),
-            title: typeof tokenRef?.tokenLabel === 'string' && tokenRef.tokenLabel.length
-                ? tokenRef.tokenLabel
-                : `Token ${tokenRef.rowIndex + 1}`
+            gradientCss: buildGradientCss(values),
+            title: label
         };
     });
 }
 
-function createActivationMatrixNode({
-    role = 'mlp-activation',
+function createHiddenSpacer({
     semantic = {},
-    labelTex = '',
-    labelText = '',
-    rowItems = [],
-    rowCount = 1,
-    columnCount = D_MODEL,
-    visualStyleKey = VIEW2D_STYLE_KEYS.MLP,
-    isSmallScreen = false,
-    scale = 1,
-    metadata = null
+    role = 'layout-spacer',
+    width = 1,
+    height = 1
 } = {}) {
-    const vectorMetrics = resolveVectorMetrics(rowCount, {
-        isSmallScreen,
-        columnCount,
-        scale
-    });
-    return createVectorStripMatrixNode({
+    return createMatrixNode({
         role,
         semantic,
-        labelTex,
-        labelText,
-        rowItems,
-        rowCount,
-        columnCount,
-        measureCols: vectorMetrics.measureCols,
-        compactWidth: vectorMetrics.compactWidth,
-        rowHeight: vectorMetrics.rowHeight,
-        captionPosition: 'float-top',
-        captionMinScreenHeightPx: 24,
-        visualStyleKey,
-        stripMetadata: createView2dVectorStripMetadata({
-            compactWidth: vectorMetrics.compactWidth,
-            rowHeight: vectorMetrics.rowHeight,
-            rowGap: vectorMetrics.rowGap,
-            paddingX: vectorMetrics.paddingX,
-            paddingY: vectorMetrics.paddingY,
-            cornerRadius: 10,
-            bandCount: Math.max(12, vectorMetrics.measureCols),
-            hoverScaleY: 1.12,
-            hoverGlowBlur: 10,
-            hideSurface: true
-        }),
-        metadata: {
-            kind: role,
-            ...metadata
-        }
-    });
-}
-
-function createFlowConnector({
-    role = 'connector',
-    semantic = {},
-    fromNode = null,
-    toNode = null,
-    sourceAnchor = VIEW2D_ANCHOR_SIDES.RIGHT,
-    targetAnchor = VIEW2D_ANCHOR_SIDES.LEFT,
-    route = VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
-    gap = 0
-} = {}) {
-    if (!fromNode?.id || !toNode?.id) return null;
-    return createConnectorNode({
-        role,
-        semantic,
-        source: createAnchorRef(fromNode.id, sourceAnchor),
-        target: createAnchorRef(toNode.id, targetAnchor),
-        route,
-        gap,
+        dimensions: {
+            rows: 1,
+            cols: 1
+        },
+        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
         visual: {
-            styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
-            stroke: CONNECTOR_STROKE
+            styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
         },
         metadata: {
-            preserveColor: true,
-            strokeWidthScale: 0.78,
-            arrowTipTouchTarget: true
+            hidden: true,
+            card: {
+                width: Math.max(1, Math.floor(width)),
+                height: Math.max(1, Math.floor(height)),
+                cornerRadius: 0
+            }
         }
     });
 }
@@ -319,455 +214,88 @@ export function buildMlpDetailSceneModel({
         layerIndex,
         stage: 'mlp-detail'
     };
-
-    const inputMetrics = resolveVectorMetrics(rowCount, {
+    const vectorMetrics = resolveVectorMetrics(rowCount, {
         isSmallScreen,
         columnCount: D_MODEL
     });
-    const wideMetrics = resolveVectorMetrics(rowCount, {
-        isSmallScreen,
-        columnCount: MLP_HIDDEN_WIDTH
-    });
-    const wideCopyMetrics = resolveVectorMetrics(rowCount, {
-        isSmallScreen,
-        columnCount: MLP_HIDDEN_WIDTH,
-        scale: COPY_MATRIX_SCALE
-    });
-    const downstreamCopyMetrics = resolveVectorMetrics(rowCount, {
-        isSmallScreen,
-        columnCount: MLP_HIDDEN_WIDTH,
-        scale: DOWNSTREAM_COPY_SCALE
-    });
-    const parenFontScale = Math.max(
-        isSmallScreen ? PAREN_MIN_FONT_SCALE_SMALL : PAREN_MIN_FONT_SCALE,
-        Math.min(
-            PAREN_MAX_FONT_SCALE,
-            wideCopyMetrics.estimatedHeight * PAREN_HEIGHT_RATIO
-        )
-    );
-
-    const residualRows = buildActivationRowItems(tokenRefs, {
-        baseSemantic: {
-            componentKind: 'residual',
-            layerIndex,
-            stage: 'ln2.shift'
-        },
-        role: 'mlp-input-row',
-        columnCount: D_MODEL,
-        measureCols: inputMetrics.measureCols,
+    const residualRows = buildResidualRowItems(tokenRefs, {
+        layerIndex,
+        measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => (
             typeof activationSource?.getLayerLn2 === 'function'
                 ? activationSource.getLayerLn2(layerIndex, 'shift', tokenRef.tokenIndex, D_MODEL)
                 : null
         )
     });
-    const upRows = buildActivationRowItems(tokenRefs, {
-        baseSemantic,
-        role: 'mlp-up-output-row',
-        columnCount: MLP_HIDDEN_WIDTH,
-        measureCols: wideMetrics.measureCols,
-        rangeOptions: MLP_RANGE_OPTIONS,
-        getVector: (tokenRef) => (
-            typeof activationSource?.getMlpUp === 'function'
-                ? activationSource.getMlpUp(layerIndex, tokenRef.tokenIndex, MLP_HIDDEN_WIDTH)
-                : null
-        )
-    });
-    const activationRows = buildActivationRowItems(tokenRefs, {
-        baseSemantic,
-        role: 'mlp-activation-output-row',
-        columnCount: MLP_HIDDEN_WIDTH,
-        measureCols: wideMetrics.measureCols,
-        rangeOptions: MLP_RANGE_OPTIONS,
-        getVector: (tokenRef) => (
-            typeof activationSource?.getMlpActivation === 'function'
-                ? activationSource.getMlpActivation(layerIndex, tokenRef.tokenIndex, MLP_HIDDEN_WIDTH)
-                : null
-        )
-    });
-    const downRows = buildActivationRowItems(tokenRefs, {
-        baseSemantic,
-        role: 'mlp-down-output-row',
-        columnCount: D_MODEL,
-        measureCols: inputMetrics.measureCols,
-        rangeOptions: MLP_RANGE_OPTIONS,
-        getVector: (tokenRef) => (
-            typeof activationSource?.getMlpDown === 'function'
-                ? activationSource.getMlpDown(layerIndex, tokenRef.tokenIndex, D_MODEL)
-                : null
-        )
-    });
 
-    if (!residualRows.length || !upRows.length || !activationRows.length || !downRows.length) {
+    if (!residualRows.length) {
         return null;
     }
 
-    const upWeightCardSize = resolveRelativeCardSize({
-        rows: D_MODEL,
-        cols: MLP_HIDDEN_WIDTH,
-        referenceCount: D_MODEL,
-        referenceExtent: isSmallScreen ? 88 : 96,
-        exponent: 0.38,
-        minWidth: isSmallScreen ? 80 : 90,
-        maxWidth: isSmallScreen ? 210 : 248,
-        minHeight: isSmallScreen ? 84 : 94,
-        maxHeight: isSmallScreen ? 162 : 188
-    });
-    const downWeightCardSize = resolveRelativeCardSize({
-        rows: MLP_HIDDEN_WIDTH,
-        cols: D_MODEL,
-        referenceCount: D_MODEL,
-        referenceExtent: isSmallScreen ? 88 : 96,
-        exponent: 0.38,
-        minWidth: isSmallScreen ? 80 : 90,
-        maxWidth: isSmallScreen ? 158 : 182,
-        minHeight: isSmallScreen ? 112 : 126,
-        maxHeight: isSmallScreen ? 236 : 276
-    });
-
-    const inputNode = createActivationMatrixNode({
-        role: 'mlp-input',
+    const inputNode = createVectorStripMatrixNode({
+        role: 'projection-source-xln',
         semantic: buildSemantic(baseSemantic, {
             stage: 'mlp-input',
-            role: 'mlp-input'
+            role: 'projection-source-xln'
         }),
-        labelTex: 'X_{\\mathrm{LN2}}',
-        labelText: 'X_LN2',
+        labelTex: 'x_{\\ln}',
+        labelText: 'x_ln',
         rowItems: residualRows,
         rowCount,
         columnCount: D_MODEL,
+        measureCols: vectorMetrics.measureCols,
+        compactWidth: vectorMetrics.compactWidth,
+        rowHeight: vectorMetrics.rowHeight,
+        captionPosition: 'bottom',
+        captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
-        isSmallScreen,
-        metadata: {
-            kind: 'mlp-input'
-        }
-    });
-    const upMultiplyNode = createOperatorNode({
-        role: 'mlp-up-multiply',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-up',
-            role: 'mlp-up-multiply',
-            operatorKey: 'times'
+        stripMetadata: createView2dVectorStripMetadata({
+            compactWidth: vectorMetrics.compactWidth,
+            rowHeight: vectorMetrics.rowHeight,
+            rowGap: vectorMetrics.rowGap,
+            paddingX: vectorMetrics.paddingX,
+            paddingY: vectorMetrics.paddingY,
+            cornerRadius: 10,
+            bandCount: Math.max(12, vectorMetrics.measureCols),
+            hoverScaleY: 1.12,
+            hoverGlowBlur: 10,
+            hideSurface: true
         }),
-        text: '×',
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.OPERATOR
-        },
         metadata: {
-            fontScale: isSmallScreen ? 0.96 : 1.04,
-            kind: 'mlp-up-multiply'
-        }
-    });
-    const upWeightNode = createCaptionedCardMatrixNode({
-        role: 'mlp-up-weight',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-up',
-            role: 'mlp-up-weight'
-        }),
-        labelTex: 'W_{\\mathrm{up}}',
-        labelText: 'W_up',
-        rowCount: D_MODEL,
-        columnCount: MLP_HIDDEN_WIDTH,
-        cardWidth: upWeightCardSize.width,
-        cardHeight: upWeightCardSize.height,
-        cardCornerRadius: 16,
-        captionPosition: 'bottom',
-        captionMinScreenHeightPx: 22,
-        captionLabelScale: 0.96,
-        visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
-        metadata: {
-            kind: 'mlp-up-weight'
-        }
-    });
-    const upOutputNode = createActivationMatrixNode({
-        role: 'mlp-up-output',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-up',
-            role: 'mlp-up-output'
-        }),
-        labelTex: 'H_{\\mathrm{up}}',
-        labelText: 'H_up',
-        rowItems: upRows,
-        rowCount,
-        columnCount: MLP_HIDDEN_WIDTH,
-        visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
-        isSmallScreen,
-        metadata: {
-            kind: 'mlp-up-output'
+            kind: 'projection-source-xln',
+            disableEdgeOrnament: true
         }
     });
 
-    const geluLabelNode = createTextNode({
-        role: 'gelu-label',
+    const incomingArrowSpacerNode = createHiddenSpacer({
         semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-activation',
-            role: 'gelu-label'
+            stage: 'mlp-input',
+            role: 'incoming-arrow-spacer'
         }),
-        text: 'GELU',
-        tex: '\\operatorname{GELU}',
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.LABEL
-        },
-        metadata: {
-            fontScale: isSmallScreen ? GELU_LABEL_FONT_SCALE_SMALL : GELU_LABEL_FONT_SCALE,
-            kind: 'gelu-label'
-        }
-    });
-    const geluOpenParenNode = createOperatorNode({
-        role: 'gelu-open-paren',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-activation',
-            role: 'gelu-open-paren'
-        }),
-        text: '(',
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.OPERATOR
-        },
-        metadata: {
-            fontScale: parenFontScale,
-            kind: 'gelu-open-paren'
-        }
-    });
-    const upOutputCopyNode = createActivationMatrixNode({
-        role: 'mlp-up-output-copy',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-activation',
-            role: 'mlp-up-output-copy'
-        }),
-        labelTex: 'H_{\\mathrm{up}}',
-        labelText: 'H_up',
-        rowItems: upRows,
-        rowCount,
-        columnCount: MLP_HIDDEN_WIDTH,
-        visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
-        isSmallScreen,
-        scale: COPY_MATRIX_SCALE,
-        metadata: {
-            kind: 'mlp-up-output-copy'
-        }
-    });
-    const geluCloseParenNode = createOperatorNode({
-        role: 'gelu-close-paren',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-activation',
-            role: 'gelu-close-paren'
-        }),
-        text: ')',
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.OPERATOR
-        },
-        metadata: {
-            fontScale: parenFontScale,
-            kind: 'gelu-close-paren'
-        }
-    });
-    const geluCallNode = createGroupNode({
-        role: 'gelu-call',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-activation',
-            role: 'gelu-call'
-        }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-        gapKey: 'inline',
-        metadata: {
-            gapOverride: isSmallScreen ? INLINE_GAP_SMALL : INLINE_GAP
-        },
-        children: [
-            geluLabelNode,
-            geluOpenParenNode,
-            upOutputCopyNode,
-            geluCloseParenNode
-        ]
-    });
-    const activationOutputNode = createActivationMatrixNode({
-        role: 'mlp-activation-output',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-activation',
-            role: 'mlp-activation-output'
-        }),
-        labelTex: 'H_{\\mathrm{GELU}}',
-        labelText: 'H_GELU',
-        rowItems: activationRows,
-        rowCount,
-        columnCount: MLP_HIDDEN_WIDTH,
-        visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
-        isSmallScreen,
-        metadata: {
-            kind: 'mlp-activation-output'
-        }
-    });
-    const activationCopyNode = createActivationMatrixNode({
-        role: 'mlp-activation-copy',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-down',
-            role: 'mlp-activation-copy'
-        }),
-        labelTex: 'H_{\\mathrm{GELU}}',
-        labelText: 'H_GELU',
-        rowItems: activationRows,
-        rowCount,
-        columnCount: MLP_HIDDEN_WIDTH,
-        visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
-        isSmallScreen,
-        scale: DOWNSTREAM_COPY_SCALE,
-        metadata: {
-            kind: 'mlp-activation-copy'
-        }
-    });
-    const downMultiplyNode = createOperatorNode({
-        role: 'mlp-down-multiply',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-down',
-            role: 'mlp-down-multiply',
-            operatorKey: 'times'
-        }),
-        text: '×',
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.OPERATOR
-        },
-        metadata: {
-            fontScale: isSmallScreen ? 0.96 : 1.04,
-            kind: 'mlp-down-multiply'
-        }
-    });
-    const downWeightNode = createCaptionedCardMatrixNode({
-        role: 'mlp-down-weight',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-down',
-            role: 'mlp-down-weight'
-        }),
-        labelTex: 'W_{\\mathrm{down}}',
-        labelText: 'W_down',
-        rowCount: MLP_HIDDEN_WIDTH,
-        columnCount: D_MODEL,
-        cardWidth: downWeightCardSize.width,
-        cardHeight: downWeightCardSize.height,
-        cardCornerRadius: 16,
-        captionPosition: 'bottom',
-        captionMinScreenHeightPx: 22,
-        captionLabelScale: 0.96,
-        visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
-        metadata: {
-            kind: 'mlp-down-weight'
-        }
-    });
-    const outputNode = createActivationMatrixNode({
-        role: 'mlp-output',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-output',
-            role: 'mlp-output'
-        }),
-        labelTex: 'Y_{\\mathrm{MLP}}',
-        labelText: 'Y_MLP',
-        rowItems: downRows,
-        rowCount,
-        columnCount: D_MODEL,
-        visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
-        isSmallScreen,
-        metadata: {
-            kind: 'mlp-output'
-        }
+        role: 'incoming-arrow-spacer',
+        width: isSmallScreen ? INCOMING_ARROW_SPACER_WIDTH_SMALL : INCOMING_ARROW_SPACER_WIDTH,
+        height: 1
     });
 
-    const topStageNode = createGroupNode({
-        role: 'mlp-up-stage',
+    const incomingConnectorNode = createConnectorNode({
+        role: 'connector-mlp-input',
         semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-up',
-            role: 'mlp-up-stage'
+            stage: 'connector-mlp-input',
+            role: 'connector-mlp-input'
         }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-        gapKey: 'stage',
+        source: createAnchorRef(incomingArrowSpacerNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+        target: createAnchorRef(inputNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+        route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+        gap: 0,
+        targetGap: INPUT_CONNECTOR_TARGET_GAP,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
+        },
         metadata: {
-            gapOverride: isSmallScreen ? FLOW_GAP_SMALL : FLOW_GAP
-        },
-        children: [
-            inputNode,
-            upMultiplyNode,
-            upWeightNode,
-            upOutputNode
-        ]
+            preserveColor: true,
+            strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE
+        }
     });
-    const bottomStageNode = createGroupNode({
-        role: 'mlp-down-stage',
-        semantic: buildSemantic(baseSemantic, {
-            stage: 'mlp-down',
-            role: 'mlp-down-stage'
-        }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-        gapKey: 'stage',
-        metadata: {
-            gapOverride: isSmallScreen ? FLOW_GAP_SMALL : FLOW_GAP
-        },
-        layout: {
-            anchorAlign: {
-                axis: 'x',
-                selfNodeId: geluCallNode.id,
-                selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
-                targetNodeId: upOutputNode.id,
-                targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
-                offset: isSmallScreen ? STAGE_ALIGNMENT_OFFSET_SMALL : STAGE_ALIGNMENT_OFFSET
-            }
-        },
-        children: [
-            geluCallNode,
-            activationOutputNode,
-            activationCopyNode,
-            downMultiplyNode,
-            downWeightNode,
-            outputNode
-        ]
-    });
-
-    const connectors = [
-        createFlowConnector({
-            role: 'mlp-up-output-flow',
-            semantic: buildSemantic(baseSemantic, {
-                stage: 'mlp-up',
-                role: 'mlp-up-output-flow'
-            }),
-            fromNode: upWeightNode,
-            toNode: upOutputNode
-        }),
-        createFlowConnector({
-            role: 'mlp-up-to-gelu-flow',
-            semantic: buildSemantic(baseSemantic, {
-                stage: 'mlp-activation',
-                role: 'mlp-up-to-gelu-flow'
-            }),
-            fromNode: upOutputNode,
-            toNode: geluCallNode,
-            sourceAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
-            targetAnchor: VIEW2D_ANCHOR_SIDES.TOP,
-            route: VIEW2D_CONNECTOR_ROUTES.VERTICAL
-        }),
-        createFlowConnector({
-            role: 'mlp-gelu-output-flow',
-            semantic: buildSemantic(baseSemantic, {
-                stage: 'mlp-activation',
-                role: 'mlp-gelu-output-flow'
-            }),
-            fromNode: geluCallNode,
-            toNode: activationOutputNode
-        }),
-        createFlowConnector({
-            role: 'mlp-activation-copy-flow',
-            semantic: buildSemantic(baseSemantic, {
-                stage: 'mlp-down',
-                role: 'mlp-activation-copy-flow'
-            }),
-            fromNode: activationOutputNode,
-            toNode: activationCopyNode
-        }),
-        createFlowConnector({
-            role: 'mlp-down-output-flow',
-            semantic: buildSemantic(baseSemantic, {
-                stage: 'mlp-down',
-                role: 'mlp-down-output-flow'
-            }),
-            fromNode: downWeightNode,
-            toNode: outputNode
-        })
-    ].filter(Boolean);
 
     return createSceneModel({
         semantic: buildSemantic(baseSemantic, {
@@ -779,24 +307,22 @@ export function buildMlpDetailSceneModel({
                 semantic: buildSemantic(baseSemantic, {
                     role: 'mlp-detail-stage'
                 }),
-                direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+                direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
                 gapKey: 'default',
-                metadata: {
-                    gapOverride: isSmallScreen ? SCENE_GAP_Y_SMALL : SCENE_GAP_Y
-                },
                 children: [
-                    topStageNode,
-                    bottomStageNode
+                    incomingArrowSpacerNode,
+                    inputNode
                 ]
             }),
             createGroupNode({
-                role: 'mlp-detail-connectors',
+                role: 'connector-layer',
                 semantic: buildSemantic(baseSemantic, {
-                    role: 'mlp-detail-connectors'
+                    stage: 'connector-layer',
+                    role: 'connector-layer'
                 }),
                 direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
                 gapKey: 'default',
-                children: connectors
+                children: [incomingConnectorNode]
             })
         ],
         metadata: {

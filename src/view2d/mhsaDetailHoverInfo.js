@@ -1,4 +1,5 @@
 import { buildAttentionHoverInfo } from '../ui/attentionHoverInfo.js';
+import { resolvePostLayerNormResidualLabel } from '../utils/layerNormLabels.js';
 
 const PROJECTION_KIND_LABELS = Object.freeze({
     q: 'Query',
@@ -97,8 +98,11 @@ export function buildProjectionVectorHoverInfo(node = null, rowItem = null, kind
 
 export function buildPostLayerNormResidualHoverInfo(node = null, rowItem = null) {
     const tokenInfo = createTokenInfo(rowItem) || {};
-    const info = buildProjectionHoverInfo(node, 'Post LayerNorm Residual Vector', {
-        stage: 'ln1.shift',
+    const rowStage = String(rowItem?.semantic?.stage || '').trim().toLowerCase();
+    const activationStage = rowStage === 'ln2.shift' ? 'ln2.shift' : 'ln1.shift';
+    const label = resolvePostLayerNormResidualLabel({ stage: activationStage });
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: activationStage,
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -110,7 +114,7 @@ export function buildPostLayerNormResidualHoverInfo(node = null, rowItem = null)
         ...info,
         activationData: {
             ...(info.activationData || {}),
-            stage: 'ln1.shift',
+            stage: activationStage,
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }

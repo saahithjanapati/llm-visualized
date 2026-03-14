@@ -6,6 +6,17 @@ function normalizeLayerNormKind(kind = null) {
     return null;
 }
 
+function normalizePostLayerNormResidualKind(kind = null) {
+    const safeKind = normalizeLayerNormKind(kind);
+    return safeKind === 'ln1' || safeKind === 'ln2' ? safeKind : null;
+}
+
+function matchPostLayerNormResidualLabel(label = '') {
+    return String(label || '')
+        .toLowerCase()
+        .match(/\bpost[-\s]*layer\s*norm(?:\s*([12]))?\s+residual\b/);
+}
+
 function normalizeLayerNormParam(param = null) {
     const lower = String(param || '').toLowerCase();
     if (lower === 'scale' || lower === 'gamma') return 'scale';
@@ -54,6 +65,58 @@ export function resolveLayerNormKind({
         return 'ln2';
     }
     return null;
+}
+
+export function isPostLayerNormResidualSelection({
+    label = '',
+    stage = ''
+} = {}) {
+    const stageLower = String(stage || '').toLowerCase();
+    return stageLower === 'ln1.shift'
+        || stageLower === 'ln2.shift'
+        || Boolean(matchPostLayerNormResidualLabel(label));
+}
+
+export function resolvePostLayerNormResidualKind({
+    label = '',
+    stage = '',
+    explicitKind = null
+} = {}) {
+    const safeExplicit = normalizePostLayerNormResidualKind(explicitKind);
+    const stageLower = String(stage || '').toLowerCase();
+    if (stageLower === 'ln1.shift') return 'ln1';
+    if (stageLower === 'ln2.shift') return 'ln2';
+
+    const labelMatch = matchPostLayerNormResidualLabel(label);
+    if (!labelMatch) return null;
+    if (labelMatch[1] === '1') return 'ln1';
+    if (labelMatch[1] === '2') return 'ln2';
+    if (safeExplicit) return safeExplicit;
+
+    return normalizePostLayerNormResidualKind(resolveLayerNormKind({
+        label,
+        stage,
+        explicitKind
+    }));
+}
+
+export function formatPostLayerNormResidualLabel(kind = null) {
+    const safeKind = normalizePostLayerNormResidualKind(kind);
+    if (safeKind === 'ln1') return 'Post LayerNorm 1 Residual Vector';
+    if (safeKind === 'ln2') return 'Post LayerNorm 2 Residual Vector';
+    return 'Post LayerNorm Residual Vector';
+}
+
+export function resolvePostLayerNormResidualLabel({
+    label = '',
+    stage = '',
+    explicitKind = null
+} = {}) {
+    return formatPostLayerNormResidualLabel(resolvePostLayerNormResidualKind({
+        label,
+        stage,
+        explicitKind
+    }));
 }
 
 export function formatLayerNormLabel(kind = null) {

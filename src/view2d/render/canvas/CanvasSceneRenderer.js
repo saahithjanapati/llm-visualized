@@ -139,6 +139,10 @@ const VECTOR_STRIP_HIGHLIGHT_STROKE_SCREEN_PX = 0.8;
 const GRID_FOCUSED_CELL_STROKE_SCREEN_PX = 0.92;
 const MATRIX_ORNAMENT_ARROW_GAP_SCREEN_PX = 9;
 const MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX = 30;
+const MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX_INCOMING = 42;
+const MATRIX_ORNAMENT_ARROW_STROKE_SCREEN_PX = 0.88;
+const MATRIX_ORNAMENT_ARROW_HEAD_LENGTH_SCREEN_PX = 6;
+const MATRIX_ORNAMENT_ARROW_HEAD_WING_SCREEN_PX = 3.2;
 
 function parseLinearGradient(input = '') {
     const key = String(input || '');
@@ -2077,8 +2081,12 @@ function drawMatrixEdgeArrow(
     if (!bounds) return;
     const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
     const gap = MATRIX_ORNAMENT_ARROW_GAP_SCREEN_PX / safeWorldScale;
-    const shaftLength = MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX / safeWorldScale;
     const isLeft = String(direction || '').trim().toLowerCase() === 'left';
+    const shaftLength = (
+        isLeft
+            ? MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX_INCOMING
+            : MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX
+    ) / safeWorldScale;
     const anchorX = isLeft
         ? bounds.x - gap
         : bounds.x + bounds.width + gap;
@@ -2106,7 +2114,11 @@ function drawMatrixEdgeArrow(
             pathPoints: [startPoint, endPoint],
             metadata: {
                 strokeWidthScale: 1,
-                preserveColor: true
+                preserveColor: true,
+                fixedScreenStrokeWidthPx: MATRIX_ORNAMENT_ARROW_STROKE_SCREEN_PX,
+                fixedScreenArrowHeadLengthPx: MATRIX_ORNAMENT_ARROW_HEAD_LENGTH_SCREEN_PX,
+                fixedScreenArrowHeadWingPx: MATRIX_ORNAMENT_ARROW_HEAD_WING_SCREEN_PX,
+                disableScreenSnap: true
             }
         },
         config,
@@ -2128,6 +2140,9 @@ function drawMatrixConnectorOrnaments(
     focusAlpha = 1
 ) {
     if (!node || !bounds) return;
+    if (node.metadata?.disableEdgeOrnament === true) {
+        return;
+    }
     if (node.role === 'attention-head-output') {
         drawMatrixEdgeArrow(ctx, bounds, config, worldScale, focusAlpha, {
             direction: 'right'
@@ -2321,17 +2336,26 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
     drawCaption(ctx, entry, node, config, safeWorldScale, safeDetailScale, focusAlpha, fixedTextSizing);
 }
 
-function drawConnectorArrowHead(ctx, startPoint, endPoint, strokeWidth, fillStyle) {
+function drawConnectorArrowHead(ctx, startPoint, endPoint, strokeWidth, fillStyle, {
+    worldScale = 1,
+    fixedScreenLengthPx = null,
+    fixedScreenWingPx = null
+} = {}) {
     if (!startPoint || !endPoint) return;
     const dx = endPoint.x - startPoint.x;
     const dy = endPoint.y - startPoint.y;
     const length = Math.hypot(dx, dy);
     if (!(length > 0.0001)) return;
 
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
     const ux = dx / length;
     const uy = dy / length;
-    const size = Math.max(strokeWidth * 3.6, 6);
-    const wing = Math.max(strokeWidth * 1.7, 3.2);
+    const size = Number.isFinite(fixedScreenLengthPx) && fixedScreenLengthPx > 0
+        ? Number(fixedScreenLengthPx) / safeWorldScale
+        : Math.max(strokeWidth * 3.6, 6);
+    const wing = Number.isFinite(fixedScreenWingPx) && fixedScreenWingPx > 0
+        ? Number(fixedScreenWingPx) / safeWorldScale
+        : Math.max(strokeWidth * 1.7, 3.2);
     const baseX = endPoint.x - (ux * size);
     const baseY = endPoint.y - (uy * size);
     const perpX = -uy;
@@ -2380,19 +2404,37 @@ function drawConnector(
     const strokeWidthScale = Number.isFinite(connectorEntry?.metadata?.strokeWidthScale)
         ? Math.max(0.2, connectorEntry.metadata.strokeWidthScale)
         : 1;
-    const targetScreenWidthPx = safeWorldScale < 0.35
-        ? 0.58
-        : (safeWorldScale < 0.7 ? 0.72 : (safeWorldScale < 1.25 ? 0.88 : 1.02));
+    const fixedScreenStrokeWidthPx = Number.isFinite(connectorEntry?.metadata?.fixedScreenStrokeWidthPx)
+        && connectorEntry.metadata.fixedScreenStrokeWidthPx > 0
+        ? Number(connectorEntry.metadata.fixedScreenStrokeWidthPx)
+        : null;
+    const targetScreenWidthPx = fixedScreenStrokeWidthPx
+        ?? (
+            safeWorldScale < 0.35
+                ? 0.58
+                : (safeWorldScale < 0.7 ? 0.72 : (safeWorldScale < 1.25 ? 0.88 : 1.02))
+        );
     const strokeWidth = (Math.max(0.42, targetScreenWidthPx) * strokeWidthScale * (emphasize ? 1.18 : 1)) / safeWorldScale;
+    const fixedScreenArrowHeadLengthPx = Number.isFinite(connectorEntry?.metadata?.fixedScreenArrowHeadLengthPx)
+        && connectorEntry.metadata.fixedScreenArrowHeadLengthPx > 0
+        ? Number(connectorEntry.metadata.fixedScreenArrowHeadLengthPx)
+        : null;
+    const fixedScreenArrowHeadWingPx = Number.isFinite(connectorEntry?.metadata?.fixedScreenArrowHeadWingPx)
+        && connectorEntry.metadata.fixedScreenArrowHeadWingPx > 0
+        ? Number(connectorEntry.metadata.fixedScreenArrowHeadWingPx)
+        : null;
+    const disableScreenSnap = connectorEntry?.metadata?.disableScreenSnap === true;
     const strokeOpacity = safeWorldScale < 0.35
         ? 0.46
         : (safeWorldScale < 0.7 ? 0.54 : (safeWorldScale < 1.25 ? 0.66 : 0.78));
     const flattenedForegroundStroke = connectorEntry?.metadata?.preserveColor === true
         ? foregroundStroke
         : (flattenColorAgainstBlack(foregroundStroke, strokeOpacity) || foregroundStroke);
-    const snappedPoints = points.map((point) => snapWorldPointToConnectorGrid(point, safeWorldScale));
-    const tailPoint = snappedPoints[Math.max(0, snappedPoints.length - 2)];
-    const headPoint = snappedPoints[snappedPoints.length - 1];
+    const renderPoints = disableScreenSnap
+        ? points
+        : points.map((point) => snapWorldPointToConnectorGrid(point, safeWorldScale));
+    const tailPoint = renderPoints[Math.max(0, renderPoints.length - 2)];
+    const headPoint = renderPoints[renderPoints.length - 1];
     const rawTailPoint = points[Math.max(0, points.length - 2)];
     const rawHeadPoint = points[points.length - 1];
 
@@ -2404,9 +2446,9 @@ function drawConnector(
     ctx.filter = 'none';
     ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
     ctx.beginPath();
-    ctx.moveTo(snappedPoints[0].x, snappedPoints[0].y);
-    for (let index = 1; index < snappedPoints.length; index += 1) {
-        ctx.lineTo(snappedPoints[index].x, snappedPoints[index].y);
+    ctx.moveTo(renderPoints[0].x, renderPoints[0].y);
+    for (let index = 1; index < renderPoints.length; index += 1) {
+        ctx.lineTo(renderPoints[index].x, renderPoints[index].y);
     }
     ctx.lineWidth = strokeWidth;
     ctx.shadowBlur = 0;
@@ -2431,7 +2473,12 @@ function drawConnector(
             tailPoint,
             arrowHeadEndPoint,
             strokeWidth,
-            flattenedForegroundStroke
+            flattenedForegroundStroke,
+            {
+                worldScale: safeWorldScale,
+                fixedScreenLengthPx: fixedScreenArrowHeadLengthPx,
+                fixedScreenWingPx: fixedScreenArrowHeadWingPx
+            }
         );
     }
     ctx.restore();
@@ -2672,6 +2719,7 @@ export class CanvasSceneRenderer {
         this.headDetailSceneState = createPreparedSceneState(
             this.scene?.metadata?.mhsaHeadDetailScene
             || this.scene?.metadata?.headDetailScene
+            || this.scene?.metadata?.outputProjectionDetailScene
             || this.scene?.metadata?.mlpDetailScene
             || null
         );
@@ -2938,7 +2986,7 @@ export class CanvasSceneRenderer {
         try {
             if (
                 headDetailDepthActive
-                && (activeDetailTargetKind === 'head' || activeDetailTargetKind === 'mlp')
+                && ['head', 'mlp', 'output-projection'].includes(activeDetailTargetKind)
                 && this.headDetailSceneState?.layout?.registry
             ) {
                 const detailSceneBounds = this.headDetailSceneState.visibleBounds
@@ -2980,7 +3028,7 @@ export class CanvasSceneRenderer {
                     resolution.width
                 );
                 ctx.save();
-                ctx.fillStyle = '#000';
+                ctx.fillStyle = config.tokens.palette.sceneBackground || 'rgba(0, 0, 0, 0)';
                 ctx.fillRect(0, 0, resolution.width, resolution.height);
                 ctx.translate(detailOffsetX, detailOffsetY);
                 ctx.scale(detailWorldScale, detailWorldScale);

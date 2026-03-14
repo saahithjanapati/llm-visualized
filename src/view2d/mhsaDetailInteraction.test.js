@@ -1471,7 +1471,7 @@ describe('MHSA detail transpose view', () => {
             }
         });
 
-        expect(hoverState?.label).toBe('Post LayerNorm Residual Vector');
+        expect(hoverState?.label).toBe('Post LayerNorm 1 Residual Vector');
         expect(hoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: projectionSourceNode.id,
             rowIndex: 1
@@ -1532,8 +1532,8 @@ describe('MHSA detail transpose view', () => {
             }
         });
 
-        expect(hoverState?.label).toBe('Post LayerNorm Residual Vector');
-        expect(hoverState?.info?.activationData?.label).toBe('Post LayerNorm Residual Vector');
+        expect(hoverState?.label).toBe('Post LayerNorm 1 Residual Vector');
+        expect(hoverState?.info?.activationData?.label).toBe('Post LayerNorm 1 Residual Vector');
         expect(hoverState?.info?.activationData?.stage).toBe('ln1.shift');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(0);
         expect(hoverState?.focusState?.rowSelections).toContainEqual({

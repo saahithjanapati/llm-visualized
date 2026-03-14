@@ -12,7 +12,10 @@ import {
     buildAttentionProjectionEquation
 } from './attentionEquationTextUtils.js';
 import { buildSelectionLayerNormEquation } from './selectionPanelLayerNormEquationTextUtils.js';
-import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
+import {
+    formatLayerNormLabel,
+    isPostLayerNormResidualSelection
+} from '../utils/layerNormLabels.js';
 import { D_MODEL, D_HEAD, VOCAB_SIZE, CONTEXT_LEN } from './selectionPanelConstants.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 import {
@@ -1207,7 +1210,7 @@ function resolveLayerNormEquationSymbols(lower) {
 }
 
 function resolveLayerNormEquationHighlight(lower, stageLower = '') {
-    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+    if (isPostLayerNormResidualSelection({ label: lower, stage: stageLower })) {
         return 'output';
     }
     if (
@@ -1477,8 +1480,7 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         || lower.includes('ln1')
         || lower.includes('ln2')
         || lower.includes('final ln')
-        || lower.includes('post-layernorm residual')
-        || lower.includes('post layernorm residual');
+        || isPostLayerNormResidualSelection({ label, stage: stageLower });
     if (isLayerNormSelection) {
         const layerNormKind = lower.includes('top') || lower.includes('final ln')
             ? 'top'
@@ -1663,7 +1665,12 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('mlp expanded segments')) {
         return MLP_EXPANDED_SEGMENTS_DESCRIPTION;
     }
-    if (lower.includes('layernorm') || lower.includes('layer norm')) {
+    const activationStage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    const isPostLayerNormResidual = isPostLayerNormResidualSelection({
+        label,
+        stage: activationStage
+    });
+    if ((lower.includes('layernorm') || lower.includes('layer norm')) && !isPostLayerNormResidual) {
         if (lower.includes('top')) {
             return buildTopLayerNormDescription(selectionInfo);
         }
@@ -1684,7 +1691,7 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('merged value vectors')) {
         return MERGED_VALUE_VECTORS_DESCRIPTION;
     }
-    if (lower.includes('post-layernorm residual') || lower.includes('post layernorm residual')) {
+    if (isPostLayerNormResidual) {
         if (resolveSelectionLayerNormKind(selectionInfo) === 'ln2') {
             return buildLn2OutputDescription(selectionInfo);
         }

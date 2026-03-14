@@ -1,5 +1,6 @@
 import { resolveTokenChipLabel } from '../utils/tokenChipStyleUtils.js';
 import {
+    isPostLayerNormResidualSelection,
     resolveLayerNormKind,
     resolveLayerNormParamSpec
 } from '../utils/layerNormLabels.js';
@@ -199,12 +200,7 @@ function isResidualStreamHoverSelection(label = '', stage = '') {
 }
 
 function isPostLayerNormResidualHoverSelection(label = '', stage = '') {
-    const lower = String(label || '').toLowerCase();
-    const stageLower = String(stage || '').toLowerCase();
-    return lower.includes('post-layernorm residual')
-        || lower.includes('post layernorm residual')
-        || stageLower === 'ln1.shift'
-        || stageLower === 'ln2.shift';
+    return isPostLayerNormResidualSelection({ label, stage });
 }
 
 function isFinalLayerNormHoverSelection(label = '', info = null, object = null) {
