@@ -1,0 +1,124 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+    resolveDescription,
+    resolveSelectionPreviewEquations
+} from './selectionPanelNarrativeUtils.js';
+import {
+    MLP_DOWN_BIAS_TOOLTIP_LABEL,
+    MLP_UP_BIAS_TOOLTIP_LABEL
+} from '../utils/mlpLabels.js';
+
+describe('selectionPanelNarrativeUtils bias narratives', () => {
+    it('returns bias-specific copy for the MLP up bias term', () => {
+        const selection = {
+            label: MLP_UP_BIAS_TOOLTIP_LABEL,
+            info: {
+                activationData: {
+                    stage: 'mlp.up.bias',
+                    layerIndex: 4
+                }
+            }
+        };
+
+        const description = resolveDescription(MLP_UP_BIAS_TOOLTIP_LABEL, 'vector', selection);
+        expect(description).toContain('b_{\\text{up}}');
+        expect(description).toContain('3,072');
+        expect(description).toContain('shared across every token position');
+    });
+
+    it('returns bias-specific copy for the MLP down bias term', () => {
+        const selection = {
+            label: MLP_DOWN_BIAS_TOOLTIP_LABEL,
+            info: {
+                activationData: {
+                    stage: 'mlp.down.bias',
+                    layerIndex: 4
+                }
+            }
+        };
+
+        const description = resolveDescription(MLP_DOWN_BIAS_TOOLTIP_LABEL, 'vector', selection);
+        expect(description).toContain('b_{\\text{down}}');
+        expect(description).toContain('768');
+        expect(description).toContain('shared across all token positions');
+    });
+
+    it('highlights the up-projection equation for b_up selections', () => {
+        const selection = {
+            label: MLP_UP_BIAS_TOOLTIP_LABEL,
+            info: {
+                activationData: {
+                    stage: 'mlp.up.bias'
+                }
+            }
+        };
+
+        const entries = resolveSelectionPreviewEquations(MLP_UP_BIAS_TOOLTIP_LABEL, selection);
+        expect(entries).toHaveLength(3);
+        expect(entries[0]?.active).toBe(true);
+        expect(entries[0]?.tex).toContain('b_{\\text{up}}');
+    });
+
+    it('highlights the down-projection equation for b_down selections', () => {
+        const selection = {
+            label: MLP_DOWN_BIAS_TOOLTIP_LABEL,
+            info: {
+                activationData: {
+                    stage: 'mlp.down.bias'
+                }
+            }
+        };
+
+        const entries = resolveSelectionPreviewEquations(MLP_DOWN_BIAS_TOOLTIP_LABEL, selection);
+        expect(entries).toHaveLength(3);
+        expect(entries[1]?.active).toBe(true);
+        expect(entries[1]?.tex).toContain('b_{\\text{down}}');
+    });
+
+    it('returns query-bias-specific copy and highlights the Q projection equation', () => {
+        const selection = {
+            label: 'Query Bias Vector',
+            info: {
+                activationData: {
+                    stage: 'qkv.q.bias',
+                    layerIndex: 2,
+                    headIndex: 1
+                }
+            }
+        };
+
+        const description = resolveDescription('Query Bias Vector', 'vector', selection);
+        expect(description).toContain('query bias vector');
+        expect(description).toContain('64');
+        expect(description).toContain('same bias is reused at every token position');
+
+        const entries = resolveSelectionPreviewEquations('Query Bias Vector', selection);
+        expect(entries).toHaveLength(2);
+        expect(entries[0]?.active).toBe(true);
+        expect(entries[0]?.tex).toContain('b_{Q_i}');
+    });
+
+    it('returns value-bias-specific copy and highlights the V projection equation', () => {
+        const selection = {
+            label: 'Value Bias Vector',
+            info: {
+                activationData: {
+                    stage: 'qkv.v.bias',
+                    layerIndex: 2,
+                    headIndex: 1
+                }
+            }
+        };
+
+        const description = resolveDescription('Value Bias Vector', 'vector', selection);
+        expect(description).toContain('value bias vector');
+        expect(description).toContain('64');
+        expect(description).toContain('same bias is shared across tokens');
+
+        const entries = resolveSelectionPreviewEquations('Value Bias Vector', selection);
+        expect(entries).toHaveLength(2);
+        expect(entries[0]?.active).toBe(true);
+        expect(entries[0]?.tex).toContain('b_{V_i}');
+    });
+});

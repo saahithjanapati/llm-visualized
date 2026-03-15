@@ -10,8 +10,13 @@ import {
 import {
     MLP_ACTIVATION_TOOLTIP_LABEL,
     MLP_DOWN_BIAS_TOOLTIP_LABEL,
-    MLP_DOWN_TOOLTIP_LABEL
+    MLP_DOWN_TOOLTIP_LABEL,
+    MLP_UP_BIAS_TOOLTIP_LABEL
 } from '../utils/mlpLabels.js';
+import {
+    getAttentionBiasHeadSample,
+    getMlpBiasVectorSample
+} from '../data/biasParams.js';
 
 const PROJECTION_KIND_LABELS = Object.freeze({
     q: 'Query',
@@ -87,8 +92,12 @@ export function buildProjectionVectorHoverInfo(node = null, rowItem = null, kind
     if (!safeKind) return null;
     const label = `${resolveProjectionLabel(safeKind)} Vector`;
     const tokenInfo = createTokenInfo(rowItem) || {};
+    const values = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
     const info = buildProjectionHoverInfo(node, label, {
         stage: `qkv.${safeKind}`,
+        ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -100,10 +109,51 @@ export function buildProjectionVectorHoverInfo(node = null, rowItem = null, kind
         ...info,
         activationData: {
             ...(info.activationData || {}),
+            ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
                 : {})
+        }
+    };
+}
+
+function resolveAttentionBiasKind(kind = '') {
+    const safeKind = normalizeProjectionKind(kind);
+    if (safeKind === 'k') return 'key';
+    if (safeKind === 'v') return 'value';
+    return 'query';
+}
+
+function buildProjectionBiasHoverValues(node = null, rowItem = null, kind = '') {
+    if (hasNumericValue(rowItem?.rawValue)) {
+        return [rowItem.rawValue];
+    }
+    const layerIndex = normalizeSceneIndex(node?.semantic?.layerIndex);
+    const headIndex = normalizeSceneIndex(node?.semantic?.headIndex);
+    if (!Number.isFinite(layerIndex) || !Number.isFinite(headIndex)) return null;
+    const biasValue = getAttentionBiasHeadSample(layerIndex, resolveAttentionBiasKind(kind), headIndex);
+    return Number.isFinite(biasValue) ? [biasValue] : null;
+}
+
+export function buildProjectionBiasHoverInfo(node = null, rowItem = null, kind = '') {
+    const safeKind = normalizeProjectionKind(kind);
+    if (!safeKind) return null;
+    const label = `${resolveProjectionLabel(safeKind)} Bias Vector`;
+    const values = buildProjectionBiasHoverValues(node, rowItem, safeKind);
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: `qkv.${safeKind}.bias`,
+        parameterType: 'bias',
+        ...(values?.length ? { values } : {})
+    }) || {};
+
+    return {
+        ...info,
+        activationData: {
+            ...(info.activationData || {}),
+            stage: `qkv.${safeKind}.bias`,
+            parameterType: 'bias',
+            ...(values?.length ? { values } : {})
         }
     };
 }
@@ -198,17 +248,34 @@ export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
     };
 }
 
-export function buildMlpUpBiasHoverInfo(node = null) {
-    const label = 'Bias Vector for MLP Up Matrix';
+function buildMlpBiasHoverValues(node = null, rowItem = null, kind = 'up') {
+    const layerIndex = normalizeSceneIndex(node?.semantic?.layerIndex);
+    if (Number.isFinite(layerIndex)) {
+        const sampledValues = getMlpBiasVectorSample(layerIndex, kind);
+        if (Array.isArray(sampledValues) && sampledValues.length) {
+            return sampledValues.map((value) => (Number.isFinite(value) ? value : 0));
+        }
+    }
+    const rowValues = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
+    return rowValues?.length ? rowValues : null;
+}
+
+export function buildMlpUpBiasHoverInfo(node = null, rowItem = null) {
+    const label = MLP_UP_BIAS_TOOLTIP_LABEL;
+    const values = buildMlpBiasHoverValues(node, rowItem, 'up');
     const info = buildProjectionHoverInfo(node, label, {
-        stage: 'mlp.up.bias'
+        stage: 'mlp.up.bias',
+        ...(values?.length ? { values } : {})
     }) || {};
 
     return {
         ...info,
         activationData: {
             ...(info.activationData || {}),
-            stage: 'mlp.up.bias'
+            stage: 'mlp.up.bias',
+            ...(values?.length ? { values } : {})
         }
     };
 }
@@ -231,17 +298,20 @@ export function buildMlpDownWeightHoverInfo(node = null) {
     };
 }
 
-export function buildMlpDownBiasHoverInfo(node = null) {
+export function buildMlpDownBiasHoverInfo(node = null, rowItem = null) {
     const label = MLP_DOWN_BIAS_TOOLTIP_LABEL;
+    const values = buildMlpBiasHoverValues(node, rowItem, 'down');
     const info = buildProjectionHoverInfo(node, label, {
-        stage: 'mlp.down.bias'
+        stage: 'mlp.down.bias',
+        ...(values?.length ? { values } : {})
     }) || {};
 
     return {
         ...info,
         activationData: {
             ...(info.activationData || {}),
-            stage: 'mlp.down.bias'
+            stage: 'mlp.down.bias',
+            ...(values?.length ? { values } : {})
         }
     };
 }

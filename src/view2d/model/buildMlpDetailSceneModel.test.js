@@ -5,7 +5,8 @@ import { PRISM_DIMENSIONS_PER_UNIT } from '../../utils/constants.js';
 import {
     MLP_ACTIVATION_TOOLTIP_LABEL,
     MLP_DOWN_BIAS_TOOLTIP_LABEL,
-    MLP_DOWN_TOOLTIP_LABEL
+    MLP_DOWN_TOOLTIP_LABEL,
+    MLP_UP_BIAS_TOOLTIP_LABEL
 } from '../../utils/mlpLabels.js';
 import { buildSceneLayout } from '../layout/buildSceneLayout.js';
 import { flattenSceneNodes, VIEW2D_NODE_KINDS } from '../schema/sceneTypes.js';
@@ -729,10 +730,11 @@ describe('buildMlpDetailSceneModel', () => {
             }
         });
 
-        expect(hoverState?.label).toBe('Bias Vector for MLP Up Matrix');
-        expect(hoverState?.info?.activationData?.label).toBe('Bias Vector for MLP Up Matrix');
+        expect(hoverState?.label).toBe(MLP_UP_BIAS_TOOLTIP_LABEL);
+        expect(hoverState?.info?.activationData?.label).toBe(MLP_UP_BIAS_TOOLTIP_LABEL);
         expect(hoverState?.info?.activationData?.stage).toBe('mlp.up.bias');
         expect(hoverState?.info?.activationData?.layerIndex).toBe(4);
+        expect(hoverState?.info?.activationData?.values).toHaveLength(MLP_EXPANDED_VECTOR_BAND_COUNT);
         expect(hoverState?.focusState?.activeNodeIds).toContain(biasNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(weightNode?.id);
@@ -787,6 +789,7 @@ describe('buildMlpDetailSceneModel', () => {
         expect(hoverState?.info?.activationData?.label).toBe(MLP_DOWN_BIAS_TOOLTIP_LABEL);
         expect(hoverState?.info?.activationData?.stage).toBe('mlp.down.bias');
         expect(hoverState?.info?.activationData?.layerIndex).toBe(4);
+        expect(hoverState?.info?.activationData?.values).toHaveLength(Math.ceil(D_MODEL / PRISM_DIMENSIONS_PER_UNIT));
         expect(hoverState?.focusState?.activeNodeIds).toContain(biasNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(activationNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(activationCopyNode?.id);

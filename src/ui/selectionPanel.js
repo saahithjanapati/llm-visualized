@@ -5,7 +5,7 @@ import { VectorVisualizationInstancedPrism } from '../components/VectorVisualiza
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { appState } from '../state/appState.js';
 import { createSciFiMaterial, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
-import { mapAttentionPostScoreToColor, mapValueToColor } from '../utils/colors.js';
+import { buildHueRangeOptions, mapAttentionPostScoreToColor, mapValueToColor } from '../utils/colors.js';
 import { resolveLogitEntryText } from '../utils/logitTokenText.js';
 import {
     formatLayerNormLabel,
@@ -314,10 +314,25 @@ import {
     MHA_FINAL_V_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
     MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
+    MHA_VALUE_CLAMP_MAX,
+    MHA_VALUE_HUE_SPREAD,
+    MHA_VALUE_LIGHTNESS_MAX,
+    MHA_VALUE_LIGHTNESS_MIN,
+    MHA_VALUE_RANGE_MAX,
+    MHA_VALUE_RANGE_MIN,
+    MHA_VALUE_SPECTRUM_COLOR,
     POSITION_EMBED_COLOR,
     LN_PARAMS
 } from '../animations/LayerAnimationConstants.js';
 import { getLayerNormParamData } from '../data/layerNormParams.js';
+import {
+    getAttentionBiasHeadSample,
+    getMlpBiasVectorSample
+} from '../data/biasParams.js';
+import {
+    MLP_DOWN_BIAS_TOOLTIP_LABEL,
+    MLP_UP_BIAS_TOOLTIP_LABEL
+} from '../utils/mlpLabels.js';
 
 const ATTENTION_VECTOR_PANEL_ACTION_OPEN = 'open-attention-vector';
 const LAYERNORM_PANEL_ACTION_OPEN = 'open-layernorm';
@@ -921,6 +936,8 @@ function resolveFinalPreviewColor(label) {
     if (lower.includes('output projection matrix')) return MHA_OUTPUT_PROJECTION_MATRIX_COLOR;
     if (lower.includes('mlp up weight matrix')) return FINAL_MLP_COLOR;
     if (lower.includes('mlp down weight matrix')) return FINAL_MLP_COLOR;
+    if (lower === MLP_UP_BIAS_TOOLTIP_LABEL.toLowerCase()) return FINAL_MLP_COLOR;
+    if (lower === MLP_DOWN_BIAS_TOOLTIP_LABEL.toLowerCase()) return FINAL_MLP_COLOR;
     if (hasVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
         return hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')
             ? FINAL_VOCAB_TOP_COLOR
@@ -1913,6 +1930,112 @@ function normalizePreviewVectorDataArray(values) {
     return Array.from(values).map((value) => (Number.isFinite(value) ? value : 0));
 }
 
+function samplePreviewVectorData(values = null, targetLength = 0) {
+    const normalized = normalizePreviewVectorDataArray(values);
+    const safeTargetLength = Math.max(1, Math.floor(targetLength || 1));
+    if (!normalized?.length) {
+        return new Array(safeTargetLength).fill(0);
+    }
+    if (normalized.length <= safeTargetLength) {
+        return normalized.slice();
+    }
+    return Array.from({ length: safeTargetLength }, (_, index) => {
+        const start = Math.floor((index * normalized.length) / safeTargetLength);
+        const end = Math.max(start + 1, Math.floor(((index + 1) * normalized.length) / safeTargetLength));
+        let sum = 0;
+        for (let cursor = start; cursor < end; cursor += 1) {
+            sum += normalized[cursor];
+        }
+        return sum / Math.max(1, end - start);
+    });
+}
+
+function inferMlpBiasPreviewKind(label = '', selectionInfo = null) {
+    const lower = String(label || '').toLowerCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (stage === 'mlp.up.bias' || lower === MLP_UP_BIAS_TOOLTIP_LABEL.toLowerCase()) {
+        return 'up';
+    }
+    if (stage === 'mlp.down.bias' || lower === MLP_DOWN_BIAS_TOOLTIP_LABEL.toLowerCase()) {
+        return 'down';
+    }
+    return '';
+}
+
+function inferAttentionBiasPreviewKind(label = '', selectionInfo = null) {
+    const lower = String(label || '').toLowerCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (stage === 'qkv.q.bias' || lower === 'query bias vector') return 'q';
+    if (stage === 'qkv.k.bias' || lower === 'key bias vector') return 'k';
+    if (stage === 'qkv.v.bias' || lower === 'value bias vector') return 'v';
+    return '';
+}
+
+function resolveMlpBiasPreviewSampleCount(kind = 'up') {
+    return kind === 'down'
+        ? Math.max(1, Math.ceil(D_MODEL / PRISM_DIMENSIONS_PER_UNIT))
+        : Math.max(1, Math.ceil((D_MODEL * 4) / PRISM_DIMENSIONS_PER_UNIT));
+}
+
+function resolveSelectionLayerIndex(selectionInfo = null) {
+    const directLayerIndex = selectionInfo?.info?.activationData?.layerIndex;
+    if (Number.isFinite(directLayerIndex)) {
+        return Math.max(0, Math.floor(directLayerIndex));
+    }
+    const nestedLayerIndex = selectionInfo?.info?.layerIndex;
+    if (Number.isFinite(nestedLayerIndex)) {
+        return Math.max(0, Math.floor(nestedLayerIndex));
+    }
+    const discoveredLayerIndex = findUserDataNumber(selectionInfo, 'layerIndex');
+    return Number.isFinite(discoveredLayerIndex) ? Math.max(0, Math.floor(discoveredLayerIndex)) : null;
+}
+
+function resolveSelectionHeadIndex(selectionInfo = null) {
+    const directHeadIndex = selectionInfo?.info?.activationData?.headIndex;
+    if (Number.isFinite(directHeadIndex)) {
+        return Math.max(0, Math.floor(directHeadIndex));
+    }
+    const nestedHeadIndex = selectionInfo?.info?.headIndex;
+    if (Number.isFinite(nestedHeadIndex)) {
+        return Math.max(0, Math.floor(nestedHeadIndex));
+    }
+    const discoveredHeadIndex = findUserDataNumber(selectionInfo, 'headIndex');
+    return Number.isFinite(discoveredHeadIndex) ? Math.max(0, Math.floor(discoveredHeadIndex)) : null;
+}
+
+function resolveMlpBiasPreviewData(selectionInfo = null, kind = 'up') {
+    const sampleCount = resolveMlpBiasPreviewSampleCount(kind);
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (Number.isFinite(layerIndex)) {
+        const sampledValues = normalizePreviewVectorDataArray(getMlpBiasVectorSample(layerIndex, kind));
+        if (sampledValues?.length) {
+            return sampledValues;
+        }
+    }
+    const rawValues = extractPreviewVectorData(selectionInfo);
+    if (!rawValues?.length) return null;
+    if (rawValues.length === sampleCount) {
+        return rawValues;
+    }
+    return samplePreviewVectorData(rawValues, sampleCount);
+}
+
+function resolveAttentionBiasPreviewData(selectionInfo = null, kind = 'q') {
+    const explicitValues = normalizePreviewVectorDataArray(
+        selectionInfo?.info?.activationData?.values
+        || selectionInfo?.info?.values
+    );
+    if (explicitValues?.length) {
+        return explicitValues.slice(0, 1);
+    }
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    const headIndex = resolveSelectionHeadIndex(selectionInfo);
+    if (!Number.isFinite(layerIndex) || !Number.isFinite(headIndex)) return null;
+    const biasKind = kind === 'k' ? 'key' : (kind === 'v' ? 'value' : 'query');
+    const biasValue = getAttentionBiasHeadSample(layerIndex, biasKind, headIndex);
+    return Number.isFinite(biasValue) ? [biasValue] : null;
+}
+
 function extractMlpMiddlePreviewVectorData(selectionInfo) {
     const vectorRef = selectionInfo?.info?.vectorRef || null;
     const batchRefs = vectorRef?.isBatchedVectorRef && Array.isArray(vectorRef?._batch?._vectorRefs)
@@ -2031,7 +2154,113 @@ function buildMlpMiddleVectorPreview(selectionInfo, label = '') {
     };
 }
 
-function applyDataToPreviewVector(vec, data, { colorOptions = null, minimumKeyColors = 2 } = {}) {
+function buildMlpBiasPreviewColorOptions(previewData = []) {
+    const safeData = Array.isArray(previewData) ? previewData : [];
+    const maxAbsValue = safeData.reduce((maxValue, value) => (
+        Number.isFinite(value) ? Math.max(maxValue, Math.abs(value)) : maxValue
+    ), 0);
+    const clampRange = maxAbsValue > 1e-6 ? maxAbsValue : 1;
+    const biasBaseColor = new THREE.Color(FINAL_MLP_COLOR);
+    const biasBaseHsl = { h: 0, s: 0, l: 0 };
+    biasBaseColor.getHSL(biasBaseHsl);
+    biasBaseColor.setHSL(
+        (biasBaseHsl.h + 0.018) % 1,
+        Math.min(1, Math.max(0.82, biasBaseHsl.s)),
+        biasBaseHsl.l
+    );
+    return buildHueRangeOptions(biasBaseColor, {
+        hueSpread: 0.1,
+        valueMin: -clampRange,
+        valueMax: clampRange,
+        minLightness: 0.36,
+        maxLightness: 0.72,
+        saturation: Math.min(1, Math.max(0.84, biasBaseHsl.s))
+    });
+}
+
+function buildAttentionBiasPreviewColorOptions(kind = 'q') {
+    const baseColor = kind === 'k'
+        ? MHA_FINAL_K_COLOR
+        : (kind === 'v' ? MHA_VALUE_SPECTRUM_COLOR : MHA_FINAL_Q_COLOR);
+    return buildHueRangeOptions(baseColor, {
+        hueSpread: MHA_VALUE_HUE_SPREAD,
+        minLightness: MHA_VALUE_LIGHTNESS_MIN,
+        maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+        valueMin: MHA_VALUE_RANGE_MIN,
+        valueMax: MHA_VALUE_RANGE_MAX,
+        valueClampMax: MHA_VALUE_CLAMP_MAX
+    });
+}
+
+function buildAttentionBiasVectorPreview(selectionInfo, label = '') {
+    const kind = inferAttentionBiasPreviewKind(label, selectionInfo);
+    if (!kind) return null;
+    const previewData = resolveAttentionBiasPreviewData(selectionInfo, kind);
+    if (!previewData?.length) return null;
+
+    const vec = createPreviewVector({
+        colorHex: resolveVectorPreviewColor(label, selectionInfo),
+        data: null,
+        instanceCount: 1
+    });
+    vec.group.userData = vec.group.userData || {};
+    vec.group.userData.label = label || (
+        kind === 'k'
+            ? 'Key Bias Vector'
+            : (kind === 'v' ? 'Value Bias Vector' : 'Query Bias Vector')
+    );
+    applyDataToPreviewVector(vec, previewData, {
+        colorOptions: buildAttentionBiasPreviewColorOptions(kind),
+        numKeyColors: 1
+    });
+
+    return {
+        object: vec.group,
+        view: {
+            fitDistanceMultiplier: 1.18,
+            fitPaddingMultiplier: 1.05
+        },
+        dispose: () => {
+            vec.dispose();
+        }
+    };
+}
+
+function buildMlpBiasVectorPreview(selectionInfo, label = '') {
+    const kind = inferMlpBiasPreviewKind(label, selectionInfo);
+    if (!kind) return null;
+    const previewData = resolveMlpBiasPreviewData(selectionInfo, kind);
+    if (!previewData?.length) return null;
+    const sampleCount = resolveMlpBiasPreviewSampleCount(kind);
+    const previewLabel = label || (kind === 'down' ? MLP_DOWN_BIAS_TOOLTIP_LABEL : MLP_UP_BIAS_TOOLTIP_LABEL);
+    const vec = createPreviewVector({
+        colorHex: FINAL_MLP_COLOR,
+        data: null,
+        instanceCount: sampleCount
+    });
+    vec.group.userData = vec.group.userData || {};
+    vec.group.userData.label = previewLabel;
+    applyDataToPreviewVector(vec, previewData, {
+        colorOptions: buildMlpBiasPreviewColorOptions(previewData),
+        numKeyColors: sampleCount
+    });
+    return {
+        object: vec.group,
+        view: {
+            fitDistanceMultiplier: 1.14,
+            fitPaddingMultiplier: 1.04
+        },
+        dispose: () => {
+            vec.dispose();
+        }
+    };
+}
+
+function applyDataToPreviewVector(vec, data, {
+    colorOptions = null,
+    minimumKeyColors = 2,
+    numKeyColors = null
+} = {}) {
     const isArrayLike = Array.isArray(data) || ArrayBuffer.isView(data);
     if (!vec || !isArrayLike || data.length === 0) return;
     const raw = Array.from(data);
@@ -2040,8 +2269,10 @@ function applyDataToPreviewVector(vec, data, { colorOptions = null, minimumKeyCo
     } else {
         vec.updateDataAndSnapVisuals(raw);
     }
-    const numKeyColors = Math.min(30, Math.max(minimumKeyColors, raw.length));
-    vec.updateKeyColorsFromData(raw, numKeyColors, colorOptions, raw);
+    const resolvedNumKeyColors = Number.isFinite(numKeyColors)
+        ? Math.max(1, Math.floor(numKeyColors))
+        : Math.min(30, Math.max(minimumKeyColors, raw.length));
+    vec.updateKeyColorsFromData(raw, resolvedNumKeyColors, colorOptions, raw);
     if (typeof vec.updateInstanceGeometryAndColors === 'function') {
         vec.updateInstanceGeometryAndColors();
     }
@@ -2437,6 +2668,12 @@ export function buildVectorClonePreview(selectionInfo, label = '') {
             || buildSelectionClonePreview(selectionInfo, label);
         if (directClone) return directClone;
     }
+
+    const attentionBiasVectorPreview = buildAttentionBiasVectorPreview(selectionInfo, label);
+    if (attentionBiasVectorPreview) return attentionBiasVectorPreview;
+
+    const mlpBiasVectorPreview = buildMlpBiasVectorPreview(selectionInfo, label);
+    if (mlpBiasVectorPreview) return mlpBiasVectorPreview;
 
     if (mlpMiddleVectorSelection) {
         const expandedVectorPreview = buildMlpMiddleVectorPreview(selectionInfo, label);
@@ -7630,6 +7867,9 @@ export class SelectionPanel {
         const genericMatrixSelection = (
             lower === 'output projection matrix'
             || lower === 'output projection bias vector'
+            || lower === 'query bias vector'
+            || lower === 'key bias vector'
+            || lower === 'value bias vector'
             || lower === 'mlp up weight matrix'
             || lower === 'bias vector for mlp up matrix'
             || lower === 'mlp down weight matrix'

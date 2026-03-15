@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { FINAL_MLP_COLOR } from './selectionPanelConstants.js';
+import {
+    MLP_DOWN_BIAS_TOOLTIP_LABEL,
+    MLP_UP_BIAS_TOOLTIP_LABEL
+} from '../utils/mlpLabels.js';
 
 let buildVectorClonePreview;
 
@@ -149,6 +154,43 @@ function getInstanceX(mesh, instanceId) {
     mesh.getMatrixAt(instanceId, matrix);
     matrix.decompose(position, quaternion, scale);
     return position.x;
+}
+
+function getGradientColor(mesh, instanceId = 0, attributeName = 'colorStart') {
+    const attribute = mesh?.geometry?.getAttribute?.(attributeName);
+    if (!attribute) return null;
+    return new THREE.Color(
+        attribute.getX(instanceId),
+        attribute.getY(instanceId),
+        attribute.getZ(instanceId)
+    );
+}
+
+function getHueDistance(color, baseHex) {
+    if (!color) return Number.POSITIVE_INFINITY;
+    const baseHsl = { h: 0, s: 0, l: 0 };
+    const sampleHsl = { h: 0, s: 0, l: 0 };
+    new THREE.Color(baseHex).getHSL(baseHsl);
+    color.getHSL(sampleHsl);
+    const rawDelta = Math.abs(sampleHsl.h - baseHsl.h);
+    return Math.min(rawDelta, 1 - rawDelta);
+}
+
+function buildAttentionBiasSelection(label, stage, layerIndex = 4, headIndex = 2) {
+    return {
+        label,
+        kind: 'vector',
+        info: {
+            activationData: {
+                label,
+                stage,
+                layerIndex,
+                headIndex
+            },
+            layerIndex,
+            headIndex
+        }
+    };
 }
 
 describe('buildVectorClonePreview', () => {
@@ -359,6 +401,118 @@ describe('buildVectorClonePreview', () => {
         const previewMesh = findPreviewMesh(preview?.object);
         expect(previewMesh?.isInstancedMesh).toBe(true);
         expect(previewMesh?.count).toBe(12);
+
+        preview.dispose?.();
+    });
+
+    it('renders b_up previews with 48 MLP-colored prisms from the saved bias samples', () => {
+        const selection = {
+            label: MLP_UP_BIAS_TOOLTIP_LABEL,
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: MLP_UP_BIAS_TOOLTIP_LABEL,
+                    stage: 'mlp.up.bias',
+                    layerIndex: 4
+                },
+                layerIndex: 4
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(48);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, FINAL_MLP_COLOR)).toBeLessThan(0.12);
+        expect(getHueDistance(endColor, FINAL_MLP_COLOR)).toBeLessThan(0.12);
+
+        preview.dispose?.();
+    });
+
+    it('renders b_down previews with 12 MLP-colored prisms from the saved bias samples', () => {
+        const selection = {
+            label: MLP_DOWN_BIAS_TOOLTIP_LABEL,
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: MLP_DOWN_BIAS_TOOLTIP_LABEL,
+                    stage: 'mlp.down.bias',
+                    layerIndex: 4
+                },
+                layerIndex: 4
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(12);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, FINAL_MLP_COLOR)).toBeLessThan(0.12);
+        expect(getHueDistance(endColor, FINAL_MLP_COLOR)).toBeLessThan(0.12);
+
+        preview.dispose?.();
+    });
+
+    it('renders query bias previews as a single Q-colored head prism', () => {
+        const selection = buildAttentionBiasSelection('Query Bias Vector', 'qkv.q.bias');
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, 0x276ebb)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, 0x276ebb)).toBeLessThan(0.14);
+
+        preview.dispose?.();
+    });
+
+    it('renders key bias previews as a single K-colored head prism', () => {
+        const selection = buildAttentionBiasSelection('Key Bias Vector', 'qkv.k.bias');
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, 0x1e9f57)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, 0x1e9f57)).toBeLessThan(0.14);
+
+        preview.dispose?.();
+    });
+
+    it('renders value bias previews as a single V-colored head prism', () => {
+        const selection = buildAttentionBiasSelection('Value Bias Vector', 'qkv.v.bias');
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, 0xc44d25)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, 0xc44d25)).toBeLessThan(0.14);
 
         preview.dispose?.();
     });

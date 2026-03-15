@@ -30,6 +30,10 @@ import {
     getActivationDataFromSelection,
     resolveSelectionLogitEntry
 } from './selectionPanelSelectionUtils.js';
+import {
+    MLP_DOWN_BIAS_TOOLTIP_LABEL,
+    MLP_UP_BIAS_TOOLTIP_LABEL
+} from '../utils/mlpLabels.js';
 
 const GPT2_VOCAB_SIZE_TEXT = VOCAB_SIZE.toLocaleString('en-US');
 const GPT2_D_MODEL_TEXT = D_MODEL.toLocaleString('en-US');
@@ -769,6 +773,16 @@ const MLP_DOWN_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
     'That down-projection turns the MLP\'s private hidden features into a residual-sized update that can be added back into the main stream.'
 );
 
+const MLP_UP_BIAS_DESCRIPTION = joinParagraphs(
+    `This is the learned up-projection bias ${inlineMath('b_{\\text{up}}')}. It is a ${GPT2_MLP_HIDDEN_TEXT}-dimensional parameter vector that is added to ${inlineMath('x_{\\text{ln}} W_{\\text{up}}')} before GELU is applied.`,
+    'Unlike a token activation, this bias is shared across every token position. Its job is to shift the baseline of each hidden MLP feature so different units become easier or harder to activate.'
+);
+
+const MLP_DOWN_BIAS_DESCRIPTION = joinParagraphs(
+    `This is the learned down-projection bias ${inlineMath('b_{\\text{down}}')}. It is a ${GPT2_D_MODEL_TEXT}-dimensional parameter vector that is added after the expanded MLP state is multiplied by ${inlineMath('W_{\\text{down}}')}.`,
+    'This bias is also shared across all token positions. It lets the MLP set a default residual-width offset before the branch output is added back into the main residual stream.'
+);
+
 const MLP_GENERIC_DESCRIPTION = joinParagraphs(
     'The MLP is the token-wise feed-forward network inside each transformer block. It processes each token independently using the same learned weights at every position.',
     'Its role is to create nonlinear feature combinations within each token state. The usual pattern is expand, apply GELU, compress, then add the result back into the residual stream.'
@@ -868,6 +882,48 @@ function buildValueVectorDescription(selectionInfo = null) {
         `This is the ${GPT2_D_HEAD_TEXT}-dimensional value vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific value matrix ${weightMatrixLink}, which is the ${inlineMath(ATTENTION_VALUE_VECTOR_TEX)} computation for this attention head.`,
         `Once a query token's raw scores have been turned into weights ${inlineMath('\\alpha_{t,j}')} by softmax, this vector is multiplied by its scalar weight and added into the weighted sum.`,
         `That is how information from ${tokenRef} can flow into other tokens through ${headRef}.`
+    );
+}
+
+function buildQueryBiasVectorDescription(selectionInfo = null) {
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    const weightMatrixLink = buildQkvWeightMatrixActionMarkup(selectionInfo, {
+        matrixKind: 'Q',
+        linkText: inlineMath('W_Q')
+    });
+    return joinParagraphs(
+        `This is the learned query bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the head-specific query matrix ${weightMatrixLink}.`,
+        `In symbols, the head computes ${inlineMath('q_{t,i} = x_t W_Q + b_Q')}. The same bias is reused at every token position in this head, so it acts as a learned offset in query space before any query-key comparisons happen.`,
+        'Its job is to shift the baseline of the head\'s query features, making some query directions easier or harder to activate.'
+    );
+}
+
+function buildKeyBiasVectorDescription(selectionInfo = null) {
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    const weightMatrixLink = buildQkvWeightMatrixActionMarkup(selectionInfo, {
+        matrixKind: 'K',
+        linkText: inlineMath('W_K')
+    });
+    return joinParagraphs(
+        `This is the learned key bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the head-specific key matrix ${weightMatrixLink}.`,
+        `In symbols, the head computes ${inlineMath('k_{j,i} = x_j W_K + b_K')}. The same bias is shared across all token positions in this head, so it sets a default offset in key space for every token.`,
+        'That offset changes how easily other tokens\' queries can match against these keys when raw attention scores are formed.'
+    );
+}
+
+function buildValueBiasVectorDescription(selectionInfo = null) {
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const layerRef = buildSelectionLayerReference(selectionInfo);
+    const weightMatrixLink = buildQkvWeightMatrixActionMarkup(selectionInfo, {
+        matrixKind: 'V',
+        linkText: inlineMath('W_V')
+    });
+    return joinParagraphs(
+        `This is the learned value bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the head-specific value matrix ${weightMatrixLink}.`,
+        `In symbols, the head computes ${inlineMath('v_{j,i} = x_j W_V + b_V')}. The same bias is shared across tokens, so every value vector in this head starts from the same learned baseline offset.`,
+        'Its role is to shift the default contents of the value space that this attention head writes into its weighted sum.'
     );
 }
 
@@ -1372,10 +1428,19 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (stageLower === 'qkv.q') {
         return buildEquationEntries([queryProjectionEq, attentionEquation], [0]);
     }
+    if (stageLower === 'qkv.q.bias') {
+        return buildEquationEntries([queryProjectionEq, attentionEquation], [0]);
+    }
     if (stageLower === 'qkv.k') {
         return buildEquationEntries([keyProjectionEq, attentionEquation], [0]);
     }
+    if (stageLower === 'qkv.k.bias') {
+        return buildEquationEntries([keyProjectionEq, attentionEquation], [0]);
+    }
     if (stageLower === 'qkv.v') {
+        return buildEquationEntries([valueProjectionEq, attentionEquation], [0]);
+    }
+    if (stageLower === 'qkv.v.bias') {
         return buildEquationEntries([valueProjectionEq, attentionEquation], [0]);
     }
     if (stageLower === 'attention.pre') {
@@ -1396,10 +1461,16 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (stageLower === 'mlp.up') {
         return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [0]);
     }
+    if (stageLower === 'mlp.up.bias') {
+        return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [0]);
+    }
     if (stageLower === 'mlp.activation') {
         return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [1]);
     }
     if (stageLower === 'mlp.down') {
+        return buildEquationEntries([mlpGeluEq, mlpDownEq, postMlpResidualEq], [1]);
+    }
+    if (stageLower === 'mlp.down.bias') {
         return buildEquationEntries([mlpGeluEq, mlpDownEq, postMlpResidualEq], [1]);
     }
     if (stageLower === 'residual.post_mlp') {
@@ -1433,8 +1504,14 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (lower.includes('query vector')) {
         return buildEquationEntries([queryProjectionEq, attentionEquation], [0]);
     }
+    if (lower.includes('query bias vector')) {
+        return buildEquationEntries([queryProjectionEq, attentionEquation], [0]);
+    }
     if (lower.includes('key weight matrix')) {
         return buildEquationEntries([keyWeightMatrixEq, attentionEquation], [0]);
+    }
+    if (lower.includes('key bias vector')) {
+        return buildEquationEntries([keyProjectionEq, attentionEquation], [0]);
     }
     if (lower.includes('cached key vector') || lower.includes('key vector')) {
         return buildEquationEntries([keyProjectionEq, attentionEquation], [0]);
@@ -1444,6 +1521,9 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     }
     if (lower.includes('value weight matrix')) {
         return buildEquationEntries([valueWeightMatrixEq, attentionEquation], [0]);
+    }
+    if (lower.includes('value bias vector')) {
+        return buildEquationEntries([valueProjectionEq, attentionEquation], [0]);
     }
     if (lower.includes('cached value vector') || lower.includes('value vector')) {
         return buildEquationEntries([valueProjectionEq, attentionEquation], [0]);
@@ -1463,10 +1543,16 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (lower.includes('mlp up weight matrix') || lower.includes('mlp up projection')) {
         return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [0]);
     }
+    if (lower === MLP_UP_BIAS_TOOLTIP_LABEL.toLowerCase()) {
+        return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [0]);
+    }
     if (lower.includes('mlp expanded segments')) {
         return buildEquationEntries([mlpUpEq, mlpGeluEq, mlpDownEq], [1]);
     }
     if (lower.includes('mlp down weight matrix') || lower.includes('mlp down projection')) {
+        return buildEquationEntries([mlpGeluEq, mlpDownEq, postMlpResidualEq], [1]);
+    }
+    if (lower === MLP_DOWN_BIAS_TOOLTIP_LABEL.toLowerCase()) {
         return buildEquationEntries([mlpGeluEq, mlpDownEq, postMlpResidualEq], [1]);
     }
     if (lower.includes('post-mlp residual')) {
@@ -1555,11 +1641,20 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         if (stageLower === 'qkv.q') {
             return buildQueryVectorDescription(selectionInfo);
         }
+        if (stageLower === 'qkv.q.bias') {
+            return buildQueryBiasVectorDescription(selectionInfo);
+        }
         if (stageLower === 'qkv.k') {
             return buildKeyVectorDescription(selectionInfo);
         }
+        if (stageLower === 'qkv.k.bias') {
+            return buildKeyBiasVectorDescription(selectionInfo);
+        }
         if (stageLower === 'qkv.v') {
             return buildValueVectorDescription(selectionInfo);
+        }
+        if (stageLower === 'qkv.v.bias') {
+            return buildValueBiasVectorDescription(selectionInfo);
         }
         if (stageLower === 'attention.weighted_value') {
             return buildWeightedValueVectorDescription(selectionInfo);
@@ -1573,11 +1668,17 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         if (stageLower === 'mlp.up') {
             return MLP_UP_VECTOR_DESCRIPTION;
         }
+        if (stageLower === 'mlp.up.bias') {
+            return MLP_UP_BIAS_DESCRIPTION;
+        }
         if (stageLower === 'mlp.activation') {
             return MLP_ACTIVATION_DESCRIPTION;
         }
         if (stageLower === 'mlp.down') {
             return MLP_DOWN_VECTOR_DESCRIPTION;
+        }
+        if (stageLower === 'mlp.down.bias') {
+            return MLP_DOWN_BIAS_DESCRIPTION;
         }
         if (stageLower === 'residual.post_mlp') {
             return buildPostMlpResidualDescription(selectionInfo);
@@ -1645,11 +1746,20 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('query weight matrix')) {
         return buildQueryWeightMatrixDescription(selectionInfo);
     }
+    if (lower.includes('query bias vector')) {
+        return buildQueryBiasVectorDescription(selectionInfo);
+    }
     if (lower.includes('key weight matrix')) {
         return buildKeyWeightMatrixDescription(selectionInfo);
     }
+    if (lower.includes('key bias vector')) {
+        return buildKeyBiasVectorDescription(selectionInfo);
+    }
     if (lower.includes('value weight matrix')) {
         return buildValueWeightMatrixDescription(selectionInfo);
+    }
+    if (lower.includes('value bias vector')) {
+        return buildValueBiasVectorDescription(selectionInfo);
     }
     if (lower.includes('output projection matrix')) {
         return OUTPUT_PROJECTION_MATRIX_DESCRIPTION;
@@ -1657,8 +1767,14 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('mlp up weight matrix')) {
         return MLP_UP_WEIGHT_MATRIX_DESCRIPTION;
     }
+    if (lower === MLP_UP_BIAS_TOOLTIP_LABEL.toLowerCase()) {
+        return MLP_UP_BIAS_DESCRIPTION;
+    }
     if (lower.includes('mlp down weight matrix')) {
         return MLP_DOWN_WEIGHT_MATRIX_DESCRIPTION;
+    }
+    if (lower === MLP_DOWN_BIAS_TOOLTIP_LABEL.toLowerCase()) {
+        return MLP_DOWN_BIAS_DESCRIPTION;
     }
     if (lower.includes('mlp up projection')) {
         return MLP_UP_VECTOR_DESCRIPTION;

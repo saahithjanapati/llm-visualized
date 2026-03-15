@@ -686,6 +686,97 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.focusState?.dimNodeIds).toContain(transposeNode.id);
     });
 
+    it('shows a 2D-only tooltip for the query bias vector with a head-bias payload', () => {
+        const {
+            index,
+            projectionSourceNode,
+            queryInputNode,
+            queryWeightNode,
+            queryBiasNode,
+            queryProjectionOutputNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: queryBiasNode,
+            rowHit: {
+                rowIndex: 0,
+                rowItem: queryBiasNode?.rowItems?.[0]
+            }
+        });
+
+        expect(hoverState?.label).toBe('Query Bias Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('qkv.q.bias');
+        expect(hoverState?.info?.activationData?.parameterType).toBe('bias');
+        expect(hoverState?.info?.activationData?.values).toHaveLength(1);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionSourceNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(queryProjectionOutputNode.id);
+    });
+
+    it('shows a 2D-only tooltip for the key bias vector with a head-bias payload', () => {
+        const {
+            index,
+            projectionSourceNode,
+            keyInputNode,
+            keyWeightNode,
+            keyBiasNode,
+            keyProjectionOutputNode,
+            transposeNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: keyBiasNode,
+            rowHit: {
+                rowIndex: 0,
+                rowItem: keyBiasNode?.rowItems?.[0]
+            }
+        });
+
+        expect(hoverState?.label).toBe('Key Bias Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('qkv.k.bias');
+        expect(hoverState?.info?.activationData?.parameterType).toBe('bias');
+        expect(hoverState?.info?.activationData?.values).toHaveLength(1);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionSourceNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(keyInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(keyWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(keyBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(keyProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(transposeNode.id);
+    });
+
+    it('shows a 2D-only tooltip for the value bias vector with a head-bias payload', () => {
+        const {
+            index,
+            projectionSourceNode,
+            valueInputNode,
+            valueWeightNode,
+            valueBiasNode,
+            valueProjectionOutputNode,
+            valuePostNode
+        } = buildSceneFixtures();
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: valueBiasNode,
+            rowHit: {
+                rowIndex: 0,
+                rowItem: valueBiasNode?.rowItems?.[0]
+            }
+        });
+
+        expect(hoverState?.label).toBe('Value Bias Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('qkv.v.bias');
+        expect(hoverState?.info?.activationData?.parameterType).toBe('bias');
+        expect(hoverState?.info?.activationData?.values).toHaveLength(1);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionSourceNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueInputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueWeightNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueBiasNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueProjectionOutputNode.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valuePostNode.id);
+    });
+
     it('uses a tighter local gap inside the QK^T grouping row', () => {
         const {
             qktEquationNode,
