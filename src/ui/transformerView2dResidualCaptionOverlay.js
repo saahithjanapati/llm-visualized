@@ -39,6 +39,7 @@ const DEFAULT_CAPTION_KATEX_SUBSCRIPT_SCALE_EM = 0.8;
 const DEFAULT_CAPTION_INLINE_SUBSCRIPT_SCALE_EM = 0.84;
 const DEFAULT_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM = 0.28;
 const PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE = 4.1;
+const LAYER_NORM_PARAM_CAPTION_LABEL_ROLE_SCALE = 2.75;
 const PROJECTION_BIAS_CAPTION_DIMENSIONS_ROLE_SCALE = 2.8;
 const PROJECTION_BIAS_CAPTION_KATEX_SUBSCRIPT_SCALE_EM = 0.62;
 const PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_SCALE_EM = 0.6;
@@ -250,11 +251,17 @@ function applyCaptionRoleStyling(itemEl, node = null) {
     const isProjectionBiasNode = nodeRole === 'projection-bias'
         || nodeRole === 'mlp-up-bias'
         || nodeRole === 'mlp-down-bias';
+    const isLayerNormParamNode = nodeRole === 'layer-norm-scale'
+        || nodeRole === 'layer-norm-shift';
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-label-role-scale',
-        String(isProjectionBiasNode
-            ? PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE
-            : DEFAULT_CAPTION_LABEL_ROLE_SCALE)
+        String(
+            isProjectionBiasNode
+                ? PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE
+                : (isLayerNormParamNode
+                    ? LAYER_NORM_PARAM_CAPTION_LABEL_ROLE_SCALE
+                    : DEFAULT_CAPTION_LABEL_ROLE_SCALE)
+        )
     );
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-dimensions-role-scale',

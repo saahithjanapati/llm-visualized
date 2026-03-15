@@ -50,6 +50,7 @@ const BASE_VECTOR_ROW_GAP = 0;
 const BASE_VECTOR_PADDING_Y = 0;
 const BASE_VECTOR_PADDING_X = 0;
 const INPUT_CAPTION_LABEL_SCALE = 1;
+const PARAM_SYMBOL_CAPTION_LABEL_SCALE = 1.18;
 const EDGE_CONNECTOR_STROKE_WIDTH_SCALE = 0.88;
 const INPUT_CONNECTOR_TARGET_GAP = 8;
 const NORMALIZATION_CONNECTOR_SOURCE_GAP = 8;
@@ -69,12 +70,14 @@ const EQUATION_STAGE_GAP = 12;
 const EQUATION_STAGE_GAP_SMALL = 10;
 const PIPELINE_STAGE_GAP = 16;
 const PIPELINE_STAGE_GAP_SMALL = 12;
-const NORMALIZATION_BRIDGE_GAP = 14;
-const NORMALIZATION_BRIDGE_GAP_SMALL = 12;
-const NORMALIZATION_EQUATION_FONT_SCALE = 1.22;
+const NORMALIZATION_BRIDGE_GAP = 18;
+const NORMALIZATION_BRIDGE_GAP_SMALL = 15;
+const NORMALIZATION_EQUATION_FONT_SCALE = 1.34;
+const NORMALIZATION_EQUATION_OFFSET_Y = -14;
+const NORMALIZATION_EQUATION_OFFSET_Y_SMALL = -11;
 const CONNECTOR_LAYER_GAP = 0;
 const HADAMARD_OPERATOR_TEXT = '⊙';
-const LAYER_NORM_EQUATION_TEX = '\\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}';
+const LAYER_NORM_EQUATION_TEX = '\\hat{x} = \\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}';
 
 const LAYER_NORM_PARAM_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
     hueSpread: 0.1,
@@ -473,6 +476,7 @@ function createLayerNormVectorNode({
     measureCols = RESIDUAL_VECTOR_MEASURE_COLS,
     compactWidth = 96,
     rowHeight = BASE_VECTOR_ROW_HEIGHT,
+    captionLabelScale = INPUT_CAPTION_LABEL_SCALE,
     visualStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     stripStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     disableEdgeOrnament = false
@@ -490,7 +494,7 @@ function createLayerNormVectorNode({
         rowHeight,
         captionPosition: 'bottom',
         captionMinScreenHeightPx: 1,
-        captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
+        captionLabelScale,
         visualStyleKey,
         stripMetadata: createView2dVectorStripMetadata({
             compactWidth,
@@ -701,6 +705,7 @@ export function buildLayerNormDetailSceneModel({
         measureCols: vectorMetrics.measureCols,
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL + 5 : BASE_VECTOR_ROW_HEIGHT + 6,
+        captionLabelScale: PARAM_SYMBOL_CAPTION_LABEL_SCALE,
         visualStyleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
         stripStyleKey: 'layer-norm-scale'
     });
@@ -749,6 +754,7 @@ export function buildLayerNormDetailSceneModel({
         measureCols: vectorMetrics.measureCols,
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL + 5 : BASE_VECTOR_ROW_HEIGHT + 6,
+        captionLabelScale: PARAM_SYMBOL_CAPTION_LABEL_SCALE,
         visualStyleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
         stripStyleKey: 'layer-norm-shift'
     });
@@ -828,9 +834,12 @@ export function buildLayerNormDetailSceneModel({
             role: 'layer-norm-normalization-equation'
         }),
         tex: LAYER_NORM_EQUATION_TEX,
-        text: '(x - mu) / sqrt(sigma^2 + epsilon)',
+        text: 'x_hat = (x - mu) / sqrt(sigma^2 + epsilon)',
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.LABEL
+        },
+        layout: {
+            offsetY: isSmallScreen ? NORMALIZATION_EQUATION_OFFSET_Y_SMALL : NORMALIZATION_EQUATION_OFFSET_Y
         },
         metadata: {
             minScreenHeightPx: 0,

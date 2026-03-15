@@ -8,6 +8,7 @@ import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
 import { createMhsaDetailSceneIndex, resolveMhsaDetailHoverState } from '../view2d/mhsaDetailInteraction.js';
 import { buildMhsaSceneModel } from '../view2d/model/buildMhsaSceneModel.js';
 import { buildHeadDetailSceneModel } from '../view2d/model/buildHeadDetailSceneModel.js';
+import { buildLayerNormDetailSceneModel } from '../view2d/model/buildLayerNormDetailSceneModel.js';
 import { buildMlpDetailSceneModel } from '../view2d/model/buildMlpDetailSceneModel.js';
 import { buildOutputProjectionDetailSceneModel } from '../view2d/model/buildOutputProjectionDetailSceneModel.js';
 import { flattenSceneNodes } from '../view2d/schema/sceneTypes.js';
@@ -432,6 +433,72 @@ function buildMlpDetailFixtures({
     };
 }
 
+function buildLayerNormDetailFixtures({
+    tokenLabels = DEFAULT_TOKEN_LABELS,
+    canvasWidth = 2200,
+    canvasHeight = 1400
+} = {}) {
+    const tokenRefs = tokenLabels.map((tokenLabel, rowIndex) => ({
+        rowIndex,
+        tokenIndex: rowIndex,
+        tokenLabel
+    }));
+    const scene = buildLayerNormDetailSceneModel({
+        activationSource: {
+            getLayerIncoming(_layerIndex = 0, tokenIndex = 0, targetLength = D_MODEL) {
+                return createResidualValues(tokenIndex * 0.1).slice(0, targetLength);
+            },
+            getLayerLn1(_layerIndex = 0, stage = 'norm', tokenIndex = 0, targetLength = D_MODEL) {
+                const stageSeed = stage === 'scale' ? 0.2 : (stage === 'shift' ? 0.3 : 0.1);
+                return createResidualValues(stageSeed + (tokenIndex * 0.1)).slice(0, targetLength);
+            }
+        },
+        layerNormDetailTarget: {
+            layerNormKind: 'ln1',
+            layerIndex: 2
+        },
+        tokenRefs,
+        layerCount: 12
+    });
+    const layout = buildSceneLayout(scene);
+    const nodes = flattenSceneNodes(scene);
+    const inputNode = nodes.find((node) => node.role === 'layer-norm-input') || null;
+    const scaleNode = nodes.find((node) => node.role === 'layer-norm-scale') || null;
+    const shiftNode = nodes.find((node) => node.role === 'layer-norm-shift') || null;
+
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const canvas = document.createElement('canvas');
+    parent.appendChild(canvas);
+    Object.defineProperties(canvas, {
+        clientWidth: { configurable: true, value: canvasWidth },
+        clientHeight: { configurable: true, value: canvasHeight },
+        offsetLeft: { configurable: true, value: 0 },
+        offsetTop: { configurable: true, value: 0 }
+    });
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    const overlay = createTransformerView2dResidualCaptionOverlay({
+        documentRef: document,
+        parent
+    });
+
+    return {
+        scene,
+        layout,
+        inputNode,
+        scaleNode,
+        shiftNode,
+        canvas,
+        overlay,
+        cleanup() {
+            overlay.destroy();
+            parent.remove();
+        }
+    };
+}
+
 function resolveThresholdScale(entry = null) {
     const extent = resolveCaptionScreenExtent({
         captionPosition: 'bottom',
@@ -750,6 +817,56 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(biasDimensionsRoleScale).toBeGreaterThan(1);
             expect(biasKatexSubscriptScale).toBeLessThan(weightKatexSubscriptScale);
             expect(biasInlineSubscriptScale).toBeLessThan(weightInlineSubscriptScale);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('applies larger overlay label scaling to layer norm gamma and beta captions', () => {
+        const fixtures = buildLayerNormDetailFixtures();
+        const {
+            scene,
+            layout,
+            inputNode,
+            scaleNode,
+            shiftNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: (bounds) => ({
+                    x: bounds.x,
+                    y: bounds.y,
+                    width: bounds.width,
+                    height: bounds.height
+                }),
+                visible: true,
+                enabled: true
+            });
+
+            const inputItem = queryCaptionItem(inputNode.id);
+            const scaleItem = queryCaptionItem(scaleNode.id);
+            const shiftItem = queryCaptionItem(shiftNode.id);
+            const inputLabelRoleScale = Number.parseFloat(
+                inputItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-role-scale') || '0'
+            );
+            const scaleLabelRoleScale = Number.parseFloat(
+                scaleItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-role-scale') || '0'
+            );
+            const shiftLabelRoleScale = Number.parseFloat(
+                shiftItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-role-scale') || '0'
+            );
+
+            expect(inputLabelRoleScale).toBe(1);
+            expect(scaleLabelRoleScale).toBeGreaterThan(2.5);
+            expect(shiftLabelRoleScale).toBeGreaterThan(2.5);
+            expect(scaleLabelRoleScale).toBe(shiftLabelRoleScale);
         } finally {
             cleanup();
         }

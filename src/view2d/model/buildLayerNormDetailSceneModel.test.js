@@ -103,8 +103,9 @@ describe('buildLayerNormDetailSceneModel', () => {
         const fixedTextSizing = resolveMhsaDetailFixedTextSizing(scene, 1280);
 
         expect(scene?.metadata?.visualContract).toBe('selection-panel-layer-norm-v1');
-        expect(fixedTextSizing?.captionLabelScreenFontPx).toBe(17.5);
-        expect(fixedTextSizing?.textScreenFontPx).toBe(19);
+        expect(fixedTextSizing?.captionLabelScreenFontPx).toBeNull();
+        expect(fixedTextSizing?.textScreenFontPx).toBeNull();
+        expect(fixedTextSizing?.operatorBehavior).toBe('scene-relative');
         expect(matrixNodes).toHaveLength(13);
         expect(connectorNodes).toHaveLength(5);
         expect(operatorNodes).toHaveLength(4);
@@ -113,6 +114,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizedNode?.label?.tex).toBe('\\hat{x}');
         expect(normalizedCopyNode?.label?.tex).toBe('\\hat{x}');
         expect(scaleNode?.label?.tex).toBe('\\gamma');
+        expect(scaleNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.1);
         expect(scaleNode?.dimensions).toEqual({
             rows: 1,
             cols: D_MODEL
@@ -120,10 +122,12 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(scaledNode?.label?.tex).toBe('\\gamma \\odot \\hat{x}');
         expect(scaledCopyNode?.label?.tex).toBe('\\gamma \\odot \\hat{x}');
         expect(shiftNode?.label?.tex).toBe('\\beta');
+        expect(shiftNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.1);
         expect(outputNode?.label?.tex).toBe('x_{\\ln}');
-        expect(normalizationEquationNode?.tex).toBe('\\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}');
-        expect(normalizationEquationNode?.metadata?.fontScale).toBeGreaterThan(1.15);
-        expect(normalizationBridgeNode?.metadata?.gapOverride).toBeGreaterThan(10);
+        expect(normalizationEquationNode?.tex).toBe('\\hat{x} = \\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}');
+        expect(normalizationEquationNode?.metadata?.fontScale).toBeGreaterThan(1.3);
+        expect(normalizationEquationNode?.layout?.offsetY).toBeLessThan(-10);
+        expect(normalizationBridgeNode?.metadata?.gapOverride).toBeGreaterThan(14);
         expect(hadamardNode?.text).toBe('⊙');
         expect(scaleEqualsNode?.text).toBe('=');
         expect(shiftPlusNode?.text).toBe('+');

@@ -9,12 +9,18 @@ import {
     isWeightedSumSelection
 } from '../ui/selectionPanelSelectionUtils.js';
 import {
+    flattenSceneNodes,
+    VIEW2D_NODE_KINDS
+} from './schema/sceneTypes.js';
+import { buildFocusResult } from './mhsaDetailFocusResult.js';
+import {
     resolveLayerNormKind,
     resolvePostLayerNormResidualLabel
 } from '../utils/layerNormLabels.js';
 import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
 export const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT-2 (124 M)';
+const OVERVIEW_HOVER_FOCUS_RESULT_CACHE = new WeakMap();
 
 export function normalizeOptionalIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -176,6 +182,7 @@ function resolveLayerNormKindFromSemanticStage(stage = '') {
 function buildSemanticHoverInfo({
     label = '',
     layerIndex = null,
+    headIndex = null,
     activationStage = '',
     layerNormKind = null,
     suppressTokenChip = false
@@ -183,6 +190,9 @@ function buildSemanticHoverInfo({
     const info = {};
     if (Number.isFinite(layerIndex)) {
         info.layerIndex = Math.max(0, Math.floor(layerIndex));
+    }
+    if (Number.isFinite(headIndex)) {
+        info.headIndex = Math.max(0, Math.floor(headIndex));
     }
     if (typeof layerNormKind === 'string' && layerNormKind.length) {
         info.layerNormKind = layerNormKind;
@@ -196,6 +206,7 @@ function buildSemanticHoverInfo({
             ...(label ? { label } : {}),
             ...(activationStage ? { stage: activationStage } : {}),
             ...(Number.isFinite(layerIndex) ? { layerIndex: Math.max(0, Math.floor(layerIndex)) } : {}),
+            ...(Number.isFinite(headIndex) ? { headIndex: Math.max(0, Math.floor(headIndex)) } : {}),
             ...(typeof layerNormKind === 'string' && layerNormKind.length ? { layerNormKind } : {}),
             ...(suppressTokenChip === true ? { suppressTokenChip: true } : {})
         };
@@ -229,6 +240,22 @@ export function buildSemanticNodeHoverPayload(hit = null) {
     const semantic = entry?.semantic || hit?.node?.semantic || null;
     const role = String(entry?.role || hit?.node?.role || semantic?.role || '').trim().toLowerCase();
     if (!semantic || typeof semantic !== 'object') return null;
+
+    if (isMhsaHeadOverviewEntry(entry || hit?.node)) {
+        const label = Number.isFinite(semantic.headIndex)
+            ? `Attention Head ${Math.floor(semantic.headIndex) + 1}`
+            : 'Attention Head';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                layerIndex: semantic.layerIndex,
+                headIndex: semantic.headIndex,
+                activationStage: 'attention.head',
+                suppressTokenChip: true
+            })
+        };
+    }
 
     if (
         semantic.componentKind === 'layer-norm'
@@ -323,6 +350,19 @@ export function buildSemanticNodeHoverPayload(hit = null) {
         };
     }
 
+    if (isMlpOverviewEntry(entry || hit?.node)) {
+        const label = 'Multilayer Perceptron';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                layerIndex: semantic.layerIndex,
+                activationStage: 'mlp',
+                suppressTokenChip: true
+            })
+        };
+    }
+
     if (
         semantic.componentKind === 'output-projection'
         && (
@@ -347,6 +387,159 @@ export function buildSemanticNodeHoverPayload(hit = null) {
     }
 
     return null;
+}
+
+function resolveOverviewComponentHoverMatchTarget(hit = null) {
+    const entry = hit?.entry || hit?.node || null;
+    const semantic = entry?.semantic || null;
+    if (!semantic || typeof semantic !== 'object') return null;
+
+    if (isMhsaHeadOverviewEntry(entry)) {
+        return buildSemanticTarget({
+            componentKind: 'mhsa',
+            layerIndex: semantic.layerIndex,
+            headIndex: semantic.headIndex,
+            stage: 'attention'
+        });
+    }
+
+    if (isOutputProjectionOverviewEntry(entry)) {
+        return buildSemanticTarget({
+            componentKind: 'output-projection',
+            layerIndex: semantic.layerIndex,
+            stage: semantic.stage || 'attn-out'
+        });
+    }
+
+    if (isMlpOverviewEntry(entry)) {
+        return buildSemanticTarget({
+            componentKind: 'mlp',
+            layerIndex: semantic.layerIndex,
+            stage: semantic.stage || 'mlp'
+        });
+    }
+
+    if (isLayerNormOverviewEntry(entry)) {
+        return buildSemanticTarget({
+            componentKind: 'layer-norm',
+            ...(Number.isFinite(semantic.layerIndex) ? { layerIndex: semantic.layerIndex } : {}),
+            stage: semantic.stage
+        });
+    }
+
+    return null;
+}
+
+function buildOverviewHoverFocusCacheKey(target = null) {
+    if (!target || typeof target !== 'object') return '';
+    return [
+        String(target.componentKind || ''),
+        Number.isFinite(target.layerIndex) ? Math.floor(target.layerIndex) : '',
+        Number.isFinite(target.headIndex) ? Math.floor(target.headIndex) : '',
+        String(target.stage || '')
+    ].join('|');
+}
+
+function overviewNodeMatchesHoverTarget(node = null, target = null) {
+    if (!node || typeof node !== 'object' || !target || typeof target !== 'object') {
+        return false;
+    }
+    if (node.kind === VIEW2D_NODE_KINDS.CONNECTOR) {
+        return false;
+    }
+
+    const semantic = node.semantic || {};
+    if (semantic.componentKind !== target.componentKind) {
+        return false;
+    }
+    if (String(semantic.stage || '') !== String(target.stage || '')) {
+        return false;
+    }
+
+    const targetLayerIndex = normalizeOptionalIndex(target.layerIndex);
+    const nodeLayerIndex = normalizeOptionalIndex(semantic.layerIndex);
+    if (Number.isFinite(targetLayerIndex) || Number.isFinite(nodeLayerIndex)) {
+        if (targetLayerIndex !== nodeLayerIndex) {
+            return false;
+        }
+    }
+
+    const targetHeadIndex = normalizeOptionalIndex(target.headIndex);
+    const nodeHeadIndex = normalizeOptionalIndex(semantic.headIndex);
+    if (Number.isFinite(targetHeadIndex) || Number.isFinite(nodeHeadIndex)) {
+        if (targetHeadIndex !== nodeHeadIndex) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+export function buildSemanticNodeHoverFocusState(scene = null, hit = null) {
+    const target = resolveOverviewComponentHoverMatchTarget(hit);
+    if (!scene || !target) {
+        return null;
+    }
+    const cacheKey = buildOverviewHoverFocusCacheKey(target);
+    let sceneCache = OVERVIEW_HOVER_FOCUS_RESULT_CACHE.get(scene);
+    if (!sceneCache) {
+        sceneCache = new Map();
+        OVERVIEW_HOVER_FOCUS_RESULT_CACHE.set(scene, sceneCache);
+    } else if (sceneCache.has(cacheKey)) {
+        return sceneCache.get(cacheKey) || null;
+    }
+
+    const nodes = flattenSceneNodes(scene);
+    if (!Array.isArray(nodes) || !nodes.length) {
+        sceneCache.set(cacheKey, null);
+        return null;
+    }
+
+    const activeNodeIds = [];
+    const activeNodeIdSet = new Set();
+    const connectorNodes = [];
+
+    nodes.forEach((node) => {
+        if (!node || typeof node !== 'object' || typeof node.id !== 'string' || !node.id.length) {
+            return;
+        }
+        if (node.kind === VIEW2D_NODE_KINDS.CONNECTOR) {
+            connectorNodes.push(node);
+            return;
+        }
+        if (!overviewNodeMatchesHoverTarget(node, target)) {
+            return;
+        }
+        activeNodeIds.push(node.id);
+        activeNodeIdSet.add(node.id);
+    });
+
+    if (!activeNodeIds.length) {
+        sceneCache.set(cacheKey, null);
+        return null;
+    }
+
+    const activeConnectorIds = connectorNodes.reduce((acc, connectorNode) => {
+        const sourceNodeId = typeof connectorNode?.source?.nodeId === 'string'
+            ? connectorNode.source.nodeId
+            : '';
+        const targetNodeId = typeof connectorNode?.target?.nodeId === 'string'
+            ? connectorNode.target.nodeId
+            : '';
+        if (activeNodeIdSet.has(sourceNodeId) || activeNodeIdSet.has(targetNodeId)) {
+            acc.push(connectorNode.id);
+        }
+        return acc;
+    }, []);
+
+    const focusResult = buildFocusResult({
+        activeNodeIds,
+        activeConnectorIds
+    });
+
+    const resolvedFocusResult = focusResult?.focusState ? focusResult : null;
+    sceneCache.set(cacheKey, resolvedFocusResult);
+    return resolvedFocusResult;
 }
 
 export function buildHeadDetailSemanticTarget(target = null, role = 'head') {

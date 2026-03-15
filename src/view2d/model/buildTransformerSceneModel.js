@@ -48,6 +48,7 @@ import {
     buildVocabularyEmbeddingModule
 } from './createPositionEmbeddingModule.js';
 import { buildTokenChipStackModule } from './createTokenChipStackModule.js';
+import { resolveEmbeddingStreamLayoutMetrics } from './embeddingStreamLayoutMetrics.js';
 import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
@@ -58,6 +59,7 @@ const SUMMARY_MLP_COLS = 24;
 const SUMMARY_LOGIT_COLS = 12;
 const CARD_LABEL_HORIZONTAL_INSET = 10;
 const INPUT_EMBEDDING_ADD_TO_RESIDUAL_OFFSET_X = -96;
+const OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX = 10;
 
 const HEAD_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
     valueMin: -2,
@@ -282,6 +284,16 @@ function resolveVisibleTokenRefs(activationSource = null, tokenIndices = null, t
     }));
 }
 
+function resolveVisibleTokenRefByIndex(tokenRefs = [], tokenIndex = null) {
+    const safeTokenIndex = normalizeIndex(tokenIndex);
+    if (!Number.isFinite(safeTokenIndex)) return null;
+    const safeTokenRefs = Array.isArray(tokenRefs) ? tokenRefs.filter(Boolean) : [];
+    return safeTokenRefs.find((tokenRef) => (
+        Number.isFinite(tokenRef?.tokenIndex)
+        && Math.floor(tokenRef.tokenIndex) === safeTokenIndex
+    )) || null;
+}
+
 function resolveVisiblePositionRefs(activationSource = null, tokenIndices = null) {
     return resolveVisibleTokenIndices(activationSource, tokenIndices).map((tokenIndex, rowIndex) => ({
         rowIndex,
@@ -312,16 +324,73 @@ function resolvePromptTokenCount(activationSource = null) {
     return null;
 }
 
-function resolveGeneratedTokenRefs(tokenRefs = [], activationSource = null) {
-    const safeTokenRefs = Array.isArray(tokenRefs) ? tokenRefs.filter(Boolean) : [];
-    const promptTokenCount = resolvePromptTokenCount(activationSource);
-    if (!Number.isFinite(promptTokenCount)) {
-        return [];
+function resolveKnownTokenCount(activationSource = null) {
+    const tokenCount = typeof activationSource?.getTokenCount === 'function'
+        ? activationSource.getTokenCount()
+        : null;
+    if (Number.isFinite(tokenCount)) {
+        return Math.max(0, Math.floor(tokenCount));
     }
-    return safeTokenRefs.filter((tokenRef) => (
-        Number.isFinite(tokenRef?.tokenIndex)
-        && Math.floor(tokenRef.tokenIndex) >= promptTokenCount
-    ));
+    const promptTokenCount = Array.isArray(activationSource?.meta?.prompt_tokens)
+        ? activationSource.meta.prompt_tokens.length
+        : 0;
+    const completionTokenCount = Array.isArray(activationSource?.meta?.completion_tokens)
+        ? activationSource.meta.completion_tokens.length
+        : 0;
+    return (promptTokenCount + completionTokenCount) > 0
+        ? promptTokenCount + completionTokenCount
+        : null;
+}
+
+function resolveUnembeddingOutputTokenRefs(tokenRefs = [], activationSource = null) {
+    const safeTokenRefs = Array.isArray(tokenRefs) ? tokenRefs.filter(Boolean) : [];
+    if (!safeTokenRefs.length) return [];
+
+    const promptTokenCount = resolvePromptTokenCount(activationSource);
+    const knownTokenCount = resolveKnownTokenCount(activationSource);
+
+    return safeTokenRefs.map((tokenRef, rowIndex) => {
+        const currentTokenIndex = normalizeIndex(tokenRef?.tokenIndex);
+        const nextTokenIndex = Number.isFinite(currentTokenIndex)
+            ? currentTokenIndex + 1
+            : null;
+        const nextVisibleTokenRef = resolveVisibleTokenRefByIndex(safeTokenRefs, nextTokenIndex);
+        const nextTokenKnown = Number.isFinite(nextTokenIndex) && (
+            !!nextVisibleTokenRef
+            || (
+                Number.isFinite(knownTokenCount)
+                && nextTokenIndex < knownTokenCount
+            )
+        );
+
+        if (!nextTokenKnown) {
+            return {
+                rowIndex,
+                displayMode: 'text',
+                displayText: 'NA'
+            };
+        }
+
+        if (Number.isFinite(promptTokenCount) && nextTokenIndex < promptTokenCount) {
+            return {
+                rowIndex,
+                displayMode: 'text',
+                displayText: 'NA'
+            };
+        }
+
+        return {
+            rowIndex,
+            tokenIndex: nextTokenIndex,
+            positionIndex: nextTokenIndex + 1,
+            tokenLabel: resolveTokenLabel(
+                activationSource,
+                nextTokenIndex,
+                nextVisibleTokenRef?.tokenLabel || null,
+                nextTokenIndex
+            )
+        };
+    });
 }
 
 function buildVectorRowItems(tokenRefs = [], {
@@ -451,6 +520,19 @@ function createTextFitMetadata(maxWidth = null) {
     return Object.keys(textFit).length ? { textFit } : null;
 }
 
+function createPersistentTextMetadata({
+    maxWidth = null,
+    persistentMinScreenFontPx = null
+} = {}) {
+    const metadata = {
+        ...(createTextFitMetadata(maxWidth) || {})
+    };
+    if (Number.isFinite(persistentMinScreenFontPx) && persistentMinScreenFontPx > 0) {
+        metadata.persistentMinScreenFontPx = Number(persistentMinScreenFontPx);
+    }
+    return Object.keys(metadata).length ? metadata : null;
+}
+
 function createCaptionMetadata({
     position = 'bottom',
     styleKey = null,
@@ -488,7 +570,8 @@ function createFittedLabelNode({
     semantic = {},
     text = '',
     styleKey = VIEW2D_STYLE_KEYS.LABEL,
-    maxWidth = null
+    maxWidth = null,
+    persistentMinScreenFontPx = null
 } = {}) {
     return createTextNode({
         role,
@@ -496,7 +579,10 @@ function createFittedLabelNode({
         text,
         presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
         visual: { styleKey },
-        metadata: createTextFitMetadata(maxWidth)
+        metadata: createPersistentTextMetadata({
+            maxWidth,
+            persistentMinScreenFontPx
+        })
     });
 }
 
@@ -562,7 +648,8 @@ function createModuleCardGroup({
     dimensions = { rows: 1, cols: 1 },
     cardCornerRadius = null,
     textStyleKey = VIEW2D_STYLE_KEYS.LABEL,
-    textFitWidth = null
+    textFitWidth = null,
+    textPersistentMinScreenFontPx = null
 } = {}) {
     const cardNode = createMatrixNode({
         role: cardRole,
@@ -593,7 +680,8 @@ function createModuleCardGroup({
                     styleKey: textStyleKey,
                     maxWidth: Number.isFinite(textFitWidth) && textFitWidth > 0
                         ? textFitWidth
-                        : Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2))
+                        : Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2)),
+                    persistentMinScreenFontPx: textPersistentMinScreenFontPx
                 })
             ]
         }),
@@ -735,7 +823,8 @@ function buildLayerNormModule({
         dimensions: {
             rows: 1,
             cols: D_MODEL
-        }
+        },
+        textPersistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
     });
 }
 
@@ -805,7 +894,10 @@ function buildMhsaModule({
             text: `Attention Head ${headIndex + 1}`,
             presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
             visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
-            metadata: createTextFitMetadata(Math.max(24, HEAD_CARD_WIDTH - (CARD_LABEL_HORIZONTAL_INSET * 2)))
+            metadata: createPersistentTextMetadata({
+                maxWidth: Math.max(24, HEAD_CARD_WIDTH - (CARD_LABEL_HORIZONTAL_INSET * 2)),
+                persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
+            })
         });
         const headNode = createGroupNode({
             role: 'head',
@@ -901,14 +993,16 @@ function buildOutputProjectionModule({
                             semantic: buildSemantic(semantic, { role: 'module-title-top' }),
                             text: 'Output',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth
+                            maxWidth: titleMaxWidth,
+                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
                         }),
                         createFittedLabelNode({
                             role: 'module-title-bottom',
                             semantic: buildSemantic(semantic, { role: 'module-title-bottom' }),
                             text: 'Projection',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth
+                            maxWidth: titleMaxWidth,
+                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
                         })
                     ],
                     metadata: {
@@ -985,14 +1079,16 @@ function buildMlpModule({
                             semantic: buildSemantic(semantic, { role: 'module-title-top' }),
                             text: 'Multilayer',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth
+                            maxWidth: titleMaxWidth,
+                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
                         }),
                         createFittedLabelNode({
                             role: 'module-title-bottom',
                             semantic: buildSemantic(semantic, { role: 'module-title-bottom' }),
                             text: 'Perceptron',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth
+                            maxWidth: titleMaxWidth,
+                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
                         })
                     ],
                     metadata: {
@@ -1019,6 +1115,12 @@ function buildLayerGroup({
         componentKind: 'layer',
         layerIndex
     };
+    const embeddingLayoutMetrics = includeInputPositionEmbedding
+        ? resolveEmbeddingStreamLayoutMetrics({
+            tokenCount: tokenRefs.length,
+            isSmallScreen
+        })
+        : null;
 
     const COLUMN_WIDTHS = {
         residual: 136,
@@ -1054,7 +1156,9 @@ function buildLayerGroup({
                 componentKind: 'embedding',
                 stage: 'embedding.token',
                 role: 'module'
-            }
+            },
+            cardWidth: embeddingLayoutMetrics?.vocabulary?.cardWidth,
+            cardHeight: embeddingLayoutMetrics?.vocabulary?.cardHeight
         })
         : null;
     const inputTokenChipStack = includeInputPositionEmbedding
@@ -1063,7 +1167,13 @@ function buildLayerGroup({
                 componentKind: 'embedding',
                 stage: 'embedding.token'
             },
-            tokenRefs
+            tokenRefs,
+            chipWidth: embeddingLayoutMetrics?.vocabulary?.chipWidth,
+            chipHeight: embeddingLayoutMetrics?.vocabulary?.chipHeight,
+            minChipHeight: embeddingLayoutMetrics?.vocabulary?.minChipHeight,
+            maxStackHeight: embeddingLayoutMetrics?.vocabulary?.maxStackHeight,
+            gap: embeddingLayoutMetrics?.vocabulary?.stackGap,
+            labelFontScale: embeddingLayoutMetrics?.vocabulary?.labelFontScale
         })
         : null;
     const inputPositionChipStack = includeInputPositionEmbedding
@@ -1076,7 +1186,14 @@ function buildLayerGroup({
             stackRole: 'input-position-chip-stack',
             chipRole: 'input-position-chip',
             chipLabelRole: 'input-position-chip-label',
-            chipGroupRole: 'input-position-chip-group'
+            chipGroupRole: 'input-position-chip-group',
+            chipWidth: embeddingLayoutMetrics?.position?.chipWidth,
+            chipHeight: embeddingLayoutMetrics?.position?.chipHeight,
+            minChipHeight: embeddingLayoutMetrics?.position?.minChipHeight,
+            maxStackHeight: embeddingLayoutMetrics?.position?.maxStackHeight,
+            gap: embeddingLayoutMetrics?.position?.stackGap,
+            colorMode: 'neutral',
+            labelFontScale: embeddingLayoutMetrics?.position?.labelFontScale
         })
         : null;
     const inputPositionEmbedding = includeInputPositionEmbedding
@@ -1085,7 +1202,9 @@ function buildLayerGroup({
                 componentKind: 'embedding',
                 stage: 'embedding.position',
                 role: 'module'
-            }
+            },
+            cardWidth: embeddingLayoutMetrics?.position?.cardWidth,
+            cardHeight: embeddingLayoutMetrics?.position?.cardHeight
         })
         : null;
     const ln1Module = buildLayerNormModule({
@@ -1262,7 +1381,7 @@ function buildLayerGroup({
                     targetNodeId: inputVocabularyEmbedding.cardNode.id,
                     selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
                     targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
-                    offset: -18
+                    offset: -(embeddingLayoutMetrics?.vocabulary?.chipToCardGap || 18)
                 }
             },
             children: [inputTokenChipYAnchor]
@@ -1302,7 +1421,12 @@ function buildLayerGroup({
                             targetNodeId: inputVocabularyEmbedding.cardNode.id,
                             selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
                             targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
-                            offset: 182
+                            offset: Math.round(
+                                (
+                                    (Number(embeddingLayoutMetrics?.vocabulary?.cardHeight) || 144)
+                                    + (Number(embeddingLayoutMetrics?.position?.cardHeight) || 108)
+                                ) / 2
+                            ) + (Number(embeddingLayoutMetrics?.vocabularyToPositionGap) || 56)
                         }
                     },
                     children: [inputPositionEmbedding.node]
@@ -1347,7 +1471,7 @@ function buildLayerGroup({
                     targetNodeId: inputPositionEmbedding.cardNode.id,
                     selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
                     targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
-                    offset: -18
+                    offset: -(embeddingLayoutMetrics?.position?.chipToCardGap || 18)
                 }
             },
             children: [inputPositionChipYAnchor]
@@ -1616,10 +1740,16 @@ function buildFinalOutputGroup({
     layerIndex = null,
     activationSource = null,
     tokenRefs = [],
-    anchorTargetNode = null
+    anchorTargetNode = null,
+    isSmallScreen = false
 } = {}) {
-    const UNEMBEDDING_CARD_WIDTH = 196;
-    const UNEMBEDDING_OUTPUT_GAP = 14;
+    const embeddingLayoutMetrics = resolveEmbeddingStreamLayoutMetrics({
+        tokenCount: tokenRefs.length,
+        isSmallScreen
+    });
+    const unembeddingMetrics = embeddingLayoutMetrics.unembedding;
+    const UNEMBEDDING_CARD_WIDTH = unembeddingMetrics.cardWidth;
+    const UNEMBEDDING_OUTPUT_GAP = unembeddingMetrics.outputGap;
     const COLUMN_WIDTHS = {
         residual: 136,
         layerNorm: 148,
@@ -1653,18 +1783,26 @@ function buildFinalOutputGroup({
             componentKind: 'logits',
             stage: 'unembedding',
             role: 'module'
-        }
+        },
+        cardWidth: unembeddingMetrics.cardWidth,
+        cardHeight: unembeddingMetrics.cardHeight
     });
     const chosenTokenChipStack = buildTokenChipStackModule({
         semantic: {
             componentKind: 'logits',
             stage: 'output'
         },
-        tokenRefs: resolveGeneratedTokenRefs(tokenRefs, activationSource),
+        tokenRefs: resolveUnembeddingOutputTokenRefs(tokenRefs, activationSource),
         stackRole: 'chosen-token-chip-stack',
         chipRole: 'chosen-token-chip',
         chipLabelRole: 'chosen-token-chip-label',
-        chipGroupRole: 'chosen-token-chip-group'
+        chipGroupRole: 'chosen-token-chip-group',
+        chipWidth: unembeddingMetrics.chipWidth,
+        chipHeight: unembeddingMetrics.chipHeight,
+        minChipHeight: unembeddingMetrics.minChipHeight,
+        maxStackHeight: unembeddingMetrics.maxStackHeight,
+        gap: unembeddingMetrics.stackGap,
+        labelFontScale: unembeddingMetrics.labelFontScale
     });
     const unembeddingBody = chosenTokenChipStack
         ? createGroupNode({
@@ -1687,7 +1825,7 @@ function buildFinalOutputGroup({
         })
         : unembeddingModule.node;
     COLUMN_WIDTHS.unembedding = chosenTokenChipStack
-        ? (UNEMBEDDING_CARD_WIDTH + chosenTokenChipStack.width + UNEMBEDDING_OUTPUT_GAP + 10)
+        ? (unembeddingMetrics.cardWidth + chosenTokenChipStack.width + UNEMBEDDING_OUTPUT_GAP + 10)
         : COLUMN_WIDTHS.unembedding;
 
     const node = createGroupNode({
@@ -1976,7 +2114,8 @@ export function buildTransformerSceneModel({
             layerIndex: layerModules.length - 1,
             activationSource,
             tokenRefs,
-            anchorTargetNode: layerModules[layerModules.length - 1]?.exitNode || null
+            anchorTargetNode: layerModules[layerModules.length - 1]?.exitNode || null,
+            isSmallScreen
         })
         : null;
 

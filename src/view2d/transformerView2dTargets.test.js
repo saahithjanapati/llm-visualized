@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildTransformerSceneModel } from './model/buildTransformerSceneModel.js';
+import { flattenSceneNodes, VIEW2D_NODE_KINDS } from './schema/sceneTypes.js';
 import {
     buildResidualRowHoverPayload,
+    buildSemanticNodeHoverFocusState,
     buildSemanticNodeHoverPayload,
     isLayerNormOverviewEntry,
     isMlpOverviewEntry,
@@ -389,5 +392,124 @@ describe('transformerView2dTargets', () => {
                 }
             }
         });
+    });
+
+    it('exposes hover context for overview attention heads', () => {
+        const payload = buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'head-card',
+                semantic: {
+                    componentKind: 'mhsa',
+                    layerIndex: 1,
+                    headIndex: 2,
+                    stage: 'attention',
+                    role: 'head-card'
+                }
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'Attention Head 3',
+            info: {
+                layerIndex: 1,
+                headIndex: 2,
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'Attention Head 3',
+                    stage: 'attention.head',
+                    layerIndex: 1,
+                    headIndex: 2,
+                    suppressTokenChip: true
+                }
+            }
+        });
+    });
+
+    it('exposes hover context for overview MLP modules', () => {
+        const payload = buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'module-title-top',
+                semantic: {
+                    componentKind: 'mlp',
+                    layerIndex: 5,
+                    stage: 'mlp',
+                    role: 'module-title-top'
+                }
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'Multilayer Perceptron',
+            info: {
+                layerIndex: 5,
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'Multilayer Perceptron',
+                    stage: 'mlp',
+                    layerIndex: 5,
+                    suppressTokenChip: true
+                }
+            }
+        });
+    });
+
+    it('builds overview component focus state for hovered MLP modules', () => {
+        const scene = buildTransformerSceneModel({
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const mlpCardNode = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node.semantic?.componentKind === 'mlp'
+            && node.semantic?.stage === 'mlp'
+            && node.role === 'module-card'
+        ));
+        const mlpTitleTopNode = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.TEXT
+            && node.semantic?.componentKind === 'mlp'
+            && node.semantic?.stage === 'mlp'
+            && node.role === 'module-title-top'
+        ));
+        const mlpTitleBottomNode = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.TEXT
+            && node.semantic?.componentKind === 'mlp'
+            && node.semantic?.stage === 'mlp'
+            && node.role === 'module-title-bottom'
+        ));
+        const ln2CardNode = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node.semantic?.componentKind === 'layer-norm'
+            && node.semantic?.stage === 'ln2'
+            && node.role === 'module-card'
+        ));
+        const postMlpAddNode = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node.semantic?.componentKind === 'residual'
+            && node.semantic?.stage === 'post-mlp-add'
+            && node.role === 'add-circle'
+        ));
+        const ln2ToMlpConnector = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.CONNECTOR
+            && node.source?.nodeId === ln2CardNode?.id
+            && node.target?.nodeId === mlpCardNode?.id
+        ));
+        const mlpToAddConnector = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.CONNECTOR
+            && node.source?.nodeId === mlpCardNode?.id
+            && node.target?.nodeId === postMlpAddNode?.id
+        ));
+
+        const hoverState = buildSemanticNodeHoverFocusState(scene, {
+            entry: mlpCardNode
+        });
+
+        expect(hoverState?.focusState?.activeNodeIds).toContain(mlpCardNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(mlpTitleTopNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(mlpTitleBottomNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(ln2ToMlpConnector?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(mlpToAddConnector?.id);
+        expect(Array.isArray(hoverState?.focusState?.activeNodeIds)).toBe(true);
+        expect(typeof hoverState?.signature).toBe('string');
+        expect(hoverState?.signature.length).toBeGreaterThan(0);
     });
 });

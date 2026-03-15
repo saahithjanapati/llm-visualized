@@ -52,7 +52,7 @@ describe('mhsaDetailFixedLabelSizing', () => {
         expect(sizing?.captionDimensionsScreenFontPx).toBeNull();
     });
 
-    it('uses fixed larger caption and text sizing for layer norm detail scenes', () => {
+    it('uses the same scene-relative zoom policy for layer norm detail scenes', () => {
         const scene = {
             metadata: {
                 visualContract: 'selection-panel-layer-norm-v1'
@@ -63,13 +63,13 @@ describe('mhsaDetailFixedLabelSizing', () => {
         const zoomPolicy = resolveView2dSceneTextZoomPolicy(scene);
 
         expect(zoomPolicy.useUniformMatrixCaptions).toBe(true);
-        expect(zoomPolicy.captionBehavior).toBe(VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_FIXED);
-        expect(zoomPolicy.domTextBehavior).toBe(VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_FIXED);
-        expect(sizing?.textScreenFontPx).toBe(19);
-        expect(sizing?.captionLabelScreenFontPx).toBe(17.5);
-        expect(sizing?.captionDimensionsScreenFontPx).toBe(14);
-        expect(sizing?.rowLabelScreenFontPx).toBe(13.5);
-        expect(sizing?.operatorMinScreenFontPx).toBe(17);
+        expect(zoomPolicy.captionBehavior).toBe(VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE);
+        expect(zoomPolicy.domTextBehavior).toBe(VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE);
+        expect(sizing?.textScreenFontPx).toBeNull();
+        expect(sizing?.captionLabelScreenFontPx).toBeNull();
+        expect(sizing?.captionDimensionsScreenFontPx).toBeNull();
+        expect(sizing?.rowLabelScreenFontPx).toBe(14);
+        expect(sizing?.operatorMinScreenFontPx).toBeNull();
     });
 
     it('ignores non-MHSA scenes', () => {

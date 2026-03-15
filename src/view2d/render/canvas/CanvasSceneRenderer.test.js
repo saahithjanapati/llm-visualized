@@ -692,6 +692,66 @@ describe('CanvasSceneRenderer', () => {
         expect(renderedTexts).toContain('Label');
     });
 
+    it('reveals persistent labels earlier than default canvas text labels', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+                    gapKey: 'default',
+                    children: [
+                        createTextNode({
+                            role: 'persistent-label',
+                            semantic: {
+                                componentKind: 'test',
+                                role: 'persistent-label'
+                            },
+                            text: 'Persistent',
+                            visual: {
+                                styleKey: VIEW2D_STYLE_KEYS.LABEL
+                            },
+                            metadata: {
+                                persistentMinScreenFontPx: 10
+                            }
+                        }),
+                        createTextNode({
+                            role: 'default-label',
+                            semantic: {
+                                componentKind: 'test',
+                                role: 'default-label'
+                            },
+                            text: 'Default',
+                            visual: {
+                                styleKey: VIEW2D_STYLE_KEYS.LABEL
+                            }
+                        })
+                    ]
+                })
+            ]
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 0.75,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const renderedTexts = ctx.operations
+            .filter((entry) => entry.type === 'fillText')
+            .map((entry) => entry.text);
+
+        expect(renderedTexts).toContain('Persistent');
+        expect(renderedTexts).not.toContain('Default');
+    });
+
     it('keeps connector arrowheads visible during interactive head-detail zoom renders', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);

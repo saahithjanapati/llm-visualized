@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildAttentionMatrixValues,
     resolveAttentionMatrixCellValue,
+    shouldClearPinnedAttentionOnDocumentPointerDown,
     shouldMuteCausalUpperPreAttentionCell
 } from './selectionPanelAttentionMatrixUtils.js';
 
@@ -76,5 +77,27 @@ describe('selectionPanelAttentionMatrixUtils', () => {
             queryTokenIndex: 0,
             keyTokenIndex: 2
         })).toBe(0);
+    });
+
+    it('keeps a pinned attention cell active for taps elsewhere in the detail panel', () => {
+        expect(shouldClearPinnedAttentionOnDocumentPointerDown({
+            isPinned: true,
+            panelHit: true
+        })).toBe(false);
+    });
+
+    it('clears a pinned attention cell when tapping blank space inside the attention matrix', () => {
+        expect(shouldClearPinnedAttentionOnDocumentPointerDown({
+            isPinned: true,
+            panelHit: true,
+            insideAttentionMatrix: true,
+            validMatrixCell: false
+        })).toBe(true);
+    });
+
+    it('clears a pinned attention cell when tapping outside the detail panel', () => {
+        expect(shouldClearPinnedAttentionOnDocumentPointerDown({
+            isPinned: true
+        })).toBe(true);
     });
 });

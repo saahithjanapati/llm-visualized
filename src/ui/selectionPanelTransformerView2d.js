@@ -12,6 +12,7 @@ import {
 } from '../engine/coreRaycastLabels.js';
 import {
     buildResidualRowHoverPayload,
+    buildSemanticNodeHoverFocusState,
     buildSemanticNodeHoverPayload,
     buildSemanticTarget,
     deriveBaseSemanticTarget,
@@ -451,6 +452,8 @@ export function createTransformerView2dDetailView(panelEl) {
         detailScenePinnedTokenEntry: null,
         detailScenePinnedTokenSticky: false,
         detailSceneLockActive: false,
+        overviewSceneFocus: null,
+        overviewSceneHoverSignature: '',
         hoveredResidualRow: null,
         hoverDimming: {
             value: 0,
@@ -459,7 +462,10 @@ export function createTransformerView2dDetailView(panelEl) {
             lastTime: 0,
             previousHoveredRow: null,
             rowBlend: 1,
-            rowBlendTarget: 1
+            rowBlendTarget: 1,
+            previousOverviewFocus: null,
+            overviewBlend: 1,
+            overviewBlendTarget: 1
         },
         hoverTargetKey: '',
         hoverFrame: null,
@@ -507,6 +513,20 @@ export function createTransformerView2dDetailView(panelEl) {
         state.pendingInitialFocus = false;
         state.autoFrameOnResize = false;
         state.lastAutoFrameViewportSize = null;
+    }
+
+    function getActiveSceneFocusState() {
+        return state.headDetailDepthActive
+            ? (state.detailSceneFocus || null)
+            : (state.overviewSceneFocus || null);
+    }
+
+    function shouldUseOverviewHoverRenderFastPath() {
+        if (state.headDetailDepthActive) return false;
+        if (state.hoveredResidualRow || state.overviewSceneFocus || state.hoverDimming?.previousOverviewFocus) return true;
+        const hoverDimmingValue = Number(state.hoverDimming?.value) || 0;
+        const hoverDimmingTarget = Number(state.hoverDimming?.target) || 0;
+        return hoverDimmingValue > 0.001 || hoverDimmingTarget > 0.001;
     }
 
     function trackAutoFrameViewportSize(width = 0, height = 0) {
@@ -1106,16 +1126,48 @@ export function createTransformerView2dDetailView(panelEl) {
         hoverDimming.rowBlendTarget = 1;
     }
 
+    function resetHoverOverviewBlend() {
+        const hoverDimming = state.hoverDimming;
+        if (!hoverDimming) return;
+        hoverDimming.previousOverviewFocus = null;
+        hoverDimming.overviewBlend = 1;
+        hoverDimming.overviewBlendTarget = 1;
+    }
+
     function ensureHoverDimmingAnimation() {
         const hoverDimming = state.hoverDimming;
         if (!hoverDimming || hoverDimming.rafId !== null) return;
+        const shouldReleasePreviousOverviewFocus = ({
+            dimValue = hoverDimming.value,
+            dimTarget = hoverDimming.target,
+            overviewBlendValue = hoverDimming.overviewBlend,
+            overviewBlendTarget = hoverDimming.overviewBlendTarget
+        } = {}) => {
+            if (overviewBlendTarget < 0.999 || overviewBlendValue < 0.999) {
+                return false;
+            }
+            if (state.overviewSceneFocus) {
+                return true;
+            }
+            return dimTarget <= 0.01 && dimValue <= 0.01;
+        };
         const dimSettled = Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01;
         const rowBlendSettled = Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01;
-        if (dimSettled && rowBlendSettled) {
+        const overviewBlendSettled = Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) <= 0.01;
+        if (dimSettled && rowBlendSettled && overviewBlendSettled) {
             hoverDimming.value = hoverDimming.target;
             hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
             if (hoverDimming.rowBlendTarget >= 1) {
                 hoverDimming.previousHoveredRow = null;
+            }
+            hoverDimming.overviewBlend = hoverDimming.overviewBlendTarget;
+            if (shouldReleasePreviousOverviewFocus({
+                dimValue: hoverDimming.value,
+                dimTarget: hoverDimming.target,
+                overviewBlendValue: hoverDimming.overviewBlend,
+                overviewBlendTarget: hoverDimming.overviewBlendTarget
+            })) {
+                hoverDimming.previousOverviewFocus = null;
             }
             return;
         }
@@ -1128,6 +1180,15 @@ export function createTransformerView2dDetailView(panelEl) {
                 if (hoverDimming.rowBlendTarget >= 1) {
                     hoverDimming.previousHoveredRow = null;
                 }
+                hoverDimming.overviewBlend = hoverDimming.overviewBlendTarget;
+                if (shouldReleasePreviousOverviewFocus({
+                    dimValue: hoverDimming.value,
+                    dimTarget: hoverDimming.target,
+                    overviewBlendValue: hoverDimming.overviewBlend,
+                    overviewBlendTarget: hoverDimming.overviewBlendTarget
+                })) {
+                    hoverDimming.previousOverviewFocus = null;
+                }
                 hoverDimming.lastTime = 0;
                 return;
             }
@@ -1139,6 +1200,7 @@ export function createTransformerView2dDetailView(panelEl) {
             const alpha = 1 - Math.exp(-dt / VIEW2D_ROW_HOVER_FADE_DURATION_MS);
             hoverDimming.value += (hoverDimming.target - hoverDimming.value) * alpha;
             hoverDimming.rowBlend += (hoverDimming.rowBlendTarget - hoverDimming.rowBlend) * alpha;
+            hoverDimming.overviewBlend += (hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) * alpha;
 
             if (Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01) {
                 hoverDimming.value = hoverDimming.target;
@@ -1149,11 +1211,23 @@ export function createTransformerView2dDetailView(panelEl) {
                     hoverDimming.previousHoveredRow = null;
                 }
             }
+            if (Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) <= 0.01) {
+                hoverDimming.overviewBlend = hoverDimming.overviewBlendTarget;
+                if (shouldReleasePreviousOverviewFocus({
+                    dimValue: hoverDimming.value,
+                    dimTarget: hoverDimming.target,
+                    overviewBlendValue: hoverDimming.overviewBlend,
+                    overviewBlendTarget: hoverDimming.overviewBlendTarget
+                })) {
+                    hoverDimming.previousOverviewFocus = null;
+                }
+            }
 
             const nextDimSettled = Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01;
             const nextRowBlendSettled = Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01;
+            const nextOverviewBlendSettled = Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) <= 0.01;
             render();
-            if (nextDimSettled && nextRowBlendSettled) {
+            if (nextDimSettled && nextRowBlendSettled && nextOverviewBlendSettled) {
                 hoverDimming.lastTime = 0;
                 return;
             }
@@ -1178,6 +1252,7 @@ export function createTransformerView2dDetailView(panelEl) {
             hoverDimming.value = nextTarget;
             if (nextTarget <= 0.001) {
                 resetHoverRowBlend();
+                resetHoverOverviewBlend();
             }
             if (shouldRender) scheduleRender();
             return;
@@ -1186,6 +1261,7 @@ export function createTransformerView2dDetailView(panelEl) {
         if (
             Math.abs(hoverDimming.value - nextTarget) < 0.001
             && Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) < 0.001
+            && Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) < 0.001
         ) {
             hoverDimming.value = nextTarget;
             if (shouldRender) scheduleRender();
@@ -1259,6 +1335,9 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailSceneLockActive = false;
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
+        state.overviewSceneFocus = null;
+        state.overviewSceneHoverSignature = '';
+        resetHoverOverviewBlend();
         resetCanvasHoverTargetKey();
         if (hadPinnedFocus) {
             tokenHoverSync.clearCanvasEntry({ emit: true });
@@ -1297,6 +1376,9 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailSceneLockActive = lockSelection === true;
         state.detailSceneFocus = detailHoverState.focusState;
         state.detailSceneHoverSignature = nextSignature;
+        state.overviewSceneFocus = null;
+        state.overviewSceneHoverSignature = '';
+        resetHoverOverviewBlend();
         resetCanvasHoverTargetKey();
         if (state.detailScenePinnedTokenSticky) {
             tokenHoverSync.setCanvasEntry(pinnedTokenEntry, { emit: true });
@@ -1316,6 +1398,7 @@ export function createTransformerView2dDetailView(panelEl) {
     } = {}) {
         if (state.detailScenePinnedFocus && force !== true) {
             const hadResidualHover = !!state.hoveredResidualRow;
+            const hadOverviewFocus = !!state.overviewSceneFocus;
             if (state.detailScenePinnedTokenSticky && state.detailScenePinnedTokenEntry) {
                 tokenHoverSync.setCanvasEntry(state.detailScenePinnedTokenEntry, { emit: true });
             } else {
@@ -1323,6 +1406,9 @@ export function createTransformerView2dDetailView(panelEl) {
             }
             resetCanvasHoverTargetKey();
             state.hoveredResidualRow = null;
+            state.overviewSceneFocus = null;
+            state.overviewSceneHoverSignature = '';
+            resetHoverOverviewBlend();
             state.detailSceneFocus = state.detailScenePinnedFocus;
             state.detailSceneHoverSignature = state.detailScenePinnedSignature;
             hoverLabelOverlay.hide();
@@ -1331,7 +1417,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 immediate: !state.visible,
                 shouldRender: false
             });
-            if (hadResidualHover && shouldScheduleRender) {
+            if ((hadResidualHover || hadOverviewFocus) && shouldScheduleRender) {
                 scheduleRender();
             }
             return;
@@ -1340,16 +1426,27 @@ export function createTransformerView2dDetailView(panelEl) {
         resetCanvasHoverTargetKey();
         const hadResidualHover = !!state.hoveredResidualRow;
         const hadDetailHover = !!state.detailSceneFocus;
+        const hadOverviewFocus = !!state.overviewSceneFocus || !!state.hoverDimming?.previousOverviewFocus;
+        const shouldAnimateOverviewFade = hadOverviewFocus && !(!state.visible || force === true);
         state.hoveredResidualRow = null;
+        if (shouldAnimateOverviewFade) {
+            state.hoverDimming.previousOverviewFocus = state.overviewSceneFocus || state.hoverDimming.previousOverviewFocus || null;
+            state.hoverDimming.overviewBlend = 1;
+            state.hoverDimming.overviewBlendTarget = 1;
+        } else {
+            resetHoverOverviewBlend();
+        }
+        state.overviewSceneFocus = null;
+        state.overviewSceneHoverSignature = '';
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
         hoverLabelOverlay.hide();
         resetHoverRowBlend();
         setHoverDimmingTarget(0, {
             immediate: !state.visible,
-            shouldRender: shouldScheduleRender || hadResidualHover || hadDetailHover
+            shouldRender: shouldScheduleRender || hadResidualHover || hadDetailHover || hadOverviewFocus
         });
-        if ((hadResidualHover || hadDetailHover) && shouldScheduleRender) {
+        if ((hadResidualHover || hadDetailHover || hadOverviewFocus) && shouldScheduleRender) {
             scheduleRender();
         }
     }
@@ -1416,6 +1513,9 @@ export function createTransformerView2dDetailView(panelEl) {
             tokenHoverSync.setCanvasEntryFromHoverPayload(detailHoverState, { emit: true });
             const didChange = detailHoverState.signature !== state.detailSceneHoverSignature;
             state.hoveredResidualRow = null;
+            state.overviewSceneFocus = null;
+            state.overviewSceneHoverSignature = '';
+            resetHoverOverviewBlend();
             resetHoverRowBlend();
             setHoverDimmingTarget(0, {
                 immediate: true,
@@ -1468,6 +1568,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 rowIndex: Math.max(0, Math.floor(worldHit.rowHit.rowIndex))
             };
             const prevHoveredRow = state.hoveredResidualRow;
+            const hadOverviewFocus = !!state.overviewSceneFocus;
             const didChange = !prevHoveredRow
                 || prevHoveredRow.nodeId !== nextHoveredRow.nodeId
                 || prevHoveredRow.rowIndex !== nextHoveredRow.rowIndex;
@@ -1482,10 +1583,13 @@ export function createTransformerView2dDetailView(panelEl) {
                 resetHoverRowBlend();
             }
             state.hoveredResidualRow = nextHoveredRow;
+            state.overviewSceneFocus = null;
+            state.overviewSceneHoverSignature = '';
+            resetHoverOverviewBlend();
             state.hoverTargetKey = residualHoverKey;
             tokenHoverSync.setCanvasEntryFromResidualHoverPayload(residualHoverPayload, { emit: true });
             setHoverDimmingTarget(1, {
-                shouldRender: didChange
+                shouldRender: didChange || hadOverviewFocus
             });
             hoverLabelOverlay.show({
                 clientX: event.clientX,
@@ -1494,7 +1598,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 info: residualHoverPayload.info,
                 activationSource: state.activationSource
             });
-            if (didChange) {
+            if (didChange || hadOverviewFocus) {
                 scheduleRender();
             }
             return worldHit?.entry || null;
@@ -1526,13 +1630,33 @@ export function createTransformerView2dDetailView(panelEl) {
         }
 
         const hadResidualHover = !!state.hoveredResidualRow;
+        const previousOverviewFocusSignature = state.overviewSceneHoverSignature || '';
+        const semanticHoverFocusState = buildSemanticNodeHoverFocusState(state.scene, worldHit);
+        const previousOverviewFocusState = state.overviewSceneFocus || null;
         state.hoveredResidualRow = null;
         state.detailSceneFocus = state.detailScenePinnedFocus || null;
         state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
+        state.overviewSceneFocus = semanticHoverFocusState?.focusState || null;
+        state.overviewSceneHoverSignature = semanticHoverFocusState?.signature || '';
+        if (
+            previousOverviewFocusState
+            && previousOverviewFocusSignature
+            && previousOverviewFocusSignature !== state.overviewSceneHoverSignature
+        ) {
+            state.hoverDimming.previousOverviewFocus = previousOverviewFocusState;
+            state.hoverDimming.overviewBlend = 0;
+            state.hoverDimming.overviewBlendTarget = 1;
+        } else if (!state.overviewSceneFocus) {
+            resetHoverOverviewBlend();
+        } else {
+            state.hoverDimming.previousOverviewFocus = null;
+            state.hoverDimming.overviewBlend = 1;
+            state.hoverDimming.overviewBlendTarget = 1;
+        }
         tokenHoverSync.setCanvasEntryFromHoverPayload(semanticHoverPayload, { emit: true });
         resetHoverRowBlend();
-        setHoverDimmingTarget(0, {
-            immediate: true,
+        setHoverDimmingTarget(1, {
+            immediate: !state.visible,
             shouldRender: false
         });
         state.hoverTargetKey = semanticHoverKey;
@@ -1543,7 +1667,11 @@ export function createTransformerView2dDetailView(panelEl) {
             info: semanticHoverPayload.info,
             activationSource: state.activationSource
         });
-        if (hadResidualHover) {
+        if (
+            hadResidualHover
+            || previousOverviewFocusSignature !== state.overviewSceneHoverSignature
+            || Math.abs((state.hoverDimming?.value || 0) - 1) > 0.001
+        ) {
             scheduleRender();
         }
         return worldHit?.entry || null;
@@ -1792,6 +1920,9 @@ export function createTransformerView2dDetailView(panelEl) {
         state.detailSceneLockActive = false;
         state.detailSceneFocus = null;
         state.detailSceneHoverSignature = '';
+        state.overviewSceneFocus = null;
+        state.overviewSceneHoverSignature = '';
+        resetHoverOverviewBlend();
         resetCanvasHoverTargetKey();
         tokenHoverSync.clearCanvasEntry({ emit: true });
         if (state.detailSceneIndex && state.pendingDetailInteractionTargets.length) {
@@ -1980,10 +2111,11 @@ export function createTransformerView2dDetailView(panelEl) {
         detailViewportController.setViewportSize(width, height);
         detailViewportController.setSceneBounds(headDetailSceneBounds);
         updateHeadDetailDepthState();
+        const hoverRenderFastPath = shouldUseOverviewHoverRenderFastPath();
         const didRender = renderer.render({
             width,
             height,
-            dprCap: state.isInteracting
+            dprCap: (state.isInteracting || hoverRenderFastPath)
                 ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
                 : VIEW2D_PREVIEW_DPR_CAP_IDLE,
             viewportTransform: viewportController.getViewportTransform('detail-transformer-view2d'),
@@ -1992,16 +2124,26 @@ export function createTransformerView2dDetailView(panelEl) {
                     ? detailViewportController.getViewportTransform('detail-transformer-view2d-head-detail')
                     : null
             ),
-            interacting: state.isInteracting,
+            interacting: state.isInteracting || hoverRenderFastPath,
             headDetailDepthActive: state.headDetailDepthActive,
             interactionState: {
                 hoveredRow: state.hoveredResidualRow,
                 previousHoveredRow: state.hoverDimming?.previousHoveredRow || null,
                 hoverRowBlend: state.hoverDimming?.rowBlend ?? 1,
                 hoverDimStrength: state.hoverDimming?.value || 0,
-                detailSceneFocus: state.headDetailDepthActive ? state.detailSceneFocus : null
+                detailSceneFocus: getActiveSceneFocusState(),
+                disableInactiveFilter: hoverRenderFastPath,
+                overviewFocusTransition: state.headDetailDepthActive
+                    ? null
+                    : {
+                        currentFocus: state.overviewSceneFocus || null,
+                        previousFocus: state.hoverDimming?.previousOverviewFocus || null,
+                        focusBlend: state.hoverDimming?.overviewBlend ?? 1,
+                        dimStrength: state.hoverDimming?.value || 0
+                    }
             }
         });
+        const activeSceneFocusState = getActiveSceneFocusState();
         const captionSceneState = renderer.getActiveCaptionSceneState();
         residualCaptionOverlay.sync({
             scene: captionSceneState?.scene || null,
@@ -2010,7 +2152,7 @@ export function createTransformerView2dDetailView(panelEl) {
             projectBounds: (bounds) => renderer.resolveScreenBounds(bounds),
             visible: state.visible,
             enabled: true,
-            focusState: state.headDetailDepthActive ? state.detailSceneFocus : null
+            focusState: activeSceneFocusState
         });
         syncDetailFrame();
         updateReadouts();

@@ -11,14 +11,20 @@ function createVector(seed = 0, length = D_MODEL) {
     return Array.from({ length }, (_, index) => Number((seed + (index * 0.01)).toFixed(4)));
 }
 
-function createMockActivationSource() {
+function createMockActivationSource({
+    promptTokenCount = 2,
+    completionTokenCount = 1
+} = {}) {
+    const safePromptTokenCount = Math.max(0, Math.floor(promptTokenCount));
+    const safeCompletionTokenCount = Math.max(0, Math.floor(completionTokenCount));
+    const tokenCount = safePromptTokenCount + safeCompletionTokenCount;
     return {
         meta: {
-            prompt_tokens: [101, 102],
-            completion_tokens: [103]
+            prompt_tokens: Array.from({ length: safePromptTokenCount }, (_, index) => 101 + index),
+            completion_tokens: Array.from({ length: safeCompletionTokenCount }, (_, index) => 401 + index)
         },
         getTokenCount() {
-            return 3;
+            return tokenCount;
         },
         getTokenId(tokenIndex = 0) {
             return 100 + tokenIndex;
@@ -366,9 +372,19 @@ describe('buildTransformerSceneModel', () => {
         ).toBeGreaterThan(
             chipEntries[1].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
         );
+        expect(positionChipNodes[0]?.visual?.accent).toBe(positionChipNodes[1]?.visual?.accent);
+        expect(positionChipNodes[1]?.visual?.accent).toBe(positionChipNodes[2]?.visual?.accent);
+        expect(positionChipNodes[0]?.visual?.accent).not.toBeUndefined();
+        const inputTokenChipNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'input-token-chip'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+        ));
+        expect(positionChipNodes[0]?.visual?.accent).not.toBe(inputTokenChipNode?.visual?.accent);
     });
 
-    it('places chosen generated-token chips to the right of the unembedding card', () => {
+    it('renders NA rows for prompt continuations and chips for generated continuations beside the unembedding card', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createMockActivationSource(),
             tokenIndices: [0, 1, 2],
@@ -396,7 +412,8 @@ describe('buildTransformerSceneModel', () => {
         ));
         const chosenTokenChipLabelNodes = nodes.filter((node) => (
             node?.kind === VIEW2D_NODE_KINDS.TEXT
-            && node?.role === 'chosen-token-chip-label'
+            && typeof node?.role === 'string'
+            && node.role.startsWith('chosen-token-chip-label')
             && node?.semantic?.componentKind === 'logits'
             && node?.semantic?.stage === 'output'
         ));
@@ -407,7 +424,7 @@ describe('buildTransformerSceneModel', () => {
         expect(chosenTokenChipNodes).toHaveLength(1);
         expect(
             chosenTokenChipLabelNodes.map((node) => String(node?.text || '').replace(/\u00A0/g, ' '))
-        ).toEqual(['Token C']);
+        ).toEqual(['NA', 'Token C', 'NA']);
         expect(connectors.some((connector) => (
             connector?.source?.nodeId === unembeddingNode?.id
             && connector?.target?.nodeId === chosenTokenChipStackNode?.id
@@ -423,6 +440,61 @@ describe('buildTransformerSceneModel', () => {
         ).toBeGreaterThan(
             unembeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
         );
+    });
+
+    it('scales embedding and unembedding stream heights plus the vocab-position gap for denser token windows', () => {
+        const baseTokenIndices = Array.from({ length: 5 }, (_, index) => index);
+        const denseTokenIndices = Array.from({ length: 12 }, (_, index) => index);
+        const baseScene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource({
+                promptTokenCount: 4,
+                completionTokenCount: 1
+            }),
+            tokenIndices: baseTokenIndices,
+            tokenLabels: baseTokenIndices.map((index) => `Token ${index + 1}`),
+            layerCount: 1
+        });
+        const denseScene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource({
+                promptTokenCount: 9,
+                completionTokenCount: 3
+            }),
+            tokenIndices: denseTokenIndices,
+            tokenLabels: denseTokenIndices.map((index) => `Token ${index + 1}`),
+            layerCount: 1
+        });
+
+        const baseNodes = flattenSceneNodes(baseScene);
+        const denseNodes = flattenSceneNodes(denseScene);
+        const baseVocabularyNode = baseNodes.find((node) => node?.role === 'vocabulary-embedding-card') || null;
+        const denseVocabularyNode = denseNodes.find((node) => node?.role === 'vocabulary-embedding-card') || null;
+        const basePositionNode = baseNodes.find((node) => node?.role === 'position-embedding-card') || null;
+        const densePositionNode = denseNodes.find((node) => node?.role === 'position-embedding-card') || null;
+        const baseUnembeddingNode = baseNodes.find((node) => node?.role === 'unembedding') || null;
+        const denseUnembeddingNode = denseNodes.find((node) => node?.role === 'unembedding') || null;
+
+        expect((denseVocabularyNode?.metadata?.card?.height || 0)).toBeGreaterThan(
+            (baseVocabularyNode?.metadata?.card?.height || 0)
+        );
+        expect((densePositionNode?.metadata?.card?.height || 0)).toBeGreaterThan(
+            (basePositionNode?.metadata?.card?.height || 0)
+        );
+        expect((denseUnembeddingNode?.metadata?.card?.height || 0)).toBeGreaterThan(
+            (baseUnembeddingNode?.metadata?.card?.height || 0)
+        );
+
+        const baseLayout = buildSceneLayout(baseScene);
+        const denseLayout = buildSceneLayout(denseScene);
+        const baseVocabularyEntry = baseLayout?.registry?.getNodeEntry(baseVocabularyNode?.id || '');
+        const basePositionEntry = baseLayout?.registry?.getNodeEntry(basePositionNode?.id || '');
+        const denseVocabularyEntry = denseLayout?.registry?.getNodeEntry(denseVocabularyNode?.id || '');
+        const densePositionEntry = denseLayout?.registry?.getNodeEntry(densePositionNode?.id || '');
+        const baseGap = (basePositionEntry?.contentBounds?.y || 0)
+            - ((baseVocabularyEntry?.contentBounds?.y || 0) + (baseVocabularyEntry?.contentBounds?.height || 0));
+        const denseGap = (densePositionEntry?.contentBounds?.y || 0)
+            - ((denseVocabularyEntry?.contentBounds?.y || 0) + (denseVocabularyEntry?.contentBounds?.height || 0));
+
+        expect(denseGap).toBeGreaterThan(baseGap);
     });
 
     it('maps outgoing residual hover rows to the post-MLP residual activation', () => {
@@ -612,5 +684,65 @@ describe('buildTransformerSceneModel', () => {
 
         expect(topTitleNode?.text).toBe('Multilayer');
         expect(bottomTitleNode?.text).toBe('Perceptron');
+    });
+
+    it('keeps key overview component labels persistent farther out in the zoomed view', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [0, 1],
+            tokenLabels: ['Token A', 'Token B'],
+            layerCount: 1
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const expectPersistentLabel = (predicate) => {
+            const node = nodes.find(predicate);
+            expect(node).toBeTruthy();
+            expect(node?.metadata?.persistentMinScreenFontPx).toBeGreaterThan(0);
+        };
+
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'layer-norm'
+            && node?.semantic?.stage === 'ln1'
+            && node?.role === 'module-title'
+        ));
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'mhsa'
+            && node?.role === 'head-label'
+        ));
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'output-projection'
+            && node?.role === 'module-title-top'
+        ));
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'output-projection'
+            && node?.role === 'module-title-bottom'
+        ));
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'mlp'
+            && node?.role === 'module-title-top'
+        ));
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'mlp'
+            && node?.role === 'module-title-bottom'
+        ));
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+            && node?.role === 'module-title'
+        ));
+        expectPersistentLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.position'
+            && node?.role === 'module-title'
+        ));
     });
 });

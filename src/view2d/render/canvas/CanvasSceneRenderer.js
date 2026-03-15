@@ -2517,8 +2517,16 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
                 ? Number(fixedTextSizing.textScreenFontPx)
                 : ((Number.isFinite(config?.component?.labelFontSize) ? Number(config.component.labelFontSize) : 12) * safeDetailScale)
         );
+    const persistentMinScreenFontPx = node.kind !== VIEW2D_NODE_KINDS.OPERATOR
+        && Number.isFinite(node.metadata?.persistentMinScreenFontPx)
+        && node.metadata.persistentMinScreenFontPx > 0
+        ? Number(node.metadata.persistentMinScreenFontPx)
+        : null;
+    const effectiveRevealScreenFontPx = persistentMinScreenFontPx
+        ? Math.max(revealScreenFontPx, persistentMinScreenFontPx)
+        : revealScreenFontPx;
     const effectiveRevealThresholdPx = detailOperatorMinScreenHeightPx ?? TEXT_MIN_SCREEN_HEIGHT_PX;
-    if (!isPersistentOperator && revealScreenFontPx < effectiveRevealThresholdPx) {
+    if (!isPersistentOperator && effectiveRevealScreenFontPx < effectiveRevealThresholdPx) {
         return;
     }
     ctx.save();
@@ -2597,10 +2605,6 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
                 renderedFontSize = Math.max(1, renderedFontSize * (availableTextWidth / Math.max(1, measuredWidth)));
             }
         }
-        const persistentMinScreenFontPx = Number.isFinite(node.metadata?.persistentMinScreenFontPx)
-            && node.metadata.persistentMinScreenFontPx > 0
-            ? Number(node.metadata.persistentMinScreenFontPx)
-            : null;
         if (fixedTextSizing?.textScreenFontPx) {
             renderedFontSize = fixedTextSizing.textScreenFontPx / safeWorldScale;
         } else if (persistentMinScreenFontPx) {
@@ -2961,6 +2965,23 @@ function projectWorldBoundsToScreen(bounds = null, renderState = null) {
     };
 }
 
+function createCanvasRenderSurface(pixelWidth = 0, pixelHeight = 0, referenceCanvas = null) {
+    const safePixelWidth = Math.max(1, Math.floor(Number(pixelWidth) || 0));
+    const safePixelHeight = Math.max(1, Math.floor(Number(pixelHeight) || 0));
+    if (typeof OffscreenCanvas !== 'undefined') {
+        return new OffscreenCanvas(safePixelWidth, safePixelHeight);
+    }
+    const documentRef = referenceCanvas?.ownerDocument
+        || (typeof document !== 'undefined' ? document : null);
+    if (documentRef?.createElement) {
+        const surface = documentRef.createElement('canvas');
+        surface.width = safePixelWidth;
+        surface.height = safePixelHeight;
+        return surface;
+    }
+    return null;
+}
+
 export class CanvasSceneRenderer {
     constructor({
         canvas = null,
@@ -2981,11 +3002,22 @@ export class CanvasSceneRenderer {
         this.visibleConnectors = [];
         this.headDetailSceneState = null;
         this.activeDetailSceneRenderState = null;
+        this.overviewRenderCache = {
+            surface: null,
+            ctx: null,
+            scene: null,
+            pixelWidth: 0,
+            pixelHeight: 0,
+            worldScale: null,
+            offsetX: null,
+            offsetY: null
+        };
     }
 
     setCanvas(canvas = null) {
         this.canvas = canvas;
         this.ctx = canvas?.getContext?.('2d') || null;
+        this.invalidateOverviewRenderCache();
         return this.ctx;
     }
 
@@ -2995,6 +3027,7 @@ export class CanvasSceneRenderer {
         this.metrics = this.layout?.config || null;
         this.latchedDetailScale = null;
         this.activeDetailSceneRenderState = null;
+        this.invalidateOverviewRenderCache();
         const registry = this.layout?.registry || null;
         const allNodes = this.scene ? flattenSceneNodes(this.scene) : [];
         this.drawableNodes = allNodes
@@ -3025,6 +3058,89 @@ export class CanvasSceneRenderer {
             || null
         );
         return this.layout;
+    }
+
+    invalidateOverviewRenderCache() {
+        this.overviewRenderCache.scene = null;
+        this.overviewRenderCache.worldScale = null;
+        this.overviewRenderCache.offsetX = null;
+        this.overviewRenderCache.offsetY = null;
+    }
+
+    ensureOverviewRenderCacheSurface(pixelWidth = 0, pixelHeight = 0) {
+        const safePixelWidth = Math.max(1, Math.floor(Number(pixelWidth) || 0));
+        const safePixelHeight = Math.max(1, Math.floor(Number(pixelHeight) || 0));
+        if (
+            this.overviewRenderCache.surface
+            && this.overviewRenderCache.ctx
+            && this.overviewRenderCache.pixelWidth === safePixelWidth
+            && this.overviewRenderCache.pixelHeight === safePixelHeight
+        ) {
+            return this.overviewRenderCache;
+        }
+
+        const surface = createCanvasRenderSurface(safePixelWidth, safePixelHeight, this.canvas);
+        const ctx = surface?.getContext?.('2d') || null;
+        if (!surface || !ctx) {
+            this.overviewRenderCache.surface = null;
+            this.overviewRenderCache.ctx = null;
+            this.overviewRenderCache.pixelWidth = 0;
+            this.overviewRenderCache.pixelHeight = 0;
+            return this.overviewRenderCache;
+        }
+        surface.width = safePixelWidth;
+        surface.height = safePixelHeight;
+        this.overviewRenderCache.surface = surface;
+        this.overviewRenderCache.ctx = ctx;
+        this.overviewRenderCache.pixelWidth = safePixelWidth;
+        this.overviewRenderCache.pixelHeight = safePixelHeight;
+        return this.overviewRenderCache;
+    }
+
+    updateOverviewRenderCache({
+        resolution = null,
+        worldScale = 1,
+        offsetX = 0,
+        offsetY = 0
+    } = {}) {
+        const pixelWidth = Number(resolution?.pixelWidth);
+        const pixelHeight = Number(resolution?.pixelHeight);
+        const cache = this.ensureOverviewRenderCacheSurface(pixelWidth, pixelHeight);
+        if (
+            !cache?.surface
+            || !cache?.ctx
+            || typeof cache.ctx.drawImage !== 'function'
+            || typeof this.ctx?.canvas === 'undefined'
+        ) {
+            return false;
+        }
+        cache.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        cache.ctx.clearRect(0, 0, cache.pixelWidth, cache.pixelHeight);
+        cache.ctx.drawImage(this.canvas, 0, 0);
+        cache.scene = this.scene;
+        cache.worldScale = Number.isFinite(worldScale) ? Number(worldScale.toFixed(6)) : null;
+        cache.offsetX = Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null;
+        cache.offsetY = Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null;
+        return true;
+    }
+
+    matchesOverviewRenderCache({
+        resolution = null,
+        worldScale = 1,
+        offsetX = 0,
+        offsetY = 0
+    } = {}) {
+        const cache = this.overviewRenderCache;
+        return !!(
+            cache?.surface
+            && cache?.ctx
+            && cache.scene === this.scene
+            && cache.pixelWidth === Math.max(1, Math.floor(Number(resolution?.pixelWidth) || 0))
+            && cache.pixelHeight === Math.max(1, Math.floor(Number(resolution?.pixelHeight) || 0))
+            && cache.worldScale === (Number.isFinite(worldScale) ? Number(worldScale.toFixed(6)) : null)
+            && cache.offsetX === (Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null)
+            && cache.offsetY === (Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null)
+        );
     }
 
     resize(options = {}) {
@@ -3111,6 +3227,48 @@ export class CanvasSceneRenderer {
         return this.resolveInteractiveHitAtPoint(sceneX, sceneY);
     }
 
+    drawFocusedOverviewNodes({
+        ctx = null,
+        visibleDrawableNodes = [],
+        visibleConnectors = [],
+        config = null,
+        worldScale = 1,
+        detailScale = 1,
+        fixedTextSizing = null,
+        focusState = null,
+        focusAlpha = 1,
+        headDetailTarget = null,
+        headDetailDepthActive = false
+    } = {}) {
+        if (!ctx || !focusState || focusAlpha <= 0.001) return;
+
+        visibleDrawableNodes.forEach(({ node, entry }) => {
+            if (!focusState.activeNodeIds?.has(node.id)) return;
+            if (node.kind === VIEW2D_NODE_KINDS.MATRIX) {
+                drawMatrixNode(ctx, node, entry, config, worldScale, detailScale, {
+                    skipSurfaceEffects: true,
+                    fastPath: true,
+                    headDetailTarget,
+                    headDetailDepthActive,
+                    interactionState: null,
+                    focusAlpha,
+                    fixedTextSizing,
+                    disableInactiveFilter: true
+                });
+            } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
+                drawTextLikeNode(ctx, node, entry, config, worldScale, detailScale, focusAlpha, fixedTextSizing);
+            }
+        });
+
+        visibleConnectors.forEach(({ node, entry, stroke }) => {
+            if (!focusState.activeConnectorIds?.has(node.id)) return;
+            drawConnector(ctx, entry, config, stroke, worldScale, {
+                focusAlpha,
+                emphasize: focusAlpha >= 0.995
+            });
+        });
+    }
+
     render({
         width = null,
         height = null,
@@ -3158,6 +3316,20 @@ export class CanvasSceneRenderer {
         const sceneFocusState = normalizeSceneFocusState(interactionState?.detailSceneFocus, {
             inactiveOpacity: Number(config?.tokens?.dimming?.inactiveOpacity) || 0.18
         });
+        const overviewFocusTransition = interactionState?.overviewFocusTransition || null;
+        const overviewCurrentFocusState = normalizeSceneFocusState(
+            overviewFocusTransition?.currentFocus,
+            {
+                inactiveOpacity: Number(config?.tokens?.dimming?.inactiveOpacity) || 0.18
+            }
+        );
+        const overviewPreviousFocusState = normalizeSceneFocusState(
+            overviewFocusTransition?.previousFocus,
+            {
+                inactiveOpacity: Number(config?.tokens?.dimming?.inactiveOpacity) || 0.18
+            }
+        );
+        const disableInactiveFilter = interactionState?.disableInactiveFilter === true;
         const normalizedInteractionState = sceneFocusState
             ? {
                 ...(interactionState || {}),
@@ -3405,6 +3577,87 @@ export class CanvasSceneRenderer {
                 return true;
             }
 
+            const canUseOverviewFocusCache = !!(
+                !headDetailDepthActive
+                && !interactionState?.hoveredRow
+                && (overviewCurrentFocusState || overviewPreviousFocusState)
+                && this.matchesOverviewRenderCache({
+                    resolution,
+                    worldScale,
+                    offsetX,
+                    offsetY
+                })
+                && typeof ctx.drawImage === 'function'
+            );
+            if (canUseOverviewFocusCache) {
+                const baseInactiveOpacity = Number(config?.tokens?.dimming?.inactiveOpacity) || 0.18;
+                const dimStrength = Math.max(
+                    0,
+                    Math.min(1, Number(overviewFocusTransition?.dimStrength) || 0)
+                );
+                const focusBlend = Math.max(
+                    0,
+                    Math.min(1, Number(overviewFocusTransition?.focusBlend) || 0)
+                );
+                const overlayAlpha = (1 - Math.max(0, Math.min(1, baseInactiveOpacity))) * dimStrength;
+                const fixedTextSizing = resolveMhsaDetailFixedTextSizing(this.scene, resolution.width);
+
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.drawImage(this.overviewRenderCache.surface, 0, 0);
+                ctx.restore();
+
+                if (overlayAlpha > 0.001) {
+                    ctx.save();
+                    ctx.globalAlpha = overlayAlpha;
+                    ctx.fillStyle = 'rgb(2, 4, 8)';
+                    ctx.fillRect(0, 0, resolution.width, resolution.height);
+                    ctx.restore();
+                }
+
+                ctx.save();
+                ctx.translate(offsetX, offsetY);
+                ctx.scale(worldScale, worldScale);
+                if (overviewPreviousFocusState) {
+                    const previousFocusAlpha = overviewCurrentFocusState
+                        ? (dimStrength * Math.max(0, 1 - focusBlend))
+                        : dimStrength;
+                    this.drawFocusedOverviewNodes({
+                        ctx,
+                        visibleDrawableNodes,
+                        visibleConnectors,
+                        config,
+                        worldScale,
+                        detailScale,
+                        fixedTextSizing,
+                        focusState: overviewPreviousFocusState,
+                        focusAlpha: previousFocusAlpha,
+                        headDetailTarget: activeHeadDetailTarget,
+                        headDetailDepthActive: !!headDetailDepthActive
+                    });
+                }
+                if (overviewCurrentFocusState) {
+                    this.drawFocusedOverviewNodes({
+                        ctx,
+                        visibleDrawableNodes,
+                        visibleConnectors,
+                        config,
+                        worldScale,
+                        detailScale,
+                        fixedTextSizing,
+                        focusState: overviewCurrentFocusState,
+                        focusAlpha: dimStrength * (overviewPreviousFocusState ? focusBlend : 1),
+                        headDetailTarget: activeHeadDetailTarget,
+                        headDetailDepthActive: !!headDetailDepthActive
+                    });
+                }
+                ctx.restore();
+                if (debug) {
+                    drawDebugOverlay(ctx, resolution, renderState);
+                }
+                return true;
+            }
+
             ctx.save();
             ctx.translate(offsetX, offsetY);
             ctx.scale(worldScale, worldScale);
@@ -3422,7 +3675,8 @@ export class CanvasSceneRenderer {
                         headDetailDepthActive: !!headDetailDepthActive,
                         interactionState: normalizedInteractionState,
                         focusAlpha,
-                        fixedTextSizing
+                        fixedTextSizing,
+                        disableInactiveFilter
                     });
                 } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
                     drawTextLikeNode(ctx, node, entry, config, worldScale, detailScale, focusAlpha, fixedTextSizing);
@@ -3439,6 +3693,21 @@ export class CanvasSceneRenderer {
                 });
             });
             ctx.restore();
+            const shouldRefreshOverviewRenderCache = !!(
+                !headDetailDepthActive
+                && !interactionState?.hoveredRow
+                && !overviewCurrentFocusState
+                && !overviewPreviousFocusState
+                && !sceneFocusState
+            );
+            if (shouldRefreshOverviewRenderCache) {
+                this.updateOverviewRenderCache({
+                    resolution,
+                    worldScale,
+                    offsetX,
+                    offsetY
+                });
+            }
             if (debug) {
                 drawDebugOverlay(ctx, resolution, renderState);
             }

@@ -84,6 +84,7 @@ import {
 import {
     buildAttentionMatrixValues,
     resolveAttentionMatrixCellValue,
+    shouldClearPinnedAttentionOnDocumentPointerDown,
     shouldMuteCausalUpperPreAttentionCell
 } from './selectionPanelAttentionMatrixUtils.js';
 import {
@@ -11483,6 +11484,9 @@ class SelectionPanel {
             && !matrixCell.classList.contains('is-empty')
             && !matrixCell.classList.contains('is-hidden')
         );
+        const panelHit = (hit && this.panel && this.panel.contains(hit))
+            ? hit
+            : (eventTarget && this.panel && this.panel.contains(eventTarget) ? eventTarget : null);
         const mhsaTokenMatrixRoot = resolveClosest('#detailMhsaTokenMatrixBody');
         const insideMhsaTokenMatrix = !!(
             this.mhsaTokenMatrixBody
@@ -11495,10 +11499,14 @@ class SelectionPanel {
             )
             : null;
         const shouldClearPinnedAttention = this.isOpen
-            && this._attentionPinned
-            && !hitPanelTokenNavChip
-            && !hitPanelAttentionScoreLink
-            && (!insideAttentionMatrix || !validMatrixCell);
+            && shouldClearPinnedAttentionOnDocumentPointerDown({
+                isPinned: this._attentionPinned,
+                hitPanelTokenNavChip,
+                hitPanelAttentionScoreLink,
+                insideAttentionMatrix,
+                validMatrixCell,
+                panelHit: !!panelHit
+            });
         if (shouldClearPinnedAttention) {
             this._clearPinnedAttention({ clearSelectionSummary: true });
         }
@@ -11510,9 +11518,6 @@ class SelectionPanel {
         if (shouldClearPinnedMhsaTokenMatrix) {
             this._clearPinnedMhsaTokenMatrix();
         }
-        const panelHit = (hit && this.panel && this.panel.contains(hit))
-            ? hit
-            : (eventTarget && this.panel && this.panel.contains(eventTarget) ? eventTarget : null);
         if (this.isOpen && panelHit) {
             if (this.engine && typeof this.engine.resetInteractionState === 'function') {
                 this.engine.resetInteractionState();

@@ -43,14 +43,14 @@ const MHSA_DETAIL_VIEW2D_SCENE_TEXT_ZOOM_POLICY = Object.freeze({
 });
 
 const LAYER_NORM_DETAIL_VIEW2D_SCENE_TEXT_ZOOM_POLICY = Object.freeze({
-    captionBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_FIXED,
-    domTextBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_FIXED,
-    operatorBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCREEN_FIXED,
+    captionBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
+    domTextBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
+    operatorBehavior: VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE,
     useUniformMatrixCaptions: true,
     textScreenFontPx: null,
     captionLabelScreenFontPx: null,
     captionDimensionsScreenFontPx: null,
-    rowLabelScreenFontPx: null,
+    rowLabelScreenFontPx: MHSA_DETAIL_FIXED_ROW_LABEL_SCREEN_FONT_PX,
     operatorMinScreenFontPx: null,
     operatorMinScreenHeightPx: 0
 });
@@ -58,35 +58,6 @@ const LAYER_NORM_DETAIL_VIEW2D_SCENE_TEXT_ZOOM_POLICY = Object.freeze({
 function isLayerNormDetailScene(scene = null) {
     const visualContract = String(scene?.metadata?.visualContract || '').trim().toLowerCase();
     return visualContract === LAYER_NORM_DETAIL_VISUAL_CONTRACT;
-}
-
-function resolveLayerNormDetailFixedScreenFontSizing(viewportWidth = 0) {
-    const safeViewportWidth = Number.isFinite(viewportWidth) ? Math.max(0, Number(viewportWidth)) : 0;
-    if (safeViewportWidth > 0 && safeViewportWidth < 720) {
-        return {
-            textScreenFontPx: 17,
-            captionLabelScreenFontPx: 15.5,
-            captionDimensionsScreenFontPx: 12.5,
-            rowLabelScreenFontPx: 12.5,
-            operatorMinScreenFontPx: 15
-        };
-    }
-    if (safeViewportWidth > 0 && safeViewportWidth < 1120) {
-        return {
-            textScreenFontPx: 18,
-            captionLabelScreenFontPx: 16.5,
-            captionDimensionsScreenFontPx: 13.5,
-            rowLabelScreenFontPx: 13,
-            operatorMinScreenFontPx: 16
-        };
-    }
-    return {
-        textScreenFontPx: 19,
-        captionLabelScreenFontPx: 17.5,
-        captionDimensionsScreenFontPx: 14,
-        rowLabelScreenFontPx: 13.5,
-        operatorMinScreenFontPx: 17
-    };
 }
 
 export function isMhsaDetailScene(scene = null) {
@@ -109,16 +80,13 @@ export function resolveView2dSceneTextZoomPolicy(scene = null) {
 export function resolveMhsaDetailFixedTextSizing(scene = null, viewportWidth = 0) {
     if (!isMhsaDetailScene(scene)) return null;
     const textZoomPolicy = resolveView2dSceneTextZoomPolicy(scene);
-    const layerNormFixedSizing = isLayerNormDetailScene(scene)
-        ? resolveLayerNormDetailFixedScreenFontSizing(viewportWidth)
-        : null;
     return {
-        textScreenFontPx: layerNormFixedSizing?.textScreenFontPx ?? textZoomPolicy.textScreenFontPx,
-        captionLabelScreenFontPx: layerNormFixedSizing?.captionLabelScreenFontPx ?? textZoomPolicy.captionLabelScreenFontPx,
-        captionDimensionsScreenFontPx: layerNormFixedSizing?.captionDimensionsScreenFontPx ?? textZoomPolicy.captionDimensionsScreenFontPx,
-        rowLabelScreenFontPx: layerNormFixedSizing?.rowLabelScreenFontPx ?? textZoomPolicy.rowLabelScreenFontPx,
+        textScreenFontPx: textZoomPolicy.textScreenFontPx,
+        captionLabelScreenFontPx: textZoomPolicy.captionLabelScreenFontPx,
+        captionDimensionsScreenFontPx: textZoomPolicy.captionDimensionsScreenFontPx,
+        rowLabelScreenFontPx: textZoomPolicy.rowLabelScreenFontPx,
         operatorBehavior: textZoomPolicy.operatorBehavior,
-        operatorMinScreenFontPx: layerNormFixedSizing?.operatorMinScreenFontPx ?? textZoomPolicy.operatorMinScreenFontPx,
+        operatorMinScreenFontPx: textZoomPolicy.operatorMinScreenFontPx,
         operatorMinScreenHeightPx: textZoomPolicy.operatorMinScreenHeightPx
     };
 }

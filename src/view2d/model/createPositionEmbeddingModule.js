@@ -13,6 +13,7 @@ import {
 import { VIEW2D_STYLE_KEYS } from '../theme/visualTokens.js';
 
 const CARD_LABEL_HORIZONTAL_INSET = 12;
+const EMBEDDING_STREAM_LABEL_MIN_SCREEN_FONT_PX = 10;
 
 function mergeSemantic(baseSemantic = {}, extra = {}) {
     return {
@@ -37,6 +38,19 @@ function createTextFitMetadata(maxWidth = null) {
     };
 }
 
+function createPersistentTextMetadata({
+    maxWidth = null,
+    persistentMinScreenFontPx = null
+} = {}) {
+    const metadata = {
+        ...(createTextFitMetadata(maxWidth) || {})
+    };
+    if (Number.isFinite(persistentMinScreenFontPx) && persistentMinScreenFontPx > 0) {
+        metadata.persistentMinScreenFontPx = Number(persistentMinScreenFontPx);
+    }
+    return Object.keys(metadata).length ? metadata : null;
+}
+
 function createCardMetadata(width = null, height = null, {
     cornerRadius = null,
     shape = '',
@@ -55,7 +69,9 @@ function createCardMetadata(width = null, height = null, {
 
 export function buildPositionEmbeddingModule({
     semantic = {},
-    title = 'Position Embedding'
+    title = 'Position Embedding',
+    cardWidth = 148,
+    cardHeight = 108
 } = {}) {
     return buildEmbeddingStreamModule({
         semantic,
@@ -64,14 +80,17 @@ export function buildPositionEmbeddingModule({
         labelText: 'W position',
         labelTex: 'W_{position}',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM,
-        cardWidth: 148,
-        cardHeight: 108
+        cardWidth,
+        cardHeight,
+        persistentMinScreenFontPx: EMBEDDING_STREAM_LABEL_MIN_SCREEN_FONT_PX
     });
 }
 
 export function buildVocabularyEmbeddingModule({
     semantic = {},
-    title = 'Vocabulary Embedding'
+    title = 'Vocabulary Embedding',
+    cardWidth = 196,
+    cardHeight = 144
 } = {}) {
     return buildEmbeddingStreamModule({
         semantic,
@@ -80,15 +99,18 @@ export function buildVocabularyEmbeddingModule({
         labelText: 'W vocabulary',
         labelTex: 'W_{vocabulary}',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
-        cardWidth: 196,
-        cardHeight: 144,
-        wideSide: 'left'
+        cardWidth,
+        cardHeight,
+        wideSide: 'left',
+        persistentMinScreenFontPx: EMBEDDING_STREAM_LABEL_MIN_SCREEN_FONT_PX
     });
 }
 
 export function buildUnembeddingModule({
     semantic = {},
-    title = 'Unembedding'
+    title = 'Unembedding',
+    cardWidth = 196,
+    cardHeight = 144
 } = {}) {
     return buildEmbeddingStreamModule({
         semantic,
@@ -97,8 +119,8 @@ export function buildUnembeddingModule({
         labelText: 'W_U',
         labelTex: 'W_U',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
-        cardWidth: 196,
-        cardHeight: 144,
+        cardWidth,
+        cardHeight,
         wideSide: 'right'
     });
 }
@@ -131,7 +153,8 @@ function buildEmbeddingStreamModule({
     styleKey = VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
     cardWidth = 180,
     cardHeight = 128,
-    wideSide = 'left'
+    wideSide = 'left',
+    persistentMinScreenFontPx = null
 } = {}) {
     const titleMaxWidth = Math.max(24, cardWidth - (CARD_LABEL_HORIZONTAL_INSET * 2));
 
@@ -162,7 +185,10 @@ function buildEmbeddingStreamModule({
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.LABEL
         },
-        metadata: createTextFitMetadata(titleMaxWidth)
+        metadata: createPersistentTextMetadata({
+            maxWidth: titleMaxWidth,
+            persistentMinScreenFontPx
+        })
     });
 
     return {
