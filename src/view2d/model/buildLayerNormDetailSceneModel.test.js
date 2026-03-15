@@ -132,6 +132,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(outputPlusNode?.text).toBe('+');
         expect(outputEqualsNode?.text).toBe('=');
         expect(normalizedCopyDropSpacerNode?.metadata?.hidden).toBe(true);
+        expect(normalizedCopyDropSpacerNode?.metadata?.card?.height).toBeGreaterThan(44);
         expect(inputNode?.rowItems).toHaveLength(2);
         expect(normalizedNode?.rowItems).toHaveLength(2);
         expect(scaleNode?.rowItems).toHaveLength(1);
@@ -199,6 +200,7 @@ describe('buildLayerNormDetailSceneModel', () => {
             nodeId: normalizedNode?.id,
             anchor: 'bottom'
         });
+        expect(normalizedCopyConnectorNode?.metadata?.sourceAnchorMode).toBe('caption-bottom');
         expect(normalizedCopyConnectorNode?.target).toMatchObject({
             nodeId: normalizedCopyNode?.id,
             anchor: 'top'
@@ -308,6 +310,94 @@ describe('buildLayerNormDetailSceneModel', () => {
         });
     });
 
+    it('uses the activation-source base vector length for layer norm activation rows', () => {
+        const incomingValues = Array.from({ length: 12 }, (_, index) => Number((0.1 + (index * 0.1)).toFixed(4)));
+        const postAttentionValues = Array.from({ length: 12 }, (_, index) => Number((0.2 + (index * 0.1)).toFixed(4)));
+        const postMlpValues = Array.from({ length: 12 }, (_, index) => Number((0.3 + (index * 0.1)).toFixed(4)));
+        const ln1NormValues = Array.from({ length: 12 }, (_, index) => Number((0.4 + (index * 0.1)).toFixed(4)));
+        const ln1ScaleValues = Array.from({ length: 12 }, (_, index) => Number((0.5 + (index * 0.1)).toFixed(4)));
+        const ln1ShiftValues = Array.from({ length: 12 }, (_, index) => Number((0.6 + (index * 0.1)).toFixed(4)));
+        const ln2NormValues = Array.from({ length: 12 }, (_, index) => Number((0.7 + (index * 0.1)).toFixed(4)));
+        const ln2ScaleValues = Array.from({ length: 12 }, (_, index) => Number((0.8 + (index * 0.1)).toFixed(4)));
+        const ln2ShiftValues = Array.from({ length: 12 }, (_, index) => Number((0.9 + (index * 0.1)).toFixed(4)));
+        const requestedLengths = [];
+        const buildExpandedValues = (seed = 0, length = D_MODEL) => (
+            Array.from({ length }, (_, index) => Number((seed + (index * 0.001)).toFixed(4)))
+        );
+        const activationSource = {
+            getBaseVectorLength() {
+                return 12;
+            },
+            getLayerIncoming(_layerIndex = 0, _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.push(['incoming', targetLength]);
+                return targetLength === 12 ? incomingValues : buildExpandedValues(10, targetLength);
+            },
+            getPostAttentionResidual(_layerIndex = 0, _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.push(['post-attention', targetLength]);
+                return targetLength === 12 ? postAttentionValues : buildExpandedValues(20, targetLength);
+            },
+            getPostMlpResidual(_layerIndex = 0, _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.push(['post-mlp', targetLength]);
+                return targetLength === 12 ? postMlpValues : buildExpandedValues(30, targetLength);
+            },
+            getLayerLn1(_layerIndex = 0, stage = 'norm', _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.push([`ln1.${stage}`, targetLength]);
+                if (targetLength !== 12) return buildExpandedValues(40, targetLength);
+                if (stage === 'scale') return ln1ScaleValues;
+                if (stage === 'shift') return ln1ShiftValues;
+                return ln1NormValues;
+            },
+            getLayerLn2(_layerIndex = 0, stage = 'norm', _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.push([`ln2.${stage}`, targetLength]);
+                if (targetLength !== 12) return buildExpandedValues(50, targetLength);
+                if (stage === 'scale') return ln2ScaleValues;
+                if (stage === 'shift') return ln2ShiftValues;
+                return ln2NormValues;
+            },
+            getFinalLayerNorm(stage = 'norm', _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.push([`final.${stage}`, targetLength]);
+                return targetLength === 12 ? postMlpValues : buildExpandedValues(60, targetLength);
+            }
+        };
+
+        const ln1Scene = buildLayerNormDetailSceneModel({
+            activationSource,
+            layerNormDetailTarget: {
+                layerNormKind: 'ln1',
+                layerIndex: 3
+            },
+            tokenRefs: [
+                { rowIndex: 0, tokenIndex: 0, tokenLabel: 'Token A' }
+            ],
+            layerCount: 12
+        });
+        const ln2Scene = buildLayerNormDetailSceneModel({
+            activationSource,
+            layerNormDetailTarget: {
+                layerNormKind: 'ln2',
+                layerIndex: 3
+            },
+            tokenRefs: [
+                { rowIndex: 0, tokenIndex: 0, tokenLabel: 'Token A' }
+            ],
+            layerCount: 12
+        });
+
+        const ln1Nodes = flattenSceneNodes(ln1Scene);
+        const ln2Nodes = flattenSceneNodes(ln2Scene);
+        const ln1InputNode = ln1Nodes.find((node) => node?.role === 'layer-norm-input') || null;
+        const ln2InputNode = ln2Nodes.find((node) => node?.role === 'layer-norm-input') || null;
+
+        expect(ln1InputNode?.rowItems?.[0]?.rawValues).toEqual(incomingValues);
+        expect(ln2InputNode?.rowItems?.[0]?.rawValues).toEqual(postAttentionValues);
+        expect(requestedLengths).toContainEqual(['incoming', 12]);
+        expect(requestedLengths).toContainEqual(['post-attention', 12]);
+        expect(requestedLengths).not.toContainEqual(['incoming', D_MODEL]);
+        expect(requestedLengths).not.toContainEqual(['post-attention', D_MODEL]);
+        expect(requestedLengths).toContainEqual(['ln1.norm', 12]);
+        expect(requestedLengths).toContainEqual(['ln2.norm', 12]);
+    });
+
     it('reuses deep-detail hover behavior for layer norm token rows', () => {
         const scene = buildScene();
         const nodes = flattenSceneNodes(scene);
@@ -328,11 +418,12 @@ describe('buildLayerNormDetailSceneModel', () => {
             }
         });
 
-        expect(hoverState?.label).toBe('LayerNorm 1 Input Vector');
-        expect(hoverState?.info?.activationData?.stage).toBe('ln1.input');
+        expect(hoverState?.label).toBe('Residual Stream Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('layer.incoming');
         expect(hoverState?.info?.activationData?.sourceStage).toBe('layer.incoming');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(1);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token B');
+        expect(hoverState?.info?.activationData?.values).toEqual(inputNode?.rowItems?.[1]?.rawValues);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(normalizedNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(normalizedCopyNode?.id);

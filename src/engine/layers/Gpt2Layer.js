@@ -104,7 +104,10 @@ import {
     resolveTokenIndexForLane,
     resolveTokenLabelForLayer
 } from './gpt2LayerDataAccess.js';
-import { normalizeLayerNormOutputStage } from '../../utils/layerNormLabels.js';
+import {
+    formatNormalizedResidualStreamLabel,
+    normalizeLayerNormOutputStage
+} from '../../utils/layerNormLabels.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -122,6 +125,7 @@ const COLOR_BRIGHT_YELLOW = new THREE.Color(GPT2_LAYER_VISUAL_TUNING.layerNorm.f
 const COLOR_WHITE = new THREE.Color(0xffffff);
 const COLOR_INACTIVE_COMPONENT = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 const INPUT_VOCAB_TRAVEL_TINT_COLOR = new THREE.Color(MHA_FINAL_Q_COLOR);
+const NORMALIZED_RESIDUAL_STREAM_LABEL = formatNormalizedResidualStreamLabel();
 
 const TMP_LN_TRAIL_POS = new THREE.Vector3();
 const SKIP_VISIBILITY_REFRESH_MS = 56;
@@ -1353,7 +1357,7 @@ export default class Gpt2Layer extends BaseLayer {
                         const ln1NormData = this._getLn1Data(lane, 'norm');
                         const normInput = ln1NormData ? ln1NormData.slice() : dupVec.rawData.slice();
                         lane.pendingNormData = ln1NormData || null;
-                        lane.pendingNormLabel = lane.tokenLabel ? `LN1 Normed - ${lane.tokenLabel}` : 'LN1 Normed';
+                        lane.pendingNormLabel = NORMALIZED_RESIDUAL_STREAM_LABEL;
                         lane.pendingNormMeta = this._getLaneMeta(lane, 'ln1.norm');
                         lane.normApplied = false;
                         if (!skipActive && lane.normAnim) {
@@ -1888,7 +1892,7 @@ export default class Gpt2Layer extends BaseLayer {
                         const ln2NormData = this._getLn2Data(lane, 'norm');
                         const normInput = ln2NormData ? ln2NormData.slice() : mv.rawData.slice();
                         lane.pendingNormDataLN2 = ln2NormData || null;
-                        lane.pendingNormLabelLN2 = lane.tokenLabel ? `LN2 Normed - ${lane.tokenLabel}` : 'LN2 Normed';
+                        lane.pendingNormLabelLN2 = NORMALIZED_RESIDUAL_STREAM_LABEL;
                         lane.pendingNormMetaLN2 = this._getLaneMeta(lane, 'ln2.norm');
                         lane.normAppliedLN2 = false;
                         if (!skipActive && lane.normAnimationLN2) {

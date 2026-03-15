@@ -4,6 +4,7 @@ import {
     hasView2dPointerExceededClickSlop,
     resolveView2dClickSlopPx,
     resolveView2dPointerMoveIntent,
+    shouldSuppressView2dDoubleClickFocus,
     shouldTreatView2dPointerReleaseAsClick
 } from './selectionPanelTransformerView2dInteractionUtils.js';
 
@@ -93,6 +94,32 @@ describe('selectionPanelTransformerView2dInteractionUtils', () => {
         expect(shouldTreatView2dPointerReleaseAsClick({
             moved: false,
             suppressClick: true
+        })).toBe(false);
+    });
+
+    it('suppresses double-click focus while a scene-backed deep detail view is active', () => {
+        expect(shouldSuppressView2dDoubleClickFocus({
+            headDetailDepthActive: true,
+            hasActiveDetailTarget: true,
+            hasDetailSceneIndex: true
+        })).toBe(true);
+
+        expect(shouldSuppressView2dDoubleClickFocus({
+            headDetailDepthActive: false,
+            hasActiveDetailTarget: true,
+            hasDetailSceneIndex: true
+        })).toBe(false);
+
+        expect(shouldSuppressView2dDoubleClickFocus({
+            headDetailDepthActive: true,
+            hasActiveDetailTarget: false,
+            hasDetailSceneIndex: true
+        })).toBe(false);
+
+        expect(shouldSuppressView2dDoubleClickFocus({
+            headDetailDepthActive: true,
+            hasActiveDetailTarget: true,
+            hasDetailSceneIndex: false
         })).toBe(false);
     });
 });

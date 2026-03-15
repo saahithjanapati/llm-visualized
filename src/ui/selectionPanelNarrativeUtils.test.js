@@ -10,6 +10,25 @@ import {
 } from '../utils/mlpLabels.js';
 
 describe('selectionPanelNarrativeUtils bias narratives', () => {
+    it('describes normalized residual stream vectors as post-normalization states', () => {
+        const selection = {
+            label: 'Normalized Residual Stream Vector',
+            info: {
+                activationData: {
+                    stage: 'ln1.norm',
+                    layerIndex: 4,
+                    tokenIndex: 1,
+                    tokenLabel: 'the'
+                }
+            }
+        };
+
+        const description = resolveDescription('Normalized Residual Stream Vector', 'vector', selection);
+        expect(description).toContain('normalization step');
+        expect(description).toContain('already completed');
+        expect(description).toContain('scale and shift');
+    });
+
     it('returns bias-specific copy for the MLP up bias term', () => {
         const selection = {
             label: MLP_UP_BIAS_TOOLTIP_LABEL,

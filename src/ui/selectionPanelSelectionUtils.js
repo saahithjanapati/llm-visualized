@@ -1,6 +1,8 @@
 import {
     expandLayerNormLabel,
+    formatNormalizedResidualStreamLabel,
     formatLayerNormParamLabel,
+    isLayerNormNormalizedStage,
     isPostLayerNormResidualSelection,
     resolveLayerNormKind,
     resolvePostLayerNormResidualLabel,
@@ -49,6 +51,10 @@ export function normalizeSelectionLabel(label, selectionInfo = null) {
     const activation = getActivationDataFromSelection(selectionInfo);
     const stageLower = String(activation?.stage || '').toLowerCase();
     const explicitQkvLabel = hasExplicitQkvVectorLabel(lower);
+
+    if (isLayerNormNormalizedStage(stageLower)) {
+        return formatNormalizedResidualStreamLabel();
+    }
 
     const isPostLayerNormResidual = !explicitQkvLabel && isPostLayerNormResidualSelection({
         label: raw,

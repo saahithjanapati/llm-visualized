@@ -4765,6 +4765,17 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .detail-transformer-view2d-selection-sidebar.is-visible {
     display: flex;
     pointer-events: auto;
+    animation: detail-transformer-view2d-sidebar-in 220ms cubic-bezier(0.2, 0.86, 0.2, 1) both;
+}
+@keyframes detail-transformer-view2d-sidebar-in {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 @keyframes detail-transformer-view2d-mobile-sidebar-in {
     from {
@@ -4863,10 +4874,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     align-self: stretch;
 }
 .detail-transformer-view2d-selection-sidebar-body > .detail-preview {
-    aspect-ratio: auto;
-    height: clamp(220px, 26vh, 280px);
-    min-height: 220px;
-    max-height: 280px;
+    padding-inline: 16px;
 }
 .detail-transformer-view2d-canvas-card:focus {
     outline: none;
@@ -5454,16 +5462,21 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         right: 0;
         bottom: 0;
         width: min(
-            clamp(320px, 42vw, 440px),
-            calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 96px)
+            clamp(300px, 38vw, 408px),
+            calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 120px)
         );
-        max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 96px);
+        max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 120px);
         border-right: none;
         border-bottom: none;
         border-left: 1px solid rgba(255,255,255,0.12);
         background: rgba(10, 10, 12, 0.94);
         box-shadow: 0 16px 36px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.04);
         transform: none;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-preview {
+        width: calc(100% - 12px);
+        align-self: center;
+        padding-inline: 18px;
     }
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar.is-visible {
         animation: none;

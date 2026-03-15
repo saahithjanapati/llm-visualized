@@ -113,6 +113,7 @@ import {
 } from './selectionPanelVectorSamplingUtils.js';
 import {
     LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
+    resolveLiveLayerNormNormalizedPreviewSelection,
     resolveLayerNormParameterSummary
 } from './selectionPanelLayerNormPreviewUtils.js';
 import { resolveSelectionPrimaryActionConfig } from './selectionPanelPrimaryActionUtils.js';
@@ -1505,13 +1506,14 @@ function buildExactVectorMeshSlicePreview(selectionInfo, label = '') {
         return null;
     }
 
-    const clone = sliceSource.sourceMesh.clone();
+    const clone = cloneObjectForPreview(sliceSource.sourceMesh);
+    if (!clone?.isInstancedMesh) {
+        return null;
+    }
     clone.matrixAutoUpdate = true;
     clone.count = Math.max(1, Math.floor(sliceSource.instanceCount));
     clone.frustumCulled = false;
-    clone.userData = {
-        ...(sliceSource.sourceMesh.userData || {})
-    };
+    clone.userData = sanitizePreviewUserDataValue(sliceSource.sourceMesh.userData) || {};
 
     sliceSource.sourceMesh.updateWorldMatrix(true, true);
     sliceSource.sourceMesh.matrixWorld.decompose(clone.position, clone.quaternion, clone.scale);
@@ -2154,6 +2156,14 @@ function isOutputProjectionBiasPreviewSelection(label = '', selectionInfo = null
     return stage === 'attention.output_projection.bias' || lower === 'output projection bias vector';
 }
 
+function isAttentionOutputProjectionVectorSelection(label = '', selectionInfo = null) {
+    const lower = String(label || '').toLowerCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    return stage === 'attention.output_projection'
+        || lower === 'attention output vector'
+        || lower === 'model-width attention output vector';
+}
+
 function resolveMlpBiasPreviewSampleCount(kind = 'up') {
     return kind === 'down'
         ? Math.max(1, Math.ceil(D_MODEL / PRISM_DIMENSIONS_PER_UNIT))
@@ -2573,6 +2583,31 @@ function buildOutputProjectionBiasVectorPreview(selectionInfo, label = '') {
         colorOptions: buildOutputProjectionBiasPreviewColorOptions(),
         numKeyColors: sampleCount
     });
+    return {
+        object: vec.group,
+        view: {
+            fitDistanceMultiplier: 1.14,
+            fitPaddingMultiplier: 1.04
+        },
+        dispose: () => {
+            vec.dispose();
+        }
+    };
+}
+
+function buildAttentionOutputProjectionVectorPreview(selectionInfo, label = '') {
+    if (!isAttentionOutputProjectionVectorSelection(label, selectionInfo)) return null;
+    const previewData = extractPreviewVectorData(selectionInfo);
+    if (!previewData?.length) return null;
+    const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_MODEL));
+    const vec = createPreviewVector({
+        colorHex: resolveVectorPreviewColor(label, selectionInfo),
+        data: null,
+        instanceCount: Math.max(1, Math.ceil(outputLength / PRISM_DIMENSIONS_PER_UNIT))
+    });
+    vec.group.userData = vec.group.userData || {};
+    vec.group.userData.label = label || 'Attention Output Vector';
+    applyDataToPreviewVector(vec, previewData);
     return {
         object: vec.group,
         view: {
@@ -3031,6 +3066,9 @@ export function buildVectorClonePreview(selectionInfo, label = '') {
     const attentionWeightedSumPreview = buildAttentionWeightedSumVectorPreview(selectionInfo, label);
     if (attentionWeightedSumPreview) return attentionWeightedSumPreview;
 
+    const attentionOutputProjectionPreview = buildAttentionOutputProjectionVectorPreview(selectionInfo, label);
+    if (attentionOutputProjectionPreview) return attentionOutputProjectionPreview;
+
     const attentionBiasVectorPreview = buildAttentionBiasVectorPreview(selectionInfo, label);
     if (attentionBiasVectorPreview) return attentionBiasVectorPreview;
 
@@ -3316,37 +3354,38 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
 }
 
 function resolvePreviewObject(label, selectionInfo, engine = null) {
+    const previewSelectionInfo = resolveLiveLayerNormNormalizedPreviewSelection(selectionInfo, engine) || selectionInfo;
     const lower = (label || '').toLowerCase();
-    if (isLogitBarSelection(label, selectionInfo) || lower.startsWith('chosen token:')) {
-        return buildLogitBarPreview(label, selectionInfo);
+    if (isLogitBarSelection(label, previewSelectionInfo) || lower.startsWith('chosen token:')) {
+        return buildLogitBarPreview(label, previewSelectionInfo);
     }
-    const attentionSpherePreview = buildAttentionSpherePreview(selectionInfo);
+    const attentionSpherePreview = buildAttentionSpherePreview(previewSelectionInfo);
     if (attentionSpherePreview) return attentionSpherePreview;
-    const layerNormParamPreview = buildLayerNormParamVectorPreview(label, selectionInfo);
+    const layerNormParamPreview = buildLayerNormParamVectorPreview(label, previewSelectionInfo);
     if (layerNormParamPreview) return layerNormParamPreview;
     if (isLayerNormSolidSelection(label)) {
-        return buildLayerNormPreview(label, selectionInfo, engine);
+        return buildLayerNormPreview(label, previewSelectionInfo, engine);
     }
-    const isVectorSelection = isLikelyVectorSelection(label, selectionInfo);
+    const isVectorSelection = isLikelyVectorSelection(label, previewSelectionInfo);
     if (isVectorSelection) {
-        const vectorClone = buildVectorClonePreview(selectionInfo, label);
+        const vectorClone = buildVectorClonePreview(previewSelectionInfo, label);
         if (vectorClone) return vectorClone;
     }
     if (isQkvMatrixLabel(lower)) {
-        const type = inferQkvType(label, selectionInfo);
+        const type = inferQkvType(label, previewSelectionInfo);
         const matrixColor = type === 'Q' ? MHA_FINAL_Q_COLOR : (type === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR);
-        const clonePreview = buildSelectionClonePreview(selectionInfo, label);
+        const clonePreview = buildSelectionClonePreview(previewSelectionInfo, label);
         if (clonePreview) return clonePreview;
         const preview = buildWeightMatrixPreview(MHA_MATRIX_PARAMS, matrixColor);
-        const snapshot = extractMaterialSnapshot(selectionInfo);
+        const snapshot = extractMaterialSnapshot(previewSelectionInfo);
         if (snapshot) {
             applyMaterialSnapshot(preview.object, snapshot);
             applyFinalColorToObject(preview.object, matrixColor);
         }
         return preview;
     }
-    const clonePreview = buildSelectionClonePreview(selectionInfo, label)
-        || buildDirectClonePreview(selectionInfo);
+    const clonePreview = buildSelectionClonePreview(previewSelectionInfo, label)
+        || buildDirectClonePreview(previewSelectionInfo);
     if (clonePreview) {
         if (isLayerNormLabel(label)) {
             applyFinalColorToObject(clonePreview.object, 0xffffff);
@@ -3354,10 +3393,10 @@ function resolvePreviewObject(label, selectionInfo, engine = null) {
         return clonePreview;
     }
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
-        const clonePreview = buildSelectionClonePreview(selectionInfo, label);
+        const clonePreview = buildSelectionClonePreview(previewSelectionInfo, label);
         if (clonePreview) return clonePreview;
         return buildTokenChipPreview(extractTokenText(label), {
-            tokenId: lower.startsWith('token:') ? resolvePreviewTokenId(label, selectionInfo) : null
+            tokenId: lower.startsWith('token:') ? resolvePreviewTokenId(label, previewSelectionInfo) : null
         });
     }
     if (lower.includes('output projection matrix')) {
@@ -3382,8 +3421,8 @@ function resolvePreviewObject(label, selectionInfo, engine = null) {
         return buildWeightMatrixPreview(MLP_MATRIX_PARAMS_DOWN, FINAL_MLP_COLOR);
     }
     if (hasVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
-        const clonePreview = buildSelectionClonePreview(selectionInfo, label)
-            || buildDirectClonePreview(selectionInfo);
+        const clonePreview = buildSelectionClonePreview(previewSelectionInfo, label)
+            || buildDirectClonePreview(previewSelectionInfo);
         if (clonePreview) {
             const color = hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')
                 ? FINAL_VOCAB_TOP_COLOR
@@ -3397,8 +3436,8 @@ function resolvePreviewObject(label, selectionInfo, engine = null) {
         return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_VOCAB, color);
     }
     if (lower.includes('positional embedding')) {
-        const clonePreview = buildSelectionClonePreview(selectionInfo, label)
-            || buildDirectClonePreview(selectionInfo);
+        const clonePreview = buildSelectionClonePreview(previewSelectionInfo, label)
+            || buildDirectClonePreview(previewSelectionInfo);
         if (clonePreview) return clonePreview;
         return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_POSITION, POSITION_EMBED_COLOR);
     }
@@ -3408,35 +3447,35 @@ function resolvePreviewObject(label, selectionInfo, engine = null) {
     }
 
     if (lower.includes('query vector')) {
-        return buildDirectClonePreview(selectionInfo)
-            || buildSelectionClonePreview(selectionInfo, label)
-            || buildVectorPreview(MHA_FINAL_Q_COLOR, selectionInfo);
+        return buildDirectClonePreview(previewSelectionInfo)
+            || buildSelectionClonePreview(previewSelectionInfo, label)
+            || buildVectorPreview(MHA_FINAL_Q_COLOR, previewSelectionInfo);
     }
     if (lower.includes('key vector')) {
-        return buildDirectClonePreview(selectionInfo)
-            || buildSelectionClonePreview(selectionInfo, label)
-            || buildVectorPreview(MHA_FINAL_K_COLOR, selectionInfo);
+        return buildDirectClonePreview(previewSelectionInfo)
+            || buildSelectionClonePreview(previewSelectionInfo, label)
+            || buildVectorPreview(MHA_FINAL_K_COLOR, previewSelectionInfo);
     }
     if (lower.includes('value vector')) {
-        return buildDirectClonePreview(selectionInfo)
-            || buildSelectionClonePreview(selectionInfo, label)
-            || buildVectorPreview(MHA_FINAL_V_COLOR, selectionInfo);
+        return buildDirectClonePreview(previewSelectionInfo)
+            || buildSelectionClonePreview(previewSelectionInfo, label)
+            || buildVectorPreview(MHA_FINAL_V_COLOR, previewSelectionInfo);
     }
-    if (selectionInfo?.kind === 'mergedKV') {
-        const category = (selectionInfo.info?.category === 'V') ? 'V' : 'K';
-        return buildDirectClonePreview(selectionInfo)
-            || buildSelectionClonePreview(selectionInfo, label)
-            || buildVectorPreview(category === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR, selectionInfo);
+    if (previewSelectionInfo?.kind === 'mergedKV') {
+        const category = (previewSelectionInfo.info?.category === 'V') ? 'V' : 'K';
+        return buildDirectClonePreview(previewSelectionInfo)
+            || buildSelectionClonePreview(previewSelectionInfo, label)
+            || buildVectorPreview(category === 'V' ? MHA_FINAL_V_COLOR : MHA_FINAL_K_COLOR, previewSelectionInfo);
     }
-    if (isLikelyVectorSelection(label, selectionInfo)) {
-        return buildDirectClonePreview(selectionInfo)
-            || buildSelectionClonePreview(selectionInfo, label)
-            || buildVectorPreview(null, selectionInfo);
+    if (isLikelyVectorSelection(label, previewSelectionInfo)) {
+        return buildDirectClonePreview(previewSelectionInfo)
+            || buildSelectionClonePreview(previewSelectionInfo, label)
+            || buildVectorPreview(null, previewSelectionInfo);
     }
 
-    if (isAttentionScoreSelection(label, selectionInfo)) {
-        return buildDirectClonePreview(selectionInfo)
-            || buildSelectionClonePreview(selectionInfo, label)
+    if (isAttentionScoreSelection(label, previewSelectionInfo)) {
+        return buildDirectClonePreview(previewSelectionInfo)
+            || buildSelectionClonePreview(previewSelectionInfo, label)
             || buildStackedBoxPreview(0x1b1b1b);
     }
 
@@ -7189,7 +7228,8 @@ export class SelectionPanel {
         tokenId = null,
         tokenLabel = '',
         defaultLabel = 'Vector',
-        labelMatcher = null
+        labelMatcher = null,
+        allowGenericObjectFallback = true
     } = {}) {
         const normalizedStages = Array.isArray(activationStages)
             ? activationStages
@@ -7215,6 +7255,10 @@ export class SelectionPanel {
             )
         ) {
             return instancedSelection;
+        }
+
+        if (allowGenericObjectFallback === false) {
+            return null;
         }
 
         return this._findGenericSceneObjectSelection({
@@ -8255,6 +8299,24 @@ export class SelectionPanel {
                 tokenLabel: tokenContext.tokenLabel,
                 defaultLabel: label
             }) || sceneLabelFallbackSelection() || fallbackSelection;
+        }
+
+        const residualStreamStage = liveVectorStages.find((stage) => (
+            stage === 'layer.incoming'
+            || stage === 'residual.post_attention'
+            || stage === 'residual.post_mlp'
+        )) || '';
+        if (residualStreamStage) {
+            return this._findGenericSceneVectorSelection({
+                activationStages: [residualStreamStage],
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: label,
+                allowGenericObjectFallback: false
+            }) || fallbackSelection;
         }
 
         const genericMatrixSelection = (

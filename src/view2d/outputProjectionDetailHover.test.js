@@ -123,6 +123,11 @@ describe('output projection detail hover', () => {
             rowIndex: 1,
             colIndex: 4
         });
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: concatOutputCopyNode?.id,
+            rowIndex: 1,
+            colIndex: 4
+        });
         expect(resolveTransformerView2dTokenEntryFromHoverPayload(hoverState)).toEqual({
             tokenIndex: 1,
             tokenId: null,
@@ -159,6 +164,11 @@ describe('output projection detail hover', () => {
         });
         expect(mirroredHoverState?.focusState?.cellSelections).toContainEqual({
             nodeId: concatOutputNode?.id,
+            rowIndex: 1,
+            colIndex: 4
+        });
+        expect(mirroredHoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: concatOutputCopyNode?.id,
             rowIndex: 1,
             colIndex: 4
         });
@@ -259,6 +269,9 @@ describe('output projection detail hover', () => {
         expect(outputHoverState?.label).toBe('Attention Output Vector');
         expect(outputHoverState?.info?.activationData?.stage).toBe('attention.output_projection');
         expect(outputHoverState?.info?.activationData?.tokenIndex).toBe(1);
+        expect(outputHoverState?.info?.activationData?.values).toEqual(
+            projectionOutputNode?.rowItems?.[1]?.rawValues
+        );
         expect(outputHoverState?.focusState?.activeNodeIds).toContain(concatOutputNode?.id);
         expect(outputHoverState?.focusState?.activeNodeIds).toContain(concatOutputCopyNode?.id);
         expect(outputHoverState?.focusState?.activeNodeIds).toContain(projectionWeightNode?.id);

@@ -70,8 +70,8 @@ const PIPELINE_STAGE_GAP = 16;
 const PIPELINE_STAGE_GAP_SMALL = 12;
 const PIPELINE_STACK_GAP = 28;
 const PIPELINE_STACK_GAP_SMALL = 24;
-const NORMALIZED_COPY_DROP_SPACER_HEIGHT = 44;
-const NORMALIZED_COPY_DROP_SPACER_HEIGHT_SMALL = 36;
+const NORMALIZED_COPY_DROP_SPACER_HEIGHT = 52;
+const NORMALIZED_COPY_DROP_SPACER_HEIGHT_SMALL = 42;
 const NORMALIZATION_BRIDGE_GAP = 18;
 const NORMALIZATION_BRIDGE_GAP_SMALL = 15;
 const NORMALIZATION_EQUATION_FONT_SCALE = 1.34;
@@ -236,6 +236,18 @@ function resolveVectorMetrics(rowCount = 1, {
     };
 }
 
+function resolveActivationSourceVectorLength(activationSource = null, fallbackLength = D_MODEL) {
+    const sourceLength = Number(
+        activationSource && typeof activationSource.getBaseVectorLength === 'function'
+            ? activationSource.getBaseVectorLength()
+            : null
+    );
+    if (Number.isFinite(sourceLength) && sourceLength > 0) {
+        return Math.max(1, Math.floor(sourceLength));
+    }
+    return Math.max(1, Math.floor(fallbackLength || D_MODEL));
+}
+
 function resolveLayerNormStageConfig(layerNormKind = 'ln1', layerIndex = null, layerCount = null) {
     const safeKind = normalizeLayerNormKind(layerNormKind);
     if (!safeKind) return null;
@@ -298,37 +310,48 @@ function resolveLayerNormStageConfig(layerNormKind = 'ln1', layerIndex = null, l
     };
 }
 
-function resolveLayerNormInputVector(activationSource = null, stageConfig = null, tokenIndex = null) {
+function resolveLayerNormInputVector(
+    activationSource = null,
+    stageConfig = null,
+    tokenIndex = null,
+    targetLength = D_MODEL
+) {
     if (!stageConfig) return null;
     if (stageConfig.layerNormKind === 'ln1') {
         return typeof activationSource?.getLayerIncoming === 'function'
-            ? activationSource.getLayerIncoming(stageConfig.layerIndex, tokenIndex, D_MODEL)
+            ? activationSource.getLayerIncoming(stageConfig.layerIndex, tokenIndex, targetLength)
             : null;
     }
     if (stageConfig.layerNormKind === 'ln2') {
         return typeof activationSource?.getPostAttentionResidual === 'function'
-            ? activationSource.getPostAttentionResidual(stageConfig.layerIndex, tokenIndex, D_MODEL)
+            ? activationSource.getPostAttentionResidual(stageConfig.layerIndex, tokenIndex, targetLength)
             : null;
     }
     return typeof activationSource?.getPostMlpResidual === 'function'
-        ? activationSource.getPostMlpResidual(stageConfig.layerIndex, tokenIndex, D_MODEL)
+        ? activationSource.getPostMlpResidual(stageConfig.layerIndex, tokenIndex, targetLength)
         : null;
 }
 
-function resolveLayerNormStageVector(activationSource = null, stageConfig = null, stageKey = 'norm', tokenIndex = null) {
+function resolveLayerNormStageVector(
+    activationSource = null,
+    stageConfig = null,
+    stageKey = 'norm',
+    tokenIndex = null,
+    targetLength = D_MODEL
+) {
     if (!stageConfig) return null;
     if (stageConfig.layerNormKind === 'ln1') {
         return typeof activationSource?.getLayerLn1 === 'function'
-            ? activationSource.getLayerLn1(stageConfig.layerIndex, stageKey, tokenIndex, D_MODEL)
+            ? activationSource.getLayerLn1(stageConfig.layerIndex, stageKey, tokenIndex, targetLength)
             : null;
     }
     if (stageConfig.layerNormKind === 'ln2') {
         return typeof activationSource?.getLayerLn2 === 'function'
-            ? activationSource.getLayerLn2(stageConfig.layerIndex, stageKey, tokenIndex, D_MODEL)
+            ? activationSource.getLayerLn2(stageConfig.layerIndex, stageKey, tokenIndex, targetLength)
             : null;
     }
     return typeof activationSource?.getFinalLayerNorm === 'function'
-        ? activationSource.getFinalLayerNorm(stageKey, tokenIndex, D_MODEL)
+        ? activationSource.getFinalLayerNorm(stageKey, tokenIndex, targetLength)
         : null;
 }
 
@@ -549,6 +572,7 @@ export function buildLayerNormDetailSceneModel({
         isSmallScreen,
         columnCount: D_MODEL
     });
+    const sourceVectorLength = resolveActivationSourceVectorLength(activationSource, D_MODEL);
 
     const inputRows = buildLayerNormActivationRows(tokenRefs, {
         stageConfig,
@@ -559,7 +583,8 @@ export function buildLayerNormDetailSceneModel({
         getVector: (tokenRef) => resolveLayerNormInputVector(
             activationSource,
             stageConfig,
-            tokenRef.tokenIndex
+            tokenRef.tokenIndex,
+            sourceVectorLength
         )
     });
     if (!inputRows.length) {
@@ -572,8 +597,8 @@ export function buildLayerNormDetailSceneModel({
         role: 'layer-norm-normalized-row',
         measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => (
-            resolveLayerNormStageVector(activationSource, stageConfig, 'norm', tokenRef.tokenIndex)
-            || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex)
+            resolveLayerNormStageVector(activationSource, stageConfig, 'norm', tokenRef.tokenIndex, sourceVectorLength)
+            || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex, sourceVectorLength)
         )
     });
     const normalizedCopyRows = buildLayerNormActivationRows(tokenRefs, {
@@ -582,8 +607,8 @@ export function buildLayerNormDetailSceneModel({
         role: 'layer-norm-normalized-copy-row',
         measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => (
-            resolveLayerNormStageVector(activationSource, stageConfig, 'norm', tokenRef.tokenIndex)
-            || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex)
+            resolveLayerNormStageVector(activationSource, stageConfig, 'norm', tokenRef.tokenIndex, sourceVectorLength)
+            || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex, sourceVectorLength)
         )
     });
     const scaleRows = buildLayerNormParamRows(stageConfig, {
@@ -596,12 +621,24 @@ export function buildLayerNormDetailSceneModel({
         role: 'layer-norm-scaled-row',
         measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => {
-            const normalizedVector = resolveLayerNormStageVector(activationSource, stageConfig, 'norm', tokenRef.tokenIndex)
-                || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex)
+            const normalizedVector = resolveLayerNormStageVector(
+                activationSource,
+                stageConfig,
+                'norm',
+                tokenRef.tokenIndex,
+                sourceVectorLength
+            )
+                || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex, sourceVectorLength)
                 || [];
             const scaleVector = getLayerNormParamData(stageConfig.layerIndex, stageConfig.layerNormKind, 'scale', D_MODEL)
                 || [];
-            return resolveLayerNormStageVector(activationSource, stageConfig, 'scale', tokenRef.tokenIndex)
+            return resolveLayerNormStageVector(
+                activationSource,
+                stageConfig,
+                'scale',
+                tokenRef.tokenIndex,
+                sourceVectorLength
+            )
                 || multiplyVectors(normalizedVector, scaleVector);
         }
     });
@@ -611,12 +648,24 @@ export function buildLayerNormDetailSceneModel({
         role: 'layer-norm-scaled-copy-row',
         measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => {
-            const normalizedVector = resolveLayerNormStageVector(activationSource, stageConfig, 'norm', tokenRef.tokenIndex)
-                || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex)
+            const normalizedVector = resolveLayerNormStageVector(
+                activationSource,
+                stageConfig,
+                'norm',
+                tokenRef.tokenIndex,
+                sourceVectorLength
+            )
+                || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex, sourceVectorLength)
                 || [];
             const scaleVector = getLayerNormParamData(stageConfig.layerIndex, stageConfig.layerNormKind, 'scale', D_MODEL)
                 || [];
-            return resolveLayerNormStageVector(activationSource, stageConfig, 'scale', tokenRef.tokenIndex)
+            return resolveLayerNormStageVector(
+                activationSource,
+                stageConfig,
+                'scale',
+                tokenRef.tokenIndex,
+                sourceVectorLength
+            )
                 || multiplyVectors(normalizedVector, scaleVector);
         }
     });
@@ -631,16 +680,34 @@ export function buildLayerNormDetailSceneModel({
         role: 'layer-norm-output-row',
         measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => {
-            const normalizedVector = resolveLayerNormStageVector(activationSource, stageConfig, 'norm', tokenRef.tokenIndex)
-                || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex)
+            const normalizedVector = resolveLayerNormStageVector(
+                activationSource,
+                stageConfig,
+                'norm',
+                tokenRef.tokenIndex,
+                sourceVectorLength
+            )
+                || resolveLayerNormInputVector(activationSource, stageConfig, tokenRef.tokenIndex, sourceVectorLength)
                 || [];
             const scaleVector = getLayerNormParamData(stageConfig.layerIndex, stageConfig.layerNormKind, 'scale', D_MODEL)
                 || [];
             const shiftVector = getLayerNormParamData(stageConfig.layerIndex, stageConfig.layerNormKind, 'shift', D_MODEL)
                 || [];
-            const scaledVector = resolveLayerNormStageVector(activationSource, stageConfig, 'scale', tokenRef.tokenIndex)
+            const scaledVector = resolveLayerNormStageVector(
+                activationSource,
+                stageConfig,
+                'scale',
+                tokenRef.tokenIndex,
+                sourceVectorLength
+            )
                 || multiplyVectors(normalizedVector, scaleVector);
-            return resolveLayerNormStageVector(activationSource, stageConfig, 'shift', tokenRef.tokenIndex)
+            return resolveLayerNormStageVector(
+                activationSource,
+                stageConfig,
+                'shift',
+                tokenRef.tokenIndex,
+                sourceVectorLength
+            )
                 || addVectors(scaledVector, shiftVector);
         }
     });
@@ -1018,6 +1085,7 @@ export function buildLayerNormDetailSceneModel({
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
         },
         metadata: {
+            sourceAnchorMode: 'caption-bottom',
             preserveColor: true,
             strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE
         }

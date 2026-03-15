@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="LLM-Visualized icon">
   <rect width="64" height="64" rx="10" fill="#050505" />
-  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.35">
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.05">
     <path d="M10 4v56" />
     <path d="M10 12h18v16h-18" />
     <path d="M10 34h44" />

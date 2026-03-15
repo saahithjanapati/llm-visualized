@@ -516,9 +516,10 @@ function buildPostMlpResidualDescription(selectionInfo = null) {
 function buildLayerNormNormalizedVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     const layerRef = buildSelectionLayerReference(selectionInfo);
+    const layerNormRef = buildSelectionLayerNormReference(selectionInfo);
     return joinParagraphs(
-        `This is the LayerNorm-normalized token-state vector for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''}, before the learned scale and shift are applied.`,
-        'At this moment, the vector has been re-centered and rescaled using statistics from this token\'s own features.',
+        `This is the normalized residual-stream vector for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''}. The normalization step in ${layerNormRef} has already completed, so this vector is now the zero-centered, variance-scaled version of that token's state.`,
+        'The learned scale and shift are the next LayerNorm substeps. They will turn this normalized state into the final post-LayerNorm vector that attention or the MLP actually reads.',
         'Its job is to present the same token state in a numerically steadier form so the next learned operations see a more stable input.'
     );
 }
@@ -526,7 +527,7 @@ function buildLayerNormNormalizedVectorDescription(selectionInfo = null) {
 function buildFinalLayerNormNormalizedVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     return joinParagraphs(
-        `This is the top-of-model LayerNorm-normalized token-state vector for ${tokenRef}, before the learned scale and shift are applied.`,
+        `This is the normalized residual-stream vector for ${tokenRef} at the top of the model. The final normalization step has already completed, so this vector is the zero-centered, variance-scaled state right before the last learned scale and shift.`,
         'It is the last normalized version of this token\'s state before the model converts hidden features into vocabulary logits.'
     );
 }

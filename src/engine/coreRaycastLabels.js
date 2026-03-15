@@ -1,6 +1,8 @@
 import {
     expandLayerNormLabel,
+    formatNormalizedResidualStreamLabel,
     formatLayerNormParamLabel,
+    isLayerNormNormalizedStage,
     isPostLayerNormResidualSelection,
     resolveLayerNormKind,
     resolvePostLayerNormResidualLabel
@@ -32,6 +34,10 @@ export function normalizeRaycastLabel(label, info = null, object = null) {
         || '';
     const stageLower = String(stage).toLowerCase();
     const explicitQkvLabel = hasExplicitQkvVectorLabel(lower);
+
+    if (isLayerNormNormalizedStage(stageLower)) {
+        return formatNormalizedResidualStreamLabel();
+    }
 
     const isPostLayerNormResidual = !explicitQkvLabel && isPostLayerNormResidualSelection({
         label: raw,

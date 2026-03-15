@@ -618,11 +618,19 @@ function buildAttentionOutputProjectionHoverInfo(node = null, rowItem = null, {
     const extraActivationDataObject = extraActivationData && typeof extraActivationData === 'object'
         ? extraActivationData
         : {};
+    const explicitValues = Array.isArray(extraActivationDataObject?.values) || ArrayBuffer.isView(extraActivationDataObject?.values)
+        ? Array.from(extraActivationDataObject.values).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
+    const rowValues = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
+    const values = explicitValues?.length ? explicitValues : rowValues;
     const stage = typeof extraActivationDataObject.stage === 'string' && extraActivationDataObject.stage.trim().length
         ? extraActivationDataObject.stage.trim()
         : 'attention.output_projection';
     const info = buildProjectionHoverInfo(node, label, {
         stage,
+        ...(values?.length ? { values } : {}),
         ...extraActivationDataObject,
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
@@ -636,6 +644,7 @@ function buildAttentionOutputProjectionHoverInfo(node = null, rowItem = null, {
         activationData: {
             ...(info.activationData || {}),
             stage,
+            ...(values?.length ? { values } : {}),
             ...extraActivationDataObject,
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
@@ -726,6 +735,13 @@ function buildOutputProjectionHeadOutputRowResult(index = null, node = null, row
             ...(concatOutputNodeId && Number.isFinite(headIndex)
                 ? [{
                     nodeId: concatOutputNodeId,
+                    rowIndex,
+                    colIndex: headIndex
+                }]
+                : []),
+            ...(concatOutputCopyNodeId && Number.isFinite(headIndex)
+                ? [{
+                    nodeId: concatOutputCopyNodeId,
                     rowIndex,
                     colIndex: headIndex
                 }]

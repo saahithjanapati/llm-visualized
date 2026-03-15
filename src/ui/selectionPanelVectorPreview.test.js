@@ -218,6 +218,31 @@ function buildQkvHeadSelection(label, stage, values, layerIndex = 4, headIndex =
     };
 }
 
+function buildAttentionOutputSelection(
+    label = 'Attention Output Vector',
+    stage = 'attention.output_projection',
+    values = new Array(12).fill(0).map((_, index) => Math.sin(index / 3)),
+    layerIndex = 4,
+    tokenIndex = 1
+) {
+    return {
+        label,
+        kind: 'vector',
+        info: {
+            activationData: {
+                label,
+                stage,
+                layerIndex,
+                tokenIndex,
+                values
+            },
+            layerIndex,
+            tokenIndex,
+            values
+        }
+    };
+}
+
 describe('buildVectorClonePreview', () => {
     it('copies only the selected scene-backed vector slice when prismCount metadata is present', () => {
         const prismCount = 3;
@@ -402,6 +427,79 @@ describe('buildVectorClonePreview', () => {
         expect(previewMesh?.count).toBe(12);
 
         preview.dispose?.();
+    });
+
+    it('builds exact ln2 residual previews from batched vectors with cyclic raycast metadata', () => {
+        const prismCount = 12;
+        const label = 'Post LayerNorm 2 Residual Vector';
+        const { mesh: sourceMesh, vectorRefs } = createExpandedMlpBatch({
+            prismCount,
+            vectorColors: [0xFF0000, 0x00FF00, 0x0000FF],
+            segmentGap: 120
+        });
+        const selectedRef = vectorRefs[1];
+        const activationData = {
+            label,
+            stage: 'ln2.output',
+            sourceStage: 'ln2.shift',
+            layerIndex: 2,
+            tokenIndex: 1
+        };
+        selectedRef.userData.activationData = activationData;
+        selectedRef.group.userData = {
+            isVector: true,
+            label,
+            layerIndex: 2
+        };
+
+        const cyclicEntry = {
+            label,
+            activationData,
+            vectorRef: selectedRef,
+            layerIndex: 2,
+            tokenIndex: 1,
+            category: 'residual'
+        };
+        sourceMesh.userData.instanceLabels = new Array(prismCount * vectorRefs.length).fill(label);
+        sourceMesh.userData.instanceEntries = new Array(prismCount * vectorRefs.length).fill(cyclicEntry);
+
+        const selection = {
+            label,
+            kind: 'vector',
+            object: sourceMesh,
+            hit: {
+                object: sourceMesh,
+                instanceId: prismCount
+            },
+            info: {
+                vectorIndex: 1,
+                vectorRef: selectedRef,
+                activationData,
+                layerIndex: 2,
+                tokenIndex: 1,
+                prismCount
+            }
+        };
+
+        let preview = null;
+        expect(() => {
+            preview = buildVectorClonePreview(selection, selection.label);
+        }).not.toThrow();
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(prismCount);
+
+        const copiedColor = new THREE.Color();
+        previewMesh.getColorAt(0, copiedColor);
+        expect(copiedColor.r).toBeCloseTo(0, 5);
+        expect(copiedColor.g).toBeCloseTo(1, 5);
+        expect(copiedColor.b).toBeCloseTo(0, 5);
+
+        preview.dispose?.();
+        sourceMesh.geometry.dispose();
+        sourceMesh.material.dispose();
     });
 
     it('renders data-backed MLP-down selections as one vector instead of the three-lane placeholder', () => {
@@ -621,6 +719,25 @@ describe('buildVectorClonePreview', () => {
         const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
         expect(getHueDistance(startColor, MHA_OUTPUT_PROJECTION_MATRIX_COLOR)).toBeLessThan(0.12);
         expect(getHueDistance(endColor, MHA_OUTPUT_PROJECTION_MATRIX_COLOR)).toBeLessThan(0.12);
+
+        preview.dispose?.();
+    });
+
+    it('renders attention output vectors as a single residual-style preview vector', () => {
+        const selection = buildAttentionOutputSelection();
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+        expect(countPreviewMeshes(preview?.object)).toBe(1);
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(12);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(startColor).toBeTruthy();
+        expect(endColor).toBeTruthy();
 
         preview.dispose?.();
     });

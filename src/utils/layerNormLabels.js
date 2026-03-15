@@ -24,6 +24,12 @@ const LAYER_NORM_OUTPUT_STAGE_KIND = Object.freeze({
     'final_ln.shift': 'final'
 });
 
+const LAYER_NORM_NORMALIZED_STAGE_KIND = Object.freeze({
+    'ln1.norm': 'ln1',
+    'ln2.norm': 'ln2',
+    'final_ln.norm': 'final'
+});
+
 function matchPostLayerNormResidualLabel(label = '') {
     return String(label || '')
         .toLowerCase()
@@ -70,6 +76,10 @@ export function normalizeLayerNormOutputStage(stage = '', {
 
 export function isLayerNormOutputStage(stage = '') {
     return !!normalizeLayerNormOutputStage(stage);
+}
+
+export function isLayerNormNormalizedStage(stage = '') {
+    return !!LAYER_NORM_NORMALIZED_STAGE_KIND[String(stage || '').toLowerCase()];
 }
 
 export function resolveLayerNormKind({
@@ -171,6 +181,10 @@ export function formatLayerNormLabel(kind = null) {
     if (safeKind === 'ln2') return 'LayerNorm 2';
     if (safeKind === 'final') return 'LayerNorm (Top)';
     return 'LayerNorm';
+}
+
+export function formatNormalizedResidualStreamLabel() {
+    return 'Normalized Residual Stream Vector';
 }
 
 export function formatLayerNormParamLabel(kind = null, param = 'scale') {

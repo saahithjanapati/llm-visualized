@@ -1,13 +1,17 @@
 import { MHA_FINAL_Q_COLOR } from '../animations/LayerAnimationConstants.js';
 import { getLayerNormParamMeta } from '../data/layerNormParams.js';
 import { buildHueRangeOptions } from '../utils/colors.js';
-import { resolveLayerNormKind } from '../utils/layerNormLabels.js';
+import {
+    isLayerNormNormalizedStage,
+    resolveLayerNormKind
+} from '../utils/layerNormLabels.js';
 import {
     findUserDataNumber,
     findUserDataString,
     getActivationDataFromSelection
 } from './selectionPanelSelectionUtils.js';
 import { D_MODEL } from './selectionPanelConstants.js';
+import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 
 export const LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS = Object.freeze(buildHueRangeOptions(
     MHA_FINAL_Q_COLOR,
@@ -56,6 +60,35 @@ function resolveLayerMethodValue(layer = null, methodName = '', fallbackKey = ''
         }
     }
     return fallbackKey ? layer?.[fallbackKey] : undefined;
+}
+
+function resolveLayerLaneByToken(layer = null, selectionInfo = null) {
+    const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
+    if (!lanes.length) return null;
+
+    const tokenIndex = findUserDataNumber(selectionInfo, 'tokenIndex');
+    if (Number.isFinite(tokenIndex)) {
+        const normalizedTokenIndex = Math.floor(tokenIndex);
+        const byIndex = lanes.find((lane) => (
+            lane
+            && Number.isFinite(lane.tokenIndex)
+            && Math.floor(lane.tokenIndex) === normalizedTokenIndex
+        ));
+        if (byIndex) return byIndex;
+    }
+
+    const tokenLabelRaw = findUserDataString(selectionInfo, 'tokenLabel');
+    const tokenLabel = formatTokenLabelForPreview(tokenLabelRaw);
+    if (tokenLabel) {
+        const byLabel = lanes.find((lane) => (
+            lane
+            && typeof lane.tokenLabel === 'string'
+            && formatTokenLabelForPreview(lane.tokenLabel) === tokenLabel
+        ));
+        if (byLabel) return byLabel;
+    }
+
+    return null;
 }
 
 export function resolveLayerNormPreviewContext(selectionInfo = null, engine = null) {
@@ -131,5 +164,53 @@ export function resolveLayerNormParameterSummary(selectionInfo = null, engine = 
         ...previewContext,
         perParameterCount: hiddenSize,
         totalParameterCount: hiddenSize * 2
+    };
+}
+
+export function resolveLiveLayerNormNormalizedPreviewSelection(selectionInfo = null, engine = null) {
+    const activationStage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (!isLayerNormNormalizedStage(activationStage)) return null;
+
+    const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
+    if (!previewContext?.targetLayer || previewContext.layerNormKind === 'final') return null;
+
+    const lane = resolveLayerLaneByToken(previewContext.targetLayer, selectionInfo);
+    if (!lane) return null;
+
+    let vectorRef = null;
+    let stageIsActive = false;
+    if (activationStage === 'ln1.norm') {
+        vectorRef = lane.dupVec || null;
+        stageIsActive = !!(lane.normStarted && !lane.multStarted);
+    } else if (activationStage === 'ln2.norm') {
+        vectorRef = lane.movingVecLN2 || null;
+        stageIsActive = !!(lane.normStartedLN2 && !lane.multDoneLN2);
+    }
+    if (!stageIsActive || !vectorRef || vectorRef.group?.visible === false) return null;
+
+    const object = vectorRef.mesh?.isInstancedMesh === true
+        ? vectorRef.mesh
+        : (vectorRef.group || vectorRef.mesh || null);
+    if (!object) return null;
+
+    const info = {
+        ...((selectionInfo?.info && typeof selectionInfo.info === 'object') ? selectionInfo.info : {}),
+        vectorRef
+    };
+    if (Number.isFinite(vectorRef?.instanceCount)) {
+        info.prismCount = Math.max(1, Math.floor(vectorRef.instanceCount));
+        info.prismIndex = 0;
+    }
+
+    return {
+        ...(selectionInfo && typeof selectionInfo === 'object' ? selectionInfo : {}),
+        info,
+        object,
+        ...(vectorRef.mesh?.isInstancedMesh === true ? {
+            hit: {
+                object,
+                instanceId: 0
+            }
+        } : {})
     };
 }

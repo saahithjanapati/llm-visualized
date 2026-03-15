@@ -79,3 +79,13 @@ export function shouldTreatView2dPointerReleaseAsClick({
 } = {}) {
     return moved !== true && suppressClick !== true;
 }
+
+export function shouldSuppressView2dDoubleClickFocus({
+    headDetailDepthActive = false,
+    hasActiveDetailTarget = false,
+    hasDetailSceneIndex = false
+} = {}) {
+    return headDetailDepthActive === true
+        && hasActiveDetailTarget === true
+        && hasDetailSceneIndex === true;
+}

@@ -119,6 +119,48 @@ describe('selectionPanelTransformerView2dTokenHoverUtils', () => {
         ]);
     });
 
+    it('keeps both attention tokens active when the canvas sync payload includes a token pair', () => {
+        const container = document.createElement('div');
+        const firstChip = buildTokenChip({
+            tokenText: 'Token A',
+            tokenIndex: 0,
+            tokenId: 11
+        });
+        const secondChip = buildTokenChip({
+            tokenText: 'Token B',
+            tokenIndex: 1,
+            tokenId: 12
+        });
+        const thirdChip = buildTokenChip({
+            tokenText: 'Token C',
+            tokenIndex: 2,
+            tokenId: 13
+        });
+        container.append(firstChip, secondChip, thirdChip);
+        document.body.appendChild(container);
+
+        const hoverSync = createTransformerView2dTokenHoverSync({ container });
+        hoverSync.setCanvasEntry([
+            {
+                tokenIndex: 2,
+                tokenId: 13,
+                tokenLabel: 'Token C'
+            },
+            {
+                tokenIndex: 0,
+                tokenId: 11,
+                tokenLabel: 'Token A'
+            }
+        ]);
+
+        expect(firstChip.classList.contains('is-token-chip-active')).toBe(true);
+        expect(secondChip.classList.contains('is-token-chip-active')).toBe(false);
+        expect(thirdChip.classList.contains('is-token-chip-active')).toBe(true);
+        expect(container.dataset.tokenFocusActive).toBe('true');
+
+        hoverSync.dispose({ emit: false });
+    });
+
     it('highlights the matching 2D token chip and emits sync when the canvas hovers a residual row', () => {
         const container = document.createElement('div');
         const firstChip = buildTokenChip({

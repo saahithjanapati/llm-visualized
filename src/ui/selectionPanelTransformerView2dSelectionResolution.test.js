@@ -308,6 +308,57 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.kind).toBe('vector');
     });
 
+    it('keeps layer norm input residual selections on activation-source data when only a broad scene vector exists', () => {
+        const scene = new THREE.Scene();
+        const sharedResidualMesh = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial(),
+            36
+        );
+        sharedResidualMesh.userData = {
+            isVector: true,
+            label: 'Incoming Residual (Pre-LN1)',
+            activationData: {
+                label: 'Incoming Residual (Pre-LN1)',
+                stage: 'layer.incoming',
+                layerIndex: 1,
+                tokenIndex: 2,
+                tokenLabel: 'source'
+            }
+        };
+        scene.add(sharedResidualMesh);
+
+        const panel = createPanelContext(scene);
+        panel.activationSource = {
+            getBaseVectorLength: () => 3,
+            getTokenId: () => 17,
+            getLayerIncoming: () => [0.1, 0.2, 0.3]
+        };
+
+        const selection = {
+            label: 'Residual Stream Vector',
+            info: {
+                activationData: {
+                    label: 'Residual Stream Vector',
+                    stage: 'layer.incoming',
+                    sourceStage: 'layer.incoming',
+                    layerIndex: 1,
+                    tokenIndex: 2,
+                    tokenLabel: 'source'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Residual Stream Vector');
+        expect(resolved?.object).toBeUndefined();
+        expect(resolved?.hit).toBeUndefined();
+        expect(resolved?.info?.activationData?.stage).toBe('layer.incoming');
+        expect(resolved?.info?.activationData?.values).toEqual([0.1, 0.2, 0.3]);
+        expect(resolved?.info?.tokenId).toBe(17);
+    });
+
     it('recovers the live MLP-down vector for MLP detail output selections', () => {
         const panel = createPanelContext();
         const downMesh = createSceneNode('MLP Down Projection', {

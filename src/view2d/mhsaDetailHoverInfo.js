@@ -371,10 +371,14 @@ function buildLayerNormHoverInfo(node = null, rowItem = null, {
     const layerNormKind = resolveLayerNormHoverKind(node, rowItem);
     const resolvedStage = String(stage || resolveLayerNormStageKey(node, rowItem) || '').trim().toLowerCase();
     const resolvedSourceStage = String(sourceStage || resolveLayerNormStageKey(node, rowItem) || '').trim().toLowerCase();
+    const values = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
     const info = buildProjectionHoverInfo(node, label, {
         stage: resolvedStage,
         ...(resolvedSourceStage.length ? { sourceStage: resolvedSourceStage } : {}),
         ...(layerNormKind ? { layerNormKind } : {}),
+        ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -390,6 +394,7 @@ function buildLayerNormHoverInfo(node = null, rowItem = null, {
             stage: resolvedStage,
             ...(resolvedSourceStage.length ? { sourceStage: resolvedSourceStage } : {}),
             ...(layerNormKind ? { layerNormKind } : {}),
+            ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
@@ -406,6 +411,19 @@ export function buildLayerNormActivationHoverInfo(node = null, rowItem = null, {
     const actualStage = resolveLayerNormStageKey(node, rowItem).toLowerCase();
     if (variant === 'output' && normalizePostLayerNormResidualStage(actualStage)) {
         return buildPostLayerNormResidualHoverInfo(node, rowItem);
+    }
+
+    if (variant === 'input') {
+        const residualStage = actualStage || (
+            layerNormKind === 'final'
+                ? 'residual.post_mlp'
+                : (layerNormKind === 'ln2' ? 'residual.post_attention' : 'layer.incoming')
+        );
+        return buildLayerNormHoverInfo(node, rowItem, {
+            label: 'Residual Stream Vector',
+            stage: residualStage,
+            sourceStage: residualStage
+        });
     }
 
     let label = `${layerNormLabel} Input Vector`;
