@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="LLM-Visualized icon">
+  <rect width="64" height="64" rx="10" fill="#050505" />
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.35">
+    <path d="M10 4v56" />
+    <path d="M10 12h18v16h-18" />
+    <path d="M10 34h44" />
+    <path d="M10 56h44" />
+    <path d="M54 34v22" />
+    <path d="M24 34v22" />
+    <path d="M39 34v22" />
+  </g>
+  <g fill="#ffffff">
+    <rect x="26" y="12.5" width="16" height="11" rx="3" />
+    <rect x="19.75" y="41.75" width="8.5" height="8.5" rx="2" />
+    <rect x="34.75" y="41.75" width="8.5" height="8.5" rx="2" />
+    <rect x="49.75" y="41.75" width="8.5" height="8.5" rx="2" />
+  </g>
+</svg>

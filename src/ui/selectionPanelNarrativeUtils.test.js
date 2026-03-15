@@ -164,4 +164,57 @@ describe('selectionPanelNarrativeUtils bias narratives', () => {
         expect(description).toContain('post-softmax attention weights');
         expect(description).toContain('output projection');
     });
+
+    it('returns blocked causal-mask-specific copy and highlights the attention equation', () => {
+        const selection = {
+            label: 'Causal Mask',
+            info: {
+                activationData: {
+                    stage: 'attention.mask',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    queryTokenIndex: 2,
+                    queryTokenLabel: 'cat',
+                    keyTokenIndex: 4,
+                    keyTokenLabel: 'sat',
+                    maskValue: Number.NEGATIVE_INFINITY,
+                    isMasked: true
+                }
+            }
+        };
+
+        const description = resolveDescription('Causal Mask', 'attentionSphere', selection);
+        expect(description).toContain('M_{\\mathrm{causal}}');
+        expect(description).toContain('-\\infty');
+        expect(description).toContain('future position');
+        expect(description).toContain('next-token prediction');
+
+        const entries = resolveSelectionPreviewEquations('Causal Mask', selection);
+        expect(entries).toHaveLength(2);
+        expect(entries[0]?.active).toBe(true);
+        expect(entries[0]?.tex).toContain('+ M');
+    });
+
+    it('returns allowed causal-mask-specific copy when the mask value is zero', () => {
+        const selection = {
+            label: 'Causal Mask',
+            info: {
+                activationData: {
+                    stage: 'attention.mask',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    queryTokenIndex: 4,
+                    queryTokenLabel: 'sat',
+                    keyTokenIndex: 2,
+                    keyTokenLabel: 'cat',
+                    maskValue: 0
+                }
+            }
+        };
+
+        const description = resolveDescription('Causal Mask', 'attentionSphere', selection);
+        expect(description).toContain('$0$');
+        expect(description).toContain('allowed');
+        expect(description).toContain('leaves the raw query-key score unchanged');
+    });
 });

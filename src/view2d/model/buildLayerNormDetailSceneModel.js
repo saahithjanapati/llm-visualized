@@ -70,6 +70,8 @@ const PIPELINE_STAGE_GAP = 16;
 const PIPELINE_STAGE_GAP_SMALL = 12;
 const PIPELINE_STACK_GAP = 28;
 const PIPELINE_STACK_GAP_SMALL = 24;
+const NORMALIZED_COPY_DROP_SPACER_HEIGHT = 44;
+const NORMALIZED_COPY_DROP_SPACER_HEIGHT_SMALL = 36;
 const NORMALIZATION_BRIDGE_GAP = 18;
 const NORMALIZATION_BRIDGE_GAP_SMALL = 15;
 const NORMALIZATION_EQUATION_FONT_SCALE = 1.34;
@@ -808,6 +810,17 @@ export function buildLayerNormDetailSceneModel({
         width: isSmallScreen ? OUTGOING_ARROW_SPACER_WIDTH_SMALL : OUTGOING_ARROW_SPACER_WIDTH,
         height: 1
     });
+    const normalizedCopyDropSpacerNode = createHiddenSpacer({
+        semantic: buildSemantic(baseSemantic, {
+            stage: stageConfig.scaleStage,
+            role: 'layer-norm-copy-drop-spacer'
+        }),
+        role: 'layer-norm-copy-drop-spacer',
+        width: 1,
+        height: isSmallScreen
+            ? NORMALIZED_COPY_DROP_SPACER_HEIGHT_SMALL
+            : NORMALIZED_COPY_DROP_SPACER_HEIGHT
+    });
 
     const normalizationEquationNode = createLayerNormTextNode({
         role: 'layer-norm-normalization-equation',
@@ -1082,6 +1095,7 @@ export function buildLayerNormDetailSceneModel({
                             gapOverride: isSmallScreen ? PIPELINE_STAGE_GAP_SMALL : PIPELINE_STAGE_GAP
                         }
                     }),
+                    normalizedCopyDropSpacerNode,
                     scalingStageNode,
                     outputStageNode
                 ],

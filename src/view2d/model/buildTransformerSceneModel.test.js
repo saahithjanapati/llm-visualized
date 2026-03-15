@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { CaptureActivationSource } from '../../data/CaptureActivationSource.js';
 import { D_MODEL } from '../../ui/selectionPanelConstants.js';
 import { NUM_HEAD_SETS_LAYER } from '../../utils/constants.js';
 import { buildSceneLayout } from '../layout/buildSceneLayout.js';
@@ -495,6 +496,64 @@ describe('buildTransformerSceneModel', () => {
             - ((denseVocabularyEntry?.contentBounds?.y || 0) + (denseVocabularyEntry?.contentBounds?.height || 0));
 
         expect(denseGap).toBeGreaterThan(baseGap);
+    });
+
+    it('preserves prism-length residual values in the top X summary cards', () => {
+        const incoming = [0, 1, 0, -1, 2, -2, 0.5, -0.5, 1.5, -1.5, 0.25, -0.25];
+        const postAttention = incoming.map((value, index) => Number((value + ((index % 3) * 0.1)).toFixed(4)));
+        const postMlp = incoming.map((value, index) => Number((value - ((index % 4) * 0.15)).toFixed(4)));
+        const activationSource = new CaptureActivationSource({
+            activations: {
+                embeddings: {
+                    token: [incoming],
+                    position: [incoming]
+                },
+                layers: [{
+                    incoming: [incoming],
+                    post_attn_residual: [postAttention],
+                    post_mlp_residual: [postMlp],
+                    ln1: {
+                        norm: [incoming]
+                    },
+                    ln2: {
+                        norm: [postAttention]
+                    }
+                }]
+            },
+            logits: []
+        });
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices: [0],
+            tokenLabels: ['Token A'],
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const incomingNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+            && node?.semantic?.layerIndex === 0
+        ));
+        const postAttentionNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'post-attn-residual'
+            && node?.semantic?.layerIndex === 0
+        ));
+        const outgoingNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'outgoing'
+        ));
+
+        expect(incomingNode?.rowItems?.[0]?.rawValues).toEqual(incoming);
+        expect(postAttentionNode?.rowItems?.[0]?.rawValues).toEqual(postAttention);
+        expect(outgoingNode?.rowItems?.[0]?.rawValues).toEqual(postMlp);
     });
 
     it('maps outgoing residual hover rows to the post-MLP residual activation', () => {

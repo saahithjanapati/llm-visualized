@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    CAUSAL_MASK_PREVIEW_BLOCKED_VALUE,
     buildAttentionMatrixValues,
     resolveAttentionMatrixCellValue,
     shouldClearPinnedAttentionOnDocumentPointerDown,
@@ -52,6 +53,19 @@ describe('selectionPanelAttentionMatrixUtils', () => {
             [1, 0, 0],
             [0.3, 0.7, 0],
             [0.2, 0.3, 0.5]
+        ]);
+    });
+
+    it('builds a deterministic causal-mask preview grid without activation rows', () => {
+        const maskValues = buildAttentionMatrixValues({
+            tokenIndices: [0, 1, 2],
+            mode: 'mask'
+        });
+
+        expect(maskValues).toEqual([
+            [0, CAUSAL_MASK_PREVIEW_BLOCKED_VALUE, CAUSAL_MASK_PREVIEW_BLOCKED_VALUE],
+            [0, 0, CAUSAL_MASK_PREVIEW_BLOCKED_VALUE],
+            [0, 0, 0]
         ]);
     });
 

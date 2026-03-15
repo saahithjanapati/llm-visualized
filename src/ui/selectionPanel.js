@@ -85,7 +85,9 @@ import {
     shouldRevealAttentionCell
 } from './selectionPanelAttentionRevealUtils.js';
 import {
+    CAUSAL_MASK_PREVIEW_BLOCKED_VALUE,
     buildAttentionMatrixValues,
+    isCausalUpperAttentionCell,
     resolveAttentionMatrixCellValue,
     shouldClearPinnedAttentionOnDocumentPointerDown,
     shouldMuteCausalUpperPreAttentionCell
@@ -316,6 +318,7 @@ import {
     MHA_OUTPUT_PROJECTION_MATRIX_PARAMS,
     MHA_VALUE_CLAMP_MAX,
     MHA_VALUE_HUE_SPREAD,
+    MHA_VALUE_KEY_COLOR_COUNT,
     MHA_VALUE_LIGHTNESS_MAX,
     MHA_VALUE_LIGHTNESS_MIN,
     MHA_VALUE_RANGE_MAX,
@@ -693,13 +696,158 @@ function darkenColor(color, factor = 1) {
     return target.multiplyScalar(safeFactor);
 }
 
+function resolveCausalMaskCellColor(isBlocked = false) {
+    if (isBlocked) return new THREE.Color(0x000000);
+    return darkenColor(
+        mapValueToColor(0, { clampMax: ATTENTION_PRE_COLOR_CLAMP }),
+        ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR
+    );
+}
+
+function buildCausalMaskLegendGradient() {
+    const blockedCss = colorToCss(resolveCausalMaskCellColor(true));
+    const allowedCss = colorToCss(resolveCausalMaskCellColor(false));
+    return `linear-gradient(90deg, ${blockedCss} 0%, ${blockedCss} 50%, ${allowedCss} 50%, ${allowedCss} 100%)`;
+}
+
 function resolveAttentionPreviewCellColor(value, mode) {
-    const safeMode = mode === 'post' ? 'post' : 'pre';
+    const safeMode = mode === 'mask'
+        ? 'mask'
+        : (mode === 'post' ? 'post' : 'pre');
     if (safeMode === 'post') {
         return mapAttentionPostScoreToColor(value);
     }
-    const baseColor = mapValueToColor(value, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
+    if (safeMode === 'mask') {
+        return resolveCausalMaskCellColor(value <= CAUSAL_MASK_PREVIEW_BLOCKED_VALUE);
+    }
+    const previewValue = value;
+    const baseColor = mapValueToColor(previewValue, { clampMax: ATTENTION_PRE_COLOR_CLAMP });
     return darkenColor(baseColor, ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR);
+}
+
+function isCausalMaskSelection(selectionInfo = null) {
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const stageLower = String(activation?.stage || '').toLowerCase();
+    if (stageLower === 'attention.mask') return true;
+    const lower = String(selectionInfo?.label || '').toLowerCase();
+    return lower.includes('causal mask') || lower.includes('attention mask');
+}
+
+function resolveAttentionSelectionDisplayMode(selectionInfo = null, fallbackMode = 'pre') {
+    if (isCausalMaskSelection(selectionInfo)) return 'mask';
+    const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (stageLower === 'attention.post') return 'post';
+    if (stageLower === 'attention.pre') return 'pre';
+    const preferredMode = resolveAttentionModeFromSelection(selectionInfo);
+    if (preferredMode === 'post' || preferredMode === 'pre') return preferredMode;
+    return fallbackMode === 'post' ? 'post' : 'pre';
+}
+
+function resolveAttentionDisplayMode(mode = 'pre') {
+    if (mode === 'mask') return 'mask';
+    return mode === 'post' ? 'post' : 'pre';
+}
+
+function isCausalMaskBlocked({
+    maskValue = null,
+    isMasked = false,
+    queryTokenIndex = null,
+    keyTokenIndex = null
+} = {}) {
+    if (maskValue === Number.NEGATIVE_INFINITY) return true;
+    if (isMasked === true) return true;
+    return isCausalUpperAttentionCell(queryTokenIndex, keyTokenIndex);
+}
+
+function resolveCausalMaskPreviewValue({
+    maskValue = null,
+    isMasked = false,
+    queryTokenIndex = null,
+    keyTokenIndex = null
+} = {}) {
+    return isCausalMaskBlocked({
+        maskValue,
+        isMasked,
+        queryTokenIndex,
+        keyTokenIndex
+    })
+        ? CAUSAL_MASK_PREVIEW_BLOCKED_VALUE
+        : 0;
+}
+
+function formatCausalMaskPreviewScore({
+    maskValue = null,
+    isMasked = false,
+    queryTokenIndex = null,
+    keyTokenIndex = null,
+    fallback = ATTENTION_VALUE_PLACEHOLDER
+} = {}) {
+    if (
+        maskValue === 0
+        || isMasked === true
+        || maskValue === Number.NEGATIVE_INFINITY
+        || (
+            Number.isFinite(queryTokenIndex)
+            && Number.isFinite(keyTokenIndex)
+        )
+    ) {
+        return isCausalMaskBlocked({
+            maskValue,
+            isMasked,
+            queryTokenIndex,
+            keyTokenIndex
+        })
+            ? '-∞'
+            : '0';
+    }
+    return fallback;
+}
+
+function formatAttentionDisplayScore({
+    mode = 'pre',
+    value = null,
+    maskValue = null,
+    isMasked = false,
+    queryTokenIndex = null,
+    keyTokenIndex = null,
+    fallback = ATTENTION_VALUE_PLACEHOLDER
+} = {}) {
+    if (resolveAttentionDisplayMode(mode) === 'mask') {
+        return formatCausalMaskPreviewScore({
+            maskValue,
+            isMasked,
+            queryTokenIndex,
+            keyTokenIndex,
+            fallback
+        });
+    }
+    return formatAttentionPreviewScore(value, fallback);
+}
+
+function buildAttentionMatrixCellTitle({
+    rowLabel = '',
+    colLabel = '',
+    mode = 'pre',
+    value = null,
+    queryTokenIndex = null,
+    keyTokenIndex = null,
+    maskValue = null,
+    isMasked = false
+} = {}) {
+    const safeMode = resolveAttentionDisplayMode(mode);
+    const modeLabel = safeMode === 'mask'
+        ? 'causal mask'
+        : (safeMode === 'post' ? 'post' : 'pre');
+    const displayValue = formatAttentionDisplayScore({
+        mode: safeMode,
+        value,
+        maskValue,
+        isMasked,
+        queryTokenIndex,
+        keyTokenIndex,
+        fallback: 'n/a'
+    });
+    return `${rowLabel} → ${colLabel} (${modeLabel}): ${displayValue}`;
 }
 
 function resolveLegendSampleT(ratio, edgeClampRatio = 0) {
@@ -774,19 +922,30 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     if (!activation) return null;
 
     const normalizedLabel = normalizeSelectionLabel(selectionInfo?.label, selectionInfo);
-    const isScoreStage = stageLower === 'attention.pre' || stageLower === 'attention.post';
+    const isScoreStage = stageLower === 'attention.pre'
+        || stageLower === 'attention.post'
+        || stageLower === 'attention.mask';
     const isAttentionScore = isAttentionScoreSelection(normalizedLabel, selectionInfo)
         || isScoreStage;
     if (!isAttentionScore) return null;
 
-    const mode = resolveAttentionModeFromSelection(selectionInfo)
-        || (stageLower.includes('post') ? 'post' : 'pre');
-    const score = resolveAttentionMatrixCellValue({
-        mode,
-        value: mode === 'post' ? activation.postScore : activation.preScore,
-        queryTokenIndex: activation.tokenIndex,
-        keyTokenIndex: activation.keyTokenIndex
-    });
+    const mode = resolveAttentionSelectionDisplayMode(
+        selectionInfo,
+        stageLower.includes('post') ? 'post' : 'pre'
+    );
+    const score = mode === 'mask'
+        ? resolveCausalMaskPreviewValue({
+            maskValue: activation.maskValue,
+            isMasked: activation.isMasked === true,
+            queryTokenIndex: activation.tokenIndex,
+            keyTokenIndex: activation.keyTokenIndex
+        })
+        : resolveAttentionMatrixCellValue({
+            mode,
+            value: mode === 'post' ? activation.postScore : activation.preScore,
+            queryTokenIndex: activation.tokenIndex,
+            keyTokenIndex: activation.keyTokenIndex
+        });
     const tokenIndices = Array.isArray(context?.tokenIndices) ? context.tokenIndices : [];
     const tokenLabels = Array.isArray(context?.tokenLabels) ? context.tokenLabels : [];
 
@@ -805,7 +964,15 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const targetTokenText = normalizeAttentionValuePart(targetLabel);
     const sourceText = sourceTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Source' : sourceTokenText;
     const targetText = targetTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Target' : targetTokenText;
-    const scoreText = formatAttentionPreviewScore(score, 'n/a');
+    const scoreText = formatAttentionDisplayScore({
+        mode,
+        value: score,
+        maskValue: activation.maskValue,
+        isMasked: activation.isMasked === true,
+        queryTokenIndex: activation.tokenIndex,
+        keyTokenIndex: activation.keyTokenIndex,
+        fallback: 'n/a'
+    });
     const hasSourceContext = Number.isFinite(sourceTokenIndex) || sourceLabel.length > 0;
     const hasTargetContext = Number.isFinite(targetTokenIndex) || targetLabel.length > 0;
     const tokenContext = (hasSourceContext || hasTargetContext)
@@ -1972,6 +2139,15 @@ function inferAttentionBiasPreviewKind(label = '', selectionInfo = null) {
     return '';
 }
 
+function inferAttentionHeadVectorPreviewKind(label = '', selectionInfo = null) {
+    const lower = String(label || '').toLowerCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (stage === 'qkv.q' || lower === 'query vector') return 'q';
+    if (stage === 'qkv.k' || lower === 'key vector') return 'k';
+    if (stage === 'qkv.v' || lower === 'value vector') return 'v';
+    return '';
+}
+
 function isOutputProjectionBiasPreviewSelection(label = '', selectionInfo = null) {
     const lower = String(label || '').toLowerCase();
     const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
@@ -2045,6 +2221,17 @@ function resolveAttentionBiasPreviewData(selectionInfo = null, kind = 'q') {
     const biasKind = kind === 'k' ? 'key' : (kind === 'v' ? 'value' : 'query');
     const biasValue = getAttentionBiasHeadSample(layerIndex, biasKind, headIndex);
     return Number.isFinite(biasValue) ? [biasValue] : null;
+}
+
+function resolveAttentionHeadVectorPreviewData(selectionInfo = null) {
+    const explicitValues = normalizePreviewVectorDataArray(
+        selectionInfo?.info?.activationData?.values
+        || selectionInfo?.info?.values
+    );
+    if (explicitValues?.length) {
+        return explicitValues;
+    }
+    return extractPreviewVectorData(selectionInfo);
 }
 
 function resolveAttentionWeightedSumPreviewData(selectionInfo = null) {
@@ -2250,6 +2437,52 @@ function buildAttentionWeightedSumPreviewColorOptions() {
         valueMax: MHA_VALUE_RANGE_MAX,
         valueClampMax: MHA_VALUE_CLAMP_MAX
     });
+}
+
+function buildAttentionHeadVectorPreview(selectionInfo, label = '') {
+    const kind = inferAttentionHeadVectorPreviewKind(label, selectionInfo);
+    if (!kind) return null;
+    const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
+    const previewData = resolveAttentionHeadVectorPreviewData(selectionInfo);
+    if (!previewData?.length) return null;
+    const vec = createPreviewVector({
+        colorHex: resolveVectorPreviewColor(label, selectionInfo),
+        data: null,
+        instanceCount: Math.max(1, Math.ceil(outputLength / PRISM_DIMENSIONS_PER_UNIT))
+    });
+    const processedData = previewData.slice(0, outputLength);
+    const numKeyColors = processedData.length <= 1
+        ? 1
+        : Math.min(MHA_VALUE_KEY_COLOR_COUNT, processedData.length);
+    vec.group.userData = vec.group.userData || {};
+    vec.group.userData.label = label || (
+        kind === 'k'
+            ? 'Key Vector'
+            : (kind === 'v' ? 'Value Vector' : 'Query Vector')
+    );
+    vec.applyProcessedVisuals(
+        processedData,
+        outputLength,
+        {
+            numKeyColors,
+            generationOptions: buildAttentionBiasPreviewColorOptions(kind)
+        },
+        {
+            setHiddenToBlack: false,
+            hideByScaleOnly: true
+        },
+        processedData
+    );
+    return {
+        object: vec.group,
+        view: {
+            fitDistanceMultiplier: 1.18,
+            fitPaddingMultiplier: 1.05
+        },
+        dispose: () => {
+            vec.dispose();
+        }
+    };
 }
 
 function buildOutputProjectionBiasPreviewColorOptions() {
@@ -2818,6 +3051,9 @@ export function buildVectorClonePreview(selectionInfo, label = '') {
     const vectorRef = selectionInfo?.info?.vectorRef || null;
     const vectorMesh = findVectorSourceMesh(selectionInfo);
     if (!vectorRef && !vectorMesh) {
+        const attentionHeadVectorPreview = buildAttentionHeadVectorPreview(selectionInfo, label);
+        if (attentionHeadVectorPreview) return attentionHeadVectorPreview;
+
         const fallbackData = extractPreviewVectorData(selectionInfo);
         if (
             (isResidualVectorSelection(label, selectionInfo)
@@ -2918,20 +3154,30 @@ function buildAttentionSpherePreview(selectionInfo) {
     const isAttentionScore = isAttentionScoreSelection(selectionInfo?.label, selectionInfo)
         || selectionInfo?.kind === 'attentionSphere'
         || stageLower === 'attention.pre'
-        || stageLower === 'attention.post';
+        || stageLower === 'attention.post'
+        || stageLower === 'attention.mask';
     if (!isAttentionScore) return null;
 
-    const mode = resolveAttentionModeFromSelection(selectionInfo)
-        || (stageLower.includes('post') ? 'post' : 'pre');
-    const score = resolveAttentionMatrixCellValue({
-        mode,
-        value: mode === 'post' ? activation?.postScore : activation?.preScore,
-        queryTokenIndex: activation?.tokenIndex,
-        keyTokenIndex: activation?.keyTokenIndex
-    });
+    const mode = resolveAttentionSelectionDisplayMode(
+        selectionInfo,
+        stageLower.includes('post') ? 'post' : 'pre'
+    );
+    const score = mode === 'mask'
+        ? resolveCausalMaskPreviewValue({
+            maskValue: activation?.maskValue,
+            isMasked: activation?.isMasked === true,
+            queryTokenIndex: activation?.tokenIndex,
+            keyTokenIndex: activation?.keyTokenIndex
+        })
+        : resolveAttentionMatrixCellValue({
+            mode,
+            value: mode === 'post' ? activation?.postScore : activation?.preScore,
+            queryTokenIndex: activation?.tokenIndex,
+            keyTokenIndex: activation?.keyTokenIndex
+        });
     const color = TMP_COLOR;
     let usedLiveColor = false;
-    if (source?.isInstancedMesh) {
+    if (mode !== 'mask' && source?.isInstancedMesh) {
         if (!source.userData?._attentionSphereInstanced && selectionInfo?.kind !== 'attentionSphere') return null;
         const instanceId = hit && typeof hit.instanceId === 'number' ? hit.instanceId : null;
         if (Number.isFinite(instanceId)) {
@@ -2949,6 +3195,8 @@ function buildAttentionSpherePreview(selectionInfo) {
     if (!usedLiveColor) {
         if (mode === 'post') {
             color.copy(mapAttentionPostScoreToColor(Number.isFinite(score) ? score : 0.5));
+        } else if (mode === 'mask') {
+            color.copy(resolveAttentionPreviewCellColor(score, 'mask'));
         } else {
             color.copy(mapValueToColor(
                 Number.isFinite(score) ? score : 0,
@@ -3600,6 +3848,7 @@ export class SelectionPanel {
             : ATTENTION_PREVIEW_MAX_TOKENS;
         this._attentionSectionCollapsed = getAttentionSectionCollapsedPreference();
         this.attentionMode = this.attentionToggle?.checked ? 'post' : 'pre';
+        this._attentionDisplayModeOverride = null;
         this._updateAttentionToggleLabel(this.attentionMode);
         this._updateAttentionTitle();
         this._attentionContext = null;
@@ -4015,7 +4264,7 @@ export class SelectionPanel {
     }
 
     _buildAttentionLegendGradient(mode) {
-        const safeMode = mode === 'post' ? 'post' : 'pre';
+        const safeMode = resolveAttentionDisplayMode(mode);
         const edgeClampRatio = this._resolveLegendEdgeClampRatio('attention');
         if (safeMode === 'post') {
             return buildLegendGradient({
@@ -4025,6 +4274,9 @@ export class SelectionPanel {
                 edgeClampRatio,
                 resolveColor: (value) => resolveAttentionPreviewCellColor(value, 'post')
             });
+        }
+        if (safeMode === 'mask') {
+            return buildCausalMaskLegendGradient();
         }
         return buildSpectrumLegendGradient({
             clampMax: ATTENTION_PRE_COLOR_CLAMP,
@@ -4049,7 +4301,7 @@ export class SelectionPanel {
         if (this.attentionRoot?.classList.contains('is-visible') && this.attentionLegend) {
             this.attentionLegend.style.setProperty(
                 '--attention-legend-gradient',
-                this._buildAttentionLegendGradient(this.attentionMode)
+                this._buildAttentionLegendGradient(this._resolveActiveAttentionDisplayMode())
             );
         }
     }
@@ -4068,17 +4320,26 @@ export class SelectionPanel {
         }
         if (kind !== 'attention') return null;
 
-        const mode = this.attentionMode === 'post' ? 'post' : 'pre';
+        const mode = this._resolveActiveAttentionDisplayMode();
         const value = mode === 'post'
             ? sampleT
-            : THREE.MathUtils.lerp(-ATTENTION_PRE_COLOR_CLAMP, ATTENTION_PRE_COLOR_CLAMP, sampleT);
+            : (mode === 'mask'
+                ? (sampleT < 0.5 ? CAUSAL_MASK_PREVIEW_BLOCKED_VALUE : 0)
+                : THREE.MathUtils.lerp(-ATTENTION_PRE_COLOR_CLAMP, ATTENTION_PRE_COLOR_CLAMP, sampleT));
         return {
             ratio: safeRatio,
             value,
-            valueLabel: this._formatLegendHoverValue(value, {
-                signed: mode === 'pre',
-                decimals: mode === 'post' ? ATTENTION_SCORE_DECIMALS : 2
-            }),
+            valueLabel: mode === 'mask'
+                ? formatCausalMaskPreviewScore({
+                    maskValue: value <= CAUSAL_MASK_PREVIEW_BLOCKED_VALUE + 1e-6
+                        ? Number.NEGATIVE_INFINITY
+                        : 0,
+                    fallback: ''
+                })
+                : this._formatLegendHoverValue(value, {
+                    signed: mode === 'pre',
+                    decimals: mode === 'post' ? ATTENTION_SCORE_DECIMALS : 2
+                }),
             colorCss: colorToCss(resolveAttentionPreviewCellColor(value, mode))
         };
     }
@@ -7794,24 +8055,6 @@ export class SelectionPanel {
         const tokenContext = this._resolveTransformerView2dSelectionTokenContext(fallbackSelection);
 
         if (
-            isAttentionScoreSelection(label, fallbackSelection)
-            && Number.isFinite(layerIndex)
-            && Number.isFinite(headIndex)
-            && Number.isFinite(tokenContext.queryTokenIndex)
-            && Number.isFinite(tokenContext.keyTokenIndex)
-        ) {
-            const link = {
-                mode: resolveAttentionModeFromSelection(fallbackSelection) === 'post' ? 'post' : 'pre',
-                layerIndex: Math.floor(layerIndex),
-                headIndex: Math.floor(headIndex),
-                sourceTokenIndex: tokenContext.queryTokenIndex,
-                targetTokenIndex: tokenContext.keyTokenIndex
-            };
-            return this._findAttentionScoreSceneSelection(link)
-                || this._buildFallbackAttentionScoreSelection(link);
-        }
-
-        if (
             stageLower === 'attention.mask'
             || lower.includes('causal mask')
             || lower.includes('attention mask')
@@ -7832,6 +8075,24 @@ export class SelectionPanel {
                 : null;
             return this._buildTransformerView2dCausalMaskSelection(fallbackSelection, link)
                 || fallbackSelection;
+        }
+
+        if (
+            isAttentionScoreSelection(label, fallbackSelection)
+            && Number.isFinite(layerIndex)
+            && Number.isFinite(headIndex)
+            && Number.isFinite(tokenContext.queryTokenIndex)
+            && Number.isFinite(tokenContext.keyTokenIndex)
+        ) {
+            const link = {
+                mode: resolveAttentionModeFromSelection(fallbackSelection) === 'post' ? 'post' : 'pre',
+                layerIndex: Math.floor(layerIndex),
+                headIndex: Math.floor(headIndex),
+                sourceTokenIndex: tokenContext.queryTokenIndex,
+                targetTokenIndex: tokenContext.keyTokenIndex
+            };
+            return this._findAttentionScoreSceneSelection(link)
+                || this._buildFallbackAttentionScoreSelection(link);
         }
 
         const layerNormParamSpec = resolveLayerNormParamPreviewSpec(label, fallbackSelection);
@@ -8725,9 +8986,15 @@ export class SelectionPanel {
         return parts.join(', ');
     }
 
+    _resolveActiveAttentionDisplayMode() {
+        return resolveAttentionDisplayMode(this._attentionDisplayModeOverride || this.attentionMode);
+    }
+
     _updateAttentionTitle(context = null) {
         if (!this.attentionTitle) return;
-        this.attentionTitle.textContent = 'Attention score matrix';
+        this.attentionTitle.textContent = this._resolveActiveAttentionDisplayMode() === 'mask'
+            ? 'Causal Mask'
+            : 'Attention score matrix';
         if (!this.attentionContextLabel) return;
         const contextParts = [];
         const layerIndex = Number.isFinite(context?.layerIndex) ? Math.floor(context.layerIndex) : null;
@@ -8739,6 +9006,8 @@ export class SelectionPanel {
 
     _applyAttentionCollapseState() {
         const collapsed = this._attentionSectionCollapsed === true;
+        const displayMode = this._resolveActiveAttentionDisplayMode();
+        const hideToggleRow = collapsed || displayMode === 'mask';
         if (this.attentionRoot) {
             this.attentionRoot.classList.toggle('is-collapsed', collapsed);
             this.attentionRoot.dataset.collapsed = collapsed ? 'true' : 'false';
@@ -8748,15 +9017,17 @@ export class SelectionPanel {
             this.attentionHeaderMeta.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
         }
         if (this.attentionToggleRow) {
-            this.attentionToggleRow.hidden = collapsed;
-            this.attentionToggleRow.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+            this.attentionToggleRow.hidden = hideToggleRow;
+            this.attentionToggleRow.setAttribute('aria-hidden', hideToggleRow ? 'true' : 'false');
         }
         if (this.attentionBody) {
             this.attentionBody.hidden = collapsed;
         }
         if (this.attentionCollapseBtn) {
             const contextLabel = this._formatAttentionPanelContext(this._attentionContext);
-            const actionBase = collapsed ? 'Maximize attention score matrix' : 'Minimize attention score matrix';
+            const actionBase = displayMode === 'mask'
+                ? (collapsed ? 'Maximize causal mask' : 'Minimize causal mask')
+                : (collapsed ? 'Maximize attention score matrix' : 'Minimize attention score matrix');
             const actionLabel = contextLabel
                 ? `${actionBase} for ${contextLabel}`
                 : actionBase;
@@ -9543,11 +9814,11 @@ export class SelectionPanel {
 
     _applyAttentionReveal(progress) {
         if (!this.attentionMatrix || !this._attentionCells || !this._attentionValues || !this._attentionContext) return;
-        const mode = this.attentionMode === 'post' ? 'post' : 'pre';
+        const mode = this._resolveActiveAttentionDisplayMode();
         const tokenLabels = this._attentionContext.tokenLabels || [];
         const count = this._attentionCells.length;
         const useFocusedPostReveal = mode === 'post' && this._hasAttentionFocusCell();
-        const useFocusedPreReveal = mode === 'pre' && this._shouldSuppressAttentionEntryHighlight();
+        const useFocusedPreReveal = mode !== 'post' && this._shouldSuppressAttentionEntryHighlight();
         const postAnimDuration = ATTENTION_POST_REVEAL_DURATION_MS;
         const preAnimDuration = ATTENTION_PRE_REVEAL_DURATION_MS;
         let hasAnyValue = false;
@@ -9563,7 +9834,7 @@ export class SelectionPanel {
                     ATTENTION_POST_REVEAL_STAGGER_MAX_MS
                 )
                 : 0;
-            const preAnimStagger = mode === 'pre' && visibleCellsInRow > 1
+            const preAnimStagger = mode !== 'post' && visibleCellsInRow > 1
                 ? THREE.MathUtils.clamp(
                     Math.round(ATTENTION_PRE_REVEAL_SWEEP_MS / (visibleCellsInRow - 1)),
                     ATTENTION_PRE_REVEAL_STAGGER_MIN_MS,
@@ -9589,7 +9860,14 @@ export class SelectionPanel {
                     cell.style.backgroundColor = colorToCss(color);
                     const rowLabel = tokenLabels[row] || '';
                     const colLabel = tokenLabels[col] || '';
-                    cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${formatAttentionPreviewScore(value)}`;
+                    cell.title = buildAttentionMatrixCellTitle({
+                        rowLabel,
+                        colLabel,
+                        mode,
+                        value,
+                        queryTokenIndex: Number(cell.dataset.rowTokenIndex),
+                        keyTokenIndex: Number(cell.dataset.colTokenIndex)
+                    });
                     cell.dataset.value = String(value);
                     cell.classList.remove('is-empty');
                     hasAnyValue = true;
@@ -9614,7 +9892,7 @@ export class SelectionPanel {
                         } else {
                             this._clearAttentionCellRevealAnimation(cell);
                         }
-                    } else if (mode === 'pre') {
+                    } else {
                         if (wasEmpty) {
                             const revealOrder = getAttentionRevealOrder(row, col, count, ATTENTION_PREVIEW_TRIANGLE);
                             this._applyAttentionCellRevealAnimation(
@@ -9682,10 +9960,11 @@ export class SelectionPanel {
         if (!this.attentionRoot) return;
         const context = this._resolveAttentionContext(selection);
         this._attentionContext = context;
+        this._attentionDisplayModeOverride = isCausalMaskSelection(selection) ? 'mask' : null;
         this._updateAttentionTitle(context);
         this._attentionSelectionSummary = resolveAttentionScoreSelectionSummary(selection, context);
         const preferredMode = resolveAttentionModeFromSelection(selection);
-        if (preferredMode && preferredMode !== this.attentionMode) {
+        if (this._attentionDisplayModeOverride !== 'mask' && preferredMode && preferredMode !== this.attentionMode) {
             this.attentionMode = preferredMode;
         }
         this._renderAttentionPreview();
@@ -9710,9 +9989,10 @@ export class SelectionPanel {
     _renderAttentionPreview() {
         if (!this.attentionRoot || !this.attentionMatrix || !this.attentionTokensTop || !this.attentionTokensLeft) return;
         const context = this._attentionContext;
+        const displayMode = this._resolveActiveAttentionDisplayMode();
         this._updateAttentionTitle(context);
         this._applyAttentionCollapseState();
-        if (!context || !this.activationSource) {
+        if (!context || (displayMode !== 'mask' && !this.activationSource)) {
             this._updateAttentionToggleLabel(this.attentionMode);
             this._setAttentionVisibility(false);
             this._setAttentionMatrixInteractivity(false);
@@ -9731,10 +10011,11 @@ export class SelectionPanel {
         }
 
         const { tokenIndices, tokenLabels, headIndex, layerIndex, trimmed, totalCount, hasSource } = context;
-        const mode = this.attentionMode === 'post' ? 'post' : 'pre';
-        this._updateAttentionToggleLabel(mode);
+        const mode = displayMode;
+        const hasRenderableValues = hasSource || mode === 'mask';
+        this._updateAttentionToggleLabel(this.attentionMode);
         this._updateAttentionLegend(mode);
-        const values = hasSource
+        const values = hasRenderableValues
             ? buildAttentionMatrixValues({
                 activationSource: this.activationSource,
                 layerIndex,
@@ -9757,7 +10038,7 @@ export class SelectionPanel {
         this._setAttentionVisibility(true);
         if (this.attentionEmpty) this.attentionEmpty.style.display = 'none';
         if (this.attentionNote) {
-            if (!hasSource) {
+            if (!hasRenderableValues) {
                 this.attentionNote.textContent = 'Attention scores unavailable (no capture loaded).';
             } else {
                 this.attentionNote.textContent = trimmed
@@ -9765,7 +10046,7 @@ export class SelectionPanel {
                     : '';
             }
         }
-        this._attentionValueDefault = hasSource
+        this._attentionValueDefault = hasRenderableValues
             ? (() => {
                 const defaultValue = this._attentionSelectionSummary?.defaultValue;
                 if (!defaultValue) {
@@ -9778,13 +10059,15 @@ export class SelectionPanel {
                 }
                 return {
                     ...defaultValue,
-                    attentionScoreLink: this._buildAttentionScoreValueLink({
-                        mode,
-                        row: this._attentionSelectionSummary?.row,
-                        col: this._attentionSelectionSummary?.col,
-                        sourceTokenIndex: defaultValue.sourceTokenIndex,
-                        targetTokenIndex: defaultValue.targetTokenIndex
-                    })
+                    attentionScoreLink: mode === 'mask'
+                        ? null
+                        : this._buildAttentionScoreValueLink({
+                            mode,
+                            row: this._attentionSelectionSummary?.row,
+                            col: this._attentionSelectionSummary?.col,
+                            sourceTokenIndex: defaultValue.sourceTokenIndex,
+                            targetTokenIndex: defaultValue.targetTokenIndex
+                        })
                 };
             })()
             : {
@@ -9903,7 +10186,14 @@ export class SelectionPanel {
                         cell.style.backgroundColor = colorToCss(color);
                         const rowLabel = tokenLabels[row] || '';
                         const colLabel = tokenLabels[col] || '';
-                        cell.title = `${rowLabel} → ${colLabel} (${mode === 'post' ? 'post' : 'pre'}): ${formatAttentionPreviewScore(value)}`;
+                        cell.title = buildAttentionMatrixCellTitle({
+                            rowLabel,
+                            colLabel,
+                            mode,
+                            value,
+                            queryTokenIndex: rowTokenIndex,
+                            keyTokenIndex: colTokenIndex
+                        });
                         cell.dataset.value = String(value);
                         hasAnyValue = true;
                     } else {
@@ -9968,7 +10258,7 @@ export class SelectionPanel {
 
     _updateAttentionLegendTickLabels(mode) {
         if (!Array.isArray(this.attentionLegendTicks) || this.attentionLegendTicks.length === 0) return;
-        const safeMode = mode === 'post' ? 'post' : 'pre';
+        const safeMode = resolveAttentionDisplayMode(mode);
         const edgeEpsilon = 1e-6;
         for (let i = 0; i < this.attentionLegendTicks.length; i += 1) {
             const tick = this.attentionLegendTicks[i];
@@ -9976,6 +10266,16 @@ export class SelectionPanel {
             const ratio = Number(tick.dataset.ratio);
             if (!Number.isFinite(ratio)) {
                 tick.dataset.label = '';
+                continue;
+            }
+            if (safeMode === 'mask') {
+                if (ratio <= edgeEpsilon) {
+                    tick.dataset.label = '-∞';
+                } else if (ratio >= (1 - edgeEpsilon)) {
+                    tick.dataset.label = '0';
+                } else {
+                    tick.dataset.label = '';
+                }
                 continue;
             }
             if (safeMode === 'pre' && ratio <= edgeEpsilon) {
@@ -9995,7 +10295,7 @@ export class SelectionPanel {
 
     _updateAttentionLegend(mode) {
         if (!this.attentionLegend || !this.attentionLegendLow || !this.attentionLegendHigh) return;
-        const safeMode = mode === 'post' ? 'post' : 'pre';
+        const safeMode = resolveAttentionDisplayMode(mode);
         if (this.attentionRoot) {
             this.attentionRoot.dataset.attnMode = safeMode;
         }
@@ -10010,12 +10310,12 @@ export class SelectionPanel {
             return;
         }
 
-        const gradient = this._buildAttentionLegendGradient('pre');
+        const gradient = this._buildAttentionLegendGradient(safeMode);
         this.attentionLegend.style.setProperty('--attention-legend-gradient', gradient);
         this.attentionLegend.dataset.mid = '';
         this.attentionLegendLow.textContent = '';
         this.attentionLegendHigh.textContent = '';
-        this._updateAttentionLegendTickLabels('pre');
+        this._updateAttentionLegendTickLabels(safeMode);
         this._refreshLegendHover('attention');
     }
 
@@ -10079,7 +10379,8 @@ export class SelectionPanel {
         const isSameCell = row === this._attentionHoverRow
             && col === this._attentionHoverCol
             && cell === this._attentionHoverCell;
-        const emphasizeTokenLabels = this.attentionMode === 'post';
+        const displayMode = this._resolveActiveAttentionDisplayMode();
+        const emphasizeTokenLabels = displayMode === 'post';
         const leftToken = this._attentionTokenElsLeft[row];
         const topToken = this._attentionTokenElsTop[col];
         if (isSameCell) {
@@ -10111,20 +10412,27 @@ export class SelectionPanel {
         const targetTokenIndex = Number.isFinite(rawColTokenIndex) ? Math.floor(rawColTokenIndex) : null;
         const sourceText = normalizeAttentionValuePart(rowLabel, 'Source');
         const targetText = normalizeAttentionValuePart(colLabel, 'Target');
-        const scoreText = formatAttentionPreviewScore(valueNum);
+        const scoreText = formatAttentionDisplayScore({
+            mode: displayMode,
+            value: valueNum,
+            queryTokenIndex: sourceTokenIndex,
+            keyTokenIndex: targetTokenIndex
+        });
         this._setAttentionValue({
             source: sourceText,
             target: targetText,
             score: scoreText,
             sourceTokenIndex,
             targetTokenIndex,
-            attentionScoreLink: this._buildAttentionScoreValueLink({
-                mode: this.attentionMode,
-                row,
-                col,
-                sourceTokenIndex,
-                targetTokenIndex
-            }),
+            attentionScoreLink: displayMode === 'mask'
+                ? null
+                : this._buildAttentionScoreValueLink({
+                    mode: displayMode,
+                    row,
+                    col,
+                    sourceTokenIndex,
+                    targetTokenIndex
+                }),
             empty: false
         });
     }

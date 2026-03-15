@@ -377,4 +377,54 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.activationData?.stage).toBe('mlp.down');
         expect(resolved?.kind).toBe('vector');
     });
+
+    it('keeps causal-mask canvas selections on the dedicated attention.mask path', () => {
+        const panel = createPanelContext();
+        const selection = {
+            label: 'Causal Mask',
+            info: {
+                activationData: {
+                    label: 'Causal Mask',
+                    stage: 'attention.mask',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    tokenIndex: 0,
+                    queryTokenIndex: 0,
+                    keyTokenIndex: 1,
+                    tokenLabel: 'Token A',
+                    keyTokenLabel: 'Token B',
+                    preScore: 0.25,
+                    postScore: 0,
+                    maskValue: Number.NEGATIVE_INFINITY,
+                    isMasked: true
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Causal Mask');
+        expect(resolved?.kind).toBe('attentionSphere');
+        expect(resolved?.info?.activationData?.stage).toBe('attention.mask');
+        expect(resolved?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
+        expect(resolved?.info?.activationData?.isMasked).toBe(true);
+    });
+
+    it('renders causal-mask legends as a discrete black-or-zero palette', () => {
+        const panel = createPanelContext();
+        panel._resolveLegendEdgeClampRatio = () => 0;
+        panel._resolveActiveAttentionDisplayMode = () => 'mask';
+
+        const gradient = panel._buildAttentionLegendGradient('mask');
+        const blockedSample = panel._resolveLegendHoverSample('attention', 0.2);
+        const allowedSample = panel._resolveLegendHoverSample('attention', 0.8);
+
+        expect(gradient).toContain('#000000 0%');
+        expect(gradient).toContain('#000000 50%');
+        expect(gradient).toContain('50%');
+        expect(blockedSample?.valueLabel).toBe('-∞');
+        expect(blockedSample?.colorCss).toBe('#000000');
+        expect(allowedSample?.valueLabel).toBe('0');
+        expect(allowedSample?.colorCss).not.toBe('#000000');
+    });
 });

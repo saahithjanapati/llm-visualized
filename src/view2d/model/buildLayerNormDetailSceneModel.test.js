@@ -93,6 +93,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         const outputPlusNode = nodes.find((node) => node?.role === 'layer-norm-output-plus') || null;
         const outputEqualsNode = nodes.find((node) => node?.role === 'layer-norm-output-equals') || null;
         const incomingSpacerNode = nodes.find((node) => node?.role === 'incoming-arrow-spacer') || null;
+        const normalizedCopyDropSpacerNode = nodes.find((node) => node?.role === 'layer-norm-copy-drop-spacer') || null;
         const outgoingSpacerNode = nodes.find((node) => node?.role === 'outgoing-arrow-spacer') || null;
         const inputConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-input') || null;
         const normalizationConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-normalization') || null;
@@ -105,7 +106,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(fixedTextSizing?.captionLabelScreenFontPx).toBeNull();
         expect(fixedTextSizing?.textScreenFontPx).toBeNull();
         expect(fixedTextSizing?.operatorBehavior).toBe('scene-relative');
-        expect(matrixNodes).toHaveLength(11);
+        expect(matrixNodes).toHaveLength(12);
         expect(connectorNodes).toHaveLength(5);
         expect(operatorNodes).toHaveLength(4);
         expect(inputNode?.label?.tex).toBe('x');
@@ -130,6 +131,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(scaleEqualsNode?.text).toBe('=');
         expect(outputPlusNode?.text).toBe('+');
         expect(outputEqualsNode?.text).toBe('=');
+        expect(normalizedCopyDropSpacerNode?.metadata?.hidden).toBe(true);
         expect(inputNode?.rowItems).toHaveLength(2);
         expect(normalizedNode?.rowItems).toHaveLength(2);
         expect(scaleNode?.rowItems).toHaveLength(1);
@@ -243,6 +245,13 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizedCopyEntry?.contentBounds?.y).toBeGreaterThan(
             (normalizedEntry?.contentBounds?.y ?? 0) + (normalizedEntry?.contentBounds?.height ?? 0)
         );
+        expect(
+            (normalizedCopyEntry?.contentBounds?.y ?? 0)
+            - (
+                (normalizedEntry?.contentBounds?.y ?? 0)
+                + (normalizedEntry?.contentBounds?.height ?? 0)
+            )
+        ).toBeGreaterThan(48);
         expect(scaleEntry?.contentBounds?.x).toBeGreaterThan(
             (normalizedCopyEntry?.contentBounds?.x ?? 0) + (normalizedCopyEntry?.contentBounds?.width ?? 0)
         );

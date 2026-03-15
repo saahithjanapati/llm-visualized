@@ -1022,6 +1022,24 @@ function buildAttentionPostScoreDescription(selectionInfo = null) {
     );
 }
 
+function buildCausalMaskDescription(selectionInfo = null) {
+    const activation = getActivationDataFromSelection(selectionInfo);
+    const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
+    const targetTokenRef = buildSelectionQueryTokenReference(selectionInfo, 'the target token');
+    const headRef = buildSelectionHeadReference(selectionInfo);
+    const maskValue = activation?.maskValue;
+    const isBlocked = activation?.isMasked === true || maskValue === Number.NEGATIVE_INFINITY;
+    const valueText = isBlocked ? inlineMath('-\\infty') : inlineMath('0');
+
+    return joinParagraphs(
+        `This is one entry of the causal mask ${inlineMath('M_{\\mathrm{causal}}')} from source token ${sourceTokenRef} to target token ${targetTokenRef} in ${headRef}. This mask entry is added to the raw query-key score before softmax so the head knows which source positions the target token is allowed to read from.`,
+        isBlocked
+            ? `Here the mask value is ${valueText}. That means ${sourceTokenRef} is a future position relative to ${targetTokenRef}, so GPT-style autoregressive self-attention must block this connection. Adding ${inlineMath('-\\infty')} before softmax forces this cell's probability to zero, so the target token cannot attend to information that comes later in the sequence.`
+            : `Here the mask value is ${valueText}. That means ${sourceTokenRef} is at or before ${targetTokenRef}, so this connection is allowed. Adding ${inlineMath('0')} leaves the raw query-key score unchanged and lets this source token compete normally inside the softmax row.`,
+        `Causal masking is what keeps self-attention compatible with next-token prediction: when the model is generating token ${targetTokenRef}, it may use the current and earlier tokens, but it must not peek at future tokens that have not been generated yet.`
+    );
+}
+
 const GENERIC_VECTOR_DESCRIPTION = joinParagraphs(
     'This vector is a learned feature representation used somewhere along the model\'s forward pass. A vector in a transformer should be thought of as a bundle of coordinates that the network has learned to make useful.',
     'Different parts of the model reinterpret and recombine these coordinates for different purposes: residual state, queries, keys, values, MLP activations, and logits all come from vectors passed through different learned transformations.'
@@ -1452,6 +1470,9 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (stageLower === 'attention.pre') {
         return buildEquationEntries([attentionEquation, concatEq], [0]);
     }
+    if (stageLower === 'attention.mask') {
+        return buildEquationEntries([attentionEquation, concatEq], [0]);
+    }
     if (stageLower === 'attention.post') {
         return buildEquationEntries([attentionEquation, concatEq], [0]);
     }
@@ -1590,6 +1611,9 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         return buildLayerNormEntries(layerNormKind, resolveLayerNormEquationHighlight(lower, stageLower));
     }
 
+    if (lower.includes('causal mask') || lower.includes('attention mask')) {
+        return buildEquationEntries([attentionEquation, concatEq], [0]);
+    }
     if (lower.includes('attention')) {
         return buildEquationEntries([attentionEquation, concatEq, outputProjectionEq], [0]);
     }
@@ -1667,6 +1691,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         }
         if (stageLower === 'qkv.v.bias') {
             return buildValueBiasVectorDescription(selectionInfo);
+        }
+        if (stageLower === 'attention.mask') {
+            return buildCausalMaskDescription(selectionInfo);
         }
         if (stageLower === 'attention.weighted_value') {
             return buildWeightedValueVectorDescription(selectionInfo);
@@ -1874,9 +1901,15 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('attention weighted sum') || stageLower === 'attention.weighted_sum') {
         return buildAttentionWeightedSumDescription(selectionInfo);
     }
+    if (lower.includes('causal mask') || lower.includes('attention mask')) {
+        return buildCausalMaskDescription(selectionInfo);
+    }
     if (lower.includes('attention score') || stageLower.startsWith('attention.')) {
         if (stageLower === 'attention.pre') {
             return buildAttentionPreScoreDescription(selectionInfo);
+        }
+        if (stageLower === 'attention.mask') {
+            return buildCausalMaskDescription(selectionInfo);
         }
         if (stageLower === 'attention.post') {
             return buildAttentionPostScoreDescription(selectionInfo);

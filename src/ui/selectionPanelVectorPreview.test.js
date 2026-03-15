@@ -197,6 +197,27 @@ function buildAttentionBiasSelection(label, stage, layerIndex = 4, headIndex = 2
     };
 }
 
+function buildQkvHeadSelection(label, stage, values, layerIndex = 4, headIndex = 2, tokenIndex = 1) {
+    return {
+        label,
+        kind: 'vector',
+        info: {
+            activationData: {
+                label,
+                stage,
+                layerIndex,
+                headIndex,
+                tokenIndex,
+                values
+            },
+            layerIndex,
+            headIndex,
+            tokenIndex,
+            values
+        }
+    };
+}
+
 describe('buildVectorClonePreview', () => {
     it('copies only the selected scene-backed vector slice when prismCount metadata is present', () => {
         const prismCount = 3;
@@ -505,6 +526,60 @@ describe('buildVectorClonePreview', () => {
 
     it('renders value bias previews as a single V-colored head prism', () => {
         const selection = buildAttentionBiasSelection('Value Bias Vector', 'qkv.v.bias');
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, 0xc44d25)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, 0xc44d25)).toBeLessThan(0.14);
+
+        preview.dispose?.();
+    });
+
+    it('renders query vectors as a single Q-colored head prism in the detail-view preview', () => {
+        const selection = buildQkvHeadSelection('Query Vector', 'qkv.q', new Array(64).fill(0));
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, 0x276ebb)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, 0x276ebb)).toBeLessThan(0.14);
+
+        preview.dispose?.();
+    });
+
+    it('renders key vectors as a single K-colored head prism in the detail-view preview', () => {
+        const selection = buildQkvHeadSelection('Key Vector', 'qkv.k', new Array(64).fill(0));
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, 0x1e9f57)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, 0x1e9f57)).toBeLessThan(0.14);
+
+        preview.dispose?.();
+    });
+
+    it('renders value vectors as a single V-colored head prism in the detail-view preview', () => {
+        const selection = buildQkvHeadSelection('Value Vector', 'qkv.v', new Array(64).fill(0));
 
         const preview = buildVectorClonePreview(selection, selection.label);
         expect(preview).toBeTruthy();

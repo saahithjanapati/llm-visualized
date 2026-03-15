@@ -283,6 +283,18 @@ function resolveVisibleTokenRefs(activationSource = null, tokenIndices = null, t
     }));
 }
 
+function resolveActivationSourceVectorLength(activationSource = null, fallbackLength = D_MODEL) {
+    const sourceLength = Number(
+        activationSource && typeof activationSource.getBaseVectorLength === 'function'
+            ? activationSource.getBaseVectorLength()
+            : null
+    );
+    if (Number.isFinite(sourceLength) && sourceLength > 0) {
+        return Math.max(1, Math.floor(sourceLength));
+    }
+    return Math.max(1, Math.floor(fallbackLength || D_MODEL));
+}
+
 function resolveVisibleTokenRefByIndex(tokenRefs = [], tokenIndex = null) {
     const safeTokenIndex = normalizeIndex(tokenIndex);
     if (!Number.isFinite(safeTokenIndex)) return null;
@@ -443,6 +455,7 @@ function buildHeadDetailPreview({
         stage: 'head-detail',
         role: 'x-ln'
     };
+    const sourceVectorLength = resolveActivationSourceVectorLength(activationSource, D_MODEL);
     const rowItems = buildVectorRowItems(tokenRefs, {
         baseSemantic,
         role: 'x-ln-row',
@@ -451,7 +464,7 @@ function buildHeadDetailPreview({
             resolvedTarget.layerIndex,
             'shift',
             tokenRef.tokenIndex,
-            D_MODEL
+            sourceVectorLength
         )
     });
     if (!rowItems.length) {
@@ -1108,6 +1121,7 @@ function buildLayerGroup({
         componentKind: 'layer',
         layerIndex
     };
+    const sourceVectorLength = resolveActivationSourceVectorLength(activationSource, D_MODEL);
     const embeddingLayoutMetrics = includeInputPositionEmbedding
         ? resolveEmbeddingStreamLayoutMetrics({
             tokenCount: tokenRefs.length,
@@ -1139,7 +1153,7 @@ function buildLayerGroup({
         tokenRefs,
         getVector: (tokenRef) => (
             typeof activationSource?.getLayerIncoming === 'function'
-                ? activationSource.getLayerIncoming(layerIndex, tokenRef.tokenIndex, D_MODEL)
+                ? activationSource.getLayerIncoming(layerIndex, tokenRef.tokenIndex, sourceVectorLength)
                 : null
         )
     });
@@ -1228,7 +1242,7 @@ function buildLayerGroup({
         tokenRefs,
         getVector: (tokenRef) => (
             typeof activationSource?.getPostAttentionResidual === 'function'
-                ? activationSource.getPostAttentionResidual(layerIndex, tokenRef.tokenIndex, D_MODEL)
+                ? activationSource.getPostAttentionResidual(layerIndex, tokenRef.tokenIndex, sourceVectorLength)
                 : null
         )
     });
@@ -1753,6 +1767,7 @@ function buildFinalOutputGroup({
         componentKind: 'transformer',
         stage: 'final-output'
     };
+    const sourceVectorLength = resolveActivationSourceVectorLength(activationSource, D_MODEL);
 
     const outgoingResidual = createResidualStateModule({
         semantic: {
@@ -1766,7 +1781,7 @@ function buildFinalOutputGroup({
         tokenRefs,
         getVector: (tokenRef) => (
             typeof activationSource?.getPostMlpResidual === 'function'
-                ? activationSource.getPostMlpResidual(layerIndex, tokenRef.tokenIndex, D_MODEL)
+                ? activationSource.getPostMlpResidual(layerIndex, tokenRef.tokenIndex, sourceVectorLength)
                 : null
         )
     });

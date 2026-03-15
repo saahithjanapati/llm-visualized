@@ -1,3 +1,5 @@
+export const CAUSAL_MASK_PREVIEW_BLOCKED_VALUE = -1;
+
 export function isCausalUpperAttentionCell(queryTokenIndex = null, keyTokenIndex = null) {
     const safeQueryTokenIndex = Number.isFinite(queryTokenIndex) ? Math.floor(queryTokenIndex) : null;
     const safeKeyTokenIndex = Number.isFinite(keyTokenIndex) ? Math.floor(keyTokenIndex) : null;
@@ -23,6 +25,12 @@ export function resolveAttentionMatrixCellValue({
     return null;
 }
 
+function resolveCausalMaskPreviewCellValue(queryTokenIndex = null, keyTokenIndex = null) {
+    return isCausalUpperAttentionCell(queryTokenIndex, keyTokenIndex)
+        ? CAUSAL_MASK_PREVIEW_BLOCKED_VALUE
+        : 0;
+}
+
 export function shouldMuteCausalUpperPreAttentionCell({
     mode = 'pre',
     queryTokenIndex = null,
@@ -39,15 +47,22 @@ export function buildAttentionMatrixValues({
     tokenIndices,
     mode
 } = {}) {
-    if (!activationSource || !Array.isArray(tokenIndices) || !tokenIndices.length) return null;
+    const safeMode = String(mode || '').toLowerCase();
+    if (!Array.isArray(tokenIndices) || !tokenIndices.length) return null;
+    if (safeMode === 'mask') {
+        return tokenIndices.map((queryTokenIndex) => tokenIndices.map((keyTokenIndex) => (
+            resolveCausalMaskPreviewCellValue(queryTokenIndex, keyTokenIndex)
+        )));
+    }
+    if (!activationSource) return null;
 
     return tokenIndices.map((queryTokenIndex) => {
         const row = activationSource.getAttentionScoresRow
-            ? activationSource.getAttentionScoresRow(layerIndex, mode, headIndex, queryTokenIndex)
+            ? activationSource.getAttentionScoresRow(layerIndex, safeMode || mode, headIndex, queryTokenIndex)
             : null;
 
         return tokenIndices.map((keyTokenIndex) => resolveAttentionMatrixCellValue({
-            mode,
+            mode: safeMode || mode,
             value: Array.isArray(row) ? row[keyTokenIndex] : null,
             queryTokenIndex,
             keyTokenIndex
