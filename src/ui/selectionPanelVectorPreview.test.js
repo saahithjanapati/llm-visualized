@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { FINAL_MLP_COLOR } from './selectionPanelConstants.js';
 import {
+    MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
+    MHA_VALUE_SPECTRUM_COLOR
+} from '../animations/LayerAnimationConstants.js';
+import {
     MLP_DOWN_BIAS_TOOLTIP_LABEL,
     MLP_UP_BIAS_TOOLTIP_LABEL
 } from '../utils/mlpLabels.js';
@@ -513,6 +517,71 @@ describe('buildVectorClonePreview', () => {
         const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
         expect(getHueDistance(startColor, 0xc44d25)).toBeLessThan(0.14);
         expect(getHueDistance(endColor, 0xc44d25)).toBeLessThan(0.14);
+
+        preview.dispose?.();
+    });
+
+    it('renders output-projection bias previews with 12 purple prisms from the saved bias samples', () => {
+        const selection = {
+            label: 'Output Projection Bias Vector',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'Output Projection Bias Vector',
+                    stage: 'attention.output_projection.bias',
+                    layerIndex: 4
+                },
+                layerIndex: 4
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(12);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, MHA_OUTPUT_PROJECTION_MATRIX_COLOR)).toBeLessThan(0.12);
+        expect(getHueDistance(endColor, MHA_OUTPUT_PROJECTION_MATRIX_COLOR)).toBeLessThan(0.12);
+
+        preview.dispose?.();
+    });
+
+    it('renders attention weighted sums as a single value-colored head prism', () => {
+        const values = new Array(64).fill(0).map((_, index) => Math.sin(index / 8));
+        const selection = {
+            label: 'Attention Weighted Sum',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'Attention Weighted Sum',
+                    stage: 'attention.weighted_sum',
+                    layerIndex: 4,
+                    headIndex: 2,
+                    tokenIndex: 1,
+                    values
+                },
+                layerIndex: 4,
+                headIndex: 2,
+                tokenIndex: 1,
+                values
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, MHA_VALUE_SPECTRUM_COLOR)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, MHA_VALUE_SPECTRUM_COLOR)).toBeLessThan(0.14);
 
         preview.dispose?.();
     });

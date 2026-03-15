@@ -326,6 +326,7 @@ import {
 } from '../animations/LayerAnimationConstants.js';
 import { getLayerNormParamData } from '../data/layerNormParams.js';
 import {
+    getAttentionBiasVectorSample,
     getAttentionBiasHeadSample,
     getMlpBiasVectorSample
 } from '../data/biasParams.js';
@@ -1971,10 +1972,20 @@ function inferAttentionBiasPreviewKind(label = '', selectionInfo = null) {
     return '';
 }
 
+function isOutputProjectionBiasPreviewSelection(label = '', selectionInfo = null) {
+    const lower = String(label || '').toLowerCase();
+    const stage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    return stage === 'attention.output_projection.bias' || lower === 'output projection bias vector';
+}
+
 function resolveMlpBiasPreviewSampleCount(kind = 'up') {
     return kind === 'down'
         ? Math.max(1, Math.ceil(D_MODEL / PRISM_DIMENSIONS_PER_UNIT))
         : Math.max(1, Math.ceil((D_MODEL * 4) / PRISM_DIMENSIONS_PER_UNIT));
+}
+
+function resolveOutputProjectionBiasPreviewSampleCount() {
+    return Math.max(1, Math.ceil(D_MODEL / PRISM_DIMENSIONS_PER_UNIT));
 }
 
 function resolveSelectionLayerIndex(selectionInfo = null) {
@@ -2034,6 +2045,44 @@ function resolveAttentionBiasPreviewData(selectionInfo = null, kind = 'q') {
     const biasKind = kind === 'k' ? 'key' : (kind === 'v' ? 'value' : 'query');
     const biasValue = getAttentionBiasHeadSample(layerIndex, biasKind, headIndex);
     return Number.isFinite(biasValue) ? [biasValue] : null;
+}
+
+function resolveAttentionWeightedSumPreviewData(selectionInfo = null) {
+    const explicitValues = normalizePreviewVectorDataArray(
+        selectionInfo?.info?.activationData?.values
+        || selectionInfo?.info?.values
+    );
+    if (explicitValues?.length) {
+        return explicitValues;
+    }
+    return extractPreviewVectorData(selectionInfo);
+}
+
+function resolveOutputProjectionBiasPreviewData(selectionInfo = null) {
+    const sampleCount = resolveOutputProjectionBiasPreviewSampleCount();
+    const explicitValues = normalizePreviewVectorDataArray(
+        selectionInfo?.info?.activationData?.values
+        || selectionInfo?.info?.values
+    );
+    if (explicitValues?.length) {
+        return explicitValues.length === sampleCount
+            ? explicitValues
+            : samplePreviewVectorData(explicitValues, sampleCount);
+    }
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (Number.isFinite(layerIndex)) {
+        const sampledValues = normalizePreviewVectorDataArray(getAttentionBiasVectorSample(layerIndex, 'output'));
+        if (sampledValues?.length) {
+            return sampledValues.length === sampleCount
+                ? sampledValues
+                : samplePreviewVectorData(sampledValues, sampleCount);
+        }
+    }
+    const rawValues = extractPreviewVectorData(selectionInfo);
+    if (!rawValues?.length) return null;
+    return rawValues.length === sampleCount
+        ? rawValues
+        : samplePreviewVectorData(rawValues, sampleCount);
 }
 
 function extractMlpMiddlePreviewVectorData(selectionInfo) {
@@ -2192,6 +2241,26 @@ function buildAttentionBiasPreviewColorOptions(kind = 'q') {
     });
 }
 
+function buildAttentionWeightedSumPreviewColorOptions() {
+    return buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+        hueSpread: MHA_VALUE_HUE_SPREAD,
+        minLightness: MHA_VALUE_LIGHTNESS_MIN,
+        maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+        valueMin: MHA_VALUE_RANGE_MIN,
+        valueMax: MHA_VALUE_RANGE_MAX,
+        valueClampMax: MHA_VALUE_CLAMP_MAX
+    });
+}
+
+function buildOutputProjectionBiasPreviewColorOptions() {
+    return buildHueRangeOptions(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, {
+        valueMin: -2,
+        valueMax: 2,
+        minLightness: 0.34,
+        maxLightness: 0.72
+    });
+}
+
 function buildAttentionBiasVectorPreview(selectionInfo, label = '') {
     const kind = inferAttentionBiasPreviewKind(label, selectionInfo);
     if (!kind) return null;
@@ -2219,6 +2288,63 @@ function buildAttentionBiasVectorPreview(selectionInfo, label = '') {
         view: {
             fitDistanceMultiplier: 1.18,
             fitPaddingMultiplier: 1.05
+        },
+        dispose: () => {
+            vec.dispose();
+        }
+    };
+}
+
+function buildAttentionWeightedSumVectorPreview(selectionInfo, label = '') {
+    if (!isWeightedSumSelection(label, selectionInfo)) return null;
+    const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
+    const previewData = resolveAttentionWeightedSumPreviewData(selectionInfo);
+    if (!previewData?.length) return null;
+    const vec = createPreviewVector({
+        colorHex: MHA_FINAL_V_COLOR,
+        data: null,
+        instanceCount: Math.max(1, Math.ceil(outputLength / PRISM_DIMENSIONS_PER_UNIT))
+    });
+    vec.group.userData = vec.group.userData || {};
+    vec.group.userData.label = label || 'Attention Weighted Sum';
+    applyDataToPreviewVector(vec, previewData.slice(0, outputLength), {
+        colorOptions: buildAttentionWeightedSumPreviewColorOptions(),
+        numKeyColors: 1
+    });
+    return {
+        object: vec.group,
+        view: {
+            fitDistanceMultiplier: 1.18,
+            fitPaddingMultiplier: 1.05
+        },
+        dispose: () => {
+            vec.dispose();
+        }
+    };
+}
+
+function buildOutputProjectionBiasVectorPreview(selectionInfo, label = '') {
+    if (!isOutputProjectionBiasPreviewSelection(label, selectionInfo)) return null;
+    const previewData = resolveOutputProjectionBiasPreviewData(selectionInfo);
+    if (!previewData?.length) return null;
+    const sampleCount = Math.max(1, previewData.length || resolveOutputProjectionBiasPreviewSampleCount());
+    const previewLabel = label || 'Output Projection Bias Vector';
+    const vec = createPreviewVector({
+        colorHex: MHA_OUTPUT_PROJECTION_MATRIX_COLOR,
+        data: null,
+        instanceCount: sampleCount
+    });
+    vec.group.userData = vec.group.userData || {};
+    vec.group.userData.label = previewLabel;
+    applyDataToPreviewVector(vec, previewData, {
+        colorOptions: buildOutputProjectionBiasPreviewColorOptions(),
+        numKeyColors: sampleCount
+    });
+    return {
+        object: vec.group,
+        view: {
+            fitDistanceMultiplier: 1.14,
+            fitPaddingMultiplier: 1.04
         },
         dispose: () => {
             vec.dispose();
@@ -2669,8 +2795,14 @@ export function buildVectorClonePreview(selectionInfo, label = '') {
         if (directClone) return directClone;
     }
 
+    const attentionWeightedSumPreview = buildAttentionWeightedSumVectorPreview(selectionInfo, label);
+    if (attentionWeightedSumPreview) return attentionWeightedSumPreview;
+
     const attentionBiasVectorPreview = buildAttentionBiasVectorPreview(selectionInfo, label);
     if (attentionBiasVectorPreview) return attentionBiasVectorPreview;
+
+    const outputProjectionBiasVectorPreview = buildOutputProjectionBiasVectorPreview(selectionInfo, label);
+    if (outputProjectionBiasVectorPreview) return outputProjectionBiasVectorPreview;
 
     const mlpBiasVectorPreview = buildMlpBiasVectorPreview(selectionInfo, label);
     if (mlpBiasVectorPreview) return mlpBiasVectorPreview;

@@ -1,5 +1,11 @@
 import {
-    MHA_FINAL_V_COLOR,
+    MHA_VALUE_SPECTRUM_COLOR,
+    MHA_VALUE_HUE_SPREAD,
+    MHA_VALUE_LIGHTNESS_MIN,
+    MHA_VALUE_LIGHTNESS_MAX,
+    MHA_VALUE_RANGE_MIN,
+    MHA_VALUE_RANGE_MAX,
+    MHA_VALUE_CLAMP_MAX,
     MHA_OUTPUT_PROJECTION_MATRIX_COLOR
 } from '../../animations/LayerAnimationConstants.js';
 import { getAttentionBiasVectorSample } from '../../data/biasParams.js';
@@ -91,11 +97,13 @@ const OUTPUT_PROJECTION_CONNECTOR_TARGET_GAP = 12;
 const OUTPUT_PROJECTION_BIAS_LABEL_SCALE = 1.8;
 const OUTPUT_PROJECTION_MULTIPLY_OPERATOR_SCALE = 0.92;
 
-const HEAD_OUTPUT_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_V_COLOR, {
-    valueMin: -2,
-    valueMax: 2,
-    minLightness: 0.34,
-    maxLightness: 0.72
+const HEAD_OUTPUT_RANGE_OPTIONS = buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
+    hueSpread: MHA_VALUE_HUE_SPREAD,
+    minLightness: MHA_VALUE_LIGHTNESS_MIN,
+    maxLightness: MHA_VALUE_LIGHTNESS_MAX,
+    valueMin: MHA_VALUE_RANGE_MIN,
+    valueMax: MHA_VALUE_RANGE_MAX,
+    valueClampMax: MHA_VALUE_CLAMP_MAX
 });
 const OUTPUT_PROJECTION_RANGE_OPTIONS = buildHueRangeOptions(MHA_OUTPUT_PROJECTION_MATRIX_COLOR, {
     valueMin: -2,
@@ -302,8 +310,9 @@ function buildHeadOutputRowItems(activationSource = null, tokenRefs = [], {
         const rawVector = typeof activationSource?.getAttentionWeightedSum === 'function'
             ? activationSource.getAttentionWeightedSum(layerIndex, headIndex, tokenIndex, D_HEAD)
             : null;
+        const vectorValues = cleanNumberArray(rawVector, D_HEAD);
         const sampledValues = sampleVector(
-            cleanNumberArray(rawVector, D_HEAD),
+            vectorValues,
             HEAD_OUTPUT_MEASURE_COLS
         );
         const label = typeof tokenRef?.tokenLabel === 'string' && tokenRef.tokenLabel.length
@@ -323,6 +332,7 @@ function buildHeadOutputRowItems(activationSource = null, tokenRefs = [], {
             index: normalizeIndex(tokenRef?.rowIndex) ?? 0,
             label,
             semantic,
+            vectorValues,
             rawValues: sampledValues,
             gradientCss: buildGradientCss(sampledValues),
             title: `${label}: H_${Math.max(1, (headIndex ?? 0) + 1)}`

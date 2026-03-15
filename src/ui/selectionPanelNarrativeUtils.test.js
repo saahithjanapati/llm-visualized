@@ -121,4 +121,47 @@ describe('selectionPanelNarrativeUtils bias narratives', () => {
         expect(entries[0]?.active).toBe(true);
         expect(entries[0]?.tex).toContain('b_{V_i}');
     });
+
+    it('returns output-projection-bias-specific copy and highlights the output projection equation', () => {
+        const selection = {
+            label: 'Output Projection Bias Vector',
+            info: {
+                activationData: {
+                    stage: 'attention.output_projection.bias',
+                    layerIndex: 2
+                }
+            }
+        };
+
+        const description = resolveDescription('Output Projection Bias Vector', 'vector', selection);
+        expect(description).toContain('b_O');
+        expect(description).toContain('768');
+        expect(description).toContain('shared across every token position');
+
+        const entries = resolveSelectionPreviewEquations('Output Projection Bias Vector', selection);
+        expect(entries).toHaveLength(3);
+        expect(entries[1]?.active).toBe(true);
+        expect(entries[1]?.tex).toContain('b_O');
+    });
+
+    it('returns H_i-specific copy for attention weighted sums', () => {
+        const selection = {
+            label: 'Attention Weighted Sum',
+            info: {
+                activationData: {
+                    stage: 'attention.weighted_sum',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    tokenIndex: 3,
+                    tokenLabel: 'the'
+                }
+            }
+        };
+
+        const description = resolveDescription('Attention Weighted Sum', 'vector', selection);
+        expect(description).toContain('64-dimensional');
+        expect(description).toContain('H_i');
+        expect(description).toContain('post-softmax attention weights');
+        expect(description).toContain('output projection');
+    });
 });

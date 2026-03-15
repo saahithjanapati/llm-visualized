@@ -748,6 +748,11 @@ const OUTPUT_PROJECTION_MATRIX_DESCRIPTION = joinParagraphs(
     'Its job is to let the model mix information across heads and express the final attention update in the same coordinate system as the residual stream.'
 );
 
+const OUTPUT_PROJECTION_BIAS_DESCRIPTION = joinParagraphs(
+    `This is the learned output-projection bias ${inlineMath('b_O')}. It is a ${GPT2_D_MODEL_TEXT}-dimensional parameter vector added after the concatenated head output is multiplied by ${inlineMath('W_O')}.`,
+    `In symbols, the attention block computes ${inlineMath('O_t = H_t W_O + b_O')}. The same bias is shared across every token position, so it shifts the baseline of the attention update before that update is added back into the residual stream.`
+);
+
 const MLP_UP_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
     'This is the first learned matrix in the feed-forward network. It expands the token state from model width into a larger hidden space so the model has more room to build nonlinear features.',
     buildLinearMapDimensionSentence({
@@ -970,8 +975,9 @@ function buildAttentionWeightedSumDescription(selectionInfo = null) {
     const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     return joinParagraphs(
-        `This is the weighted-sum output for ${queryTokenRef} in ${headRef}. It is computed as ${inlineMath('H_t = \\sum_j \\alpha_{t,j} V_j')}: each source token contributes its value vector scaled by the post-softmax weight assigned to it by ${queryTokenRef}.`,
-        `This is the actual vector that ${headRef} contributes forward for that token. After every attention head produces one, the model concatenates the attention-head outputs and applies the output projection.`
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional head output ${inlineMath('H_i')} for ${queryTokenRef} in ${headRef}. It is formed by mixing that head's value vectors with the post-softmax attention weights from ${queryTokenRef}'s attention row.`,
+        `In symbols, ${headRef} computes ${inlineMath('H_{t,i} = \\sum_j \\alpha_{t,j}^{(i)} V_j^{(i)}')}. Each source token contributes its value vector, scaled by how much attention ${queryTokenRef} assigns to that token in this head after softmax and masking.`,
+        `This is the final vector that ${headRef} contributes for that token before the model concatenates all ${GPT2_NUM_HEADS_TEXT} head outputs and applies the output projection ${inlineMath('W_O')}.`
     );
 }
 
@@ -1452,6 +1458,9 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (stageLower === 'attention.weighted_value') {
         return buildEquationEntries([attentionEquation, concatEq], [0]);
     }
+    if (stageLower === 'attention.output_projection.bias') {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
+    }
     if (stageLower === 'attention.output_projection') {
         return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
     }
@@ -1533,6 +1542,9 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     }
     if (lower.includes('attention weighted sum')) {
         return buildEquationEntries([attentionEquation, concatEq, outputProjectionEq], [0]);
+    }
+    if (lower.includes('output projection bias vector')) {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
     }
     if (lower.includes('output projection matrix')) {
         return buildEquationEntries([concatEq, outputProjectionWeightMatrixEq, postAttentionResidualEq], [1]);
@@ -1659,6 +1671,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         if (stageLower === 'attention.weighted_value') {
             return buildWeightedValueVectorDescription(selectionInfo);
         }
+        if (stageLower === 'attention.output_projection.bias') {
+            return OUTPUT_PROJECTION_BIAS_DESCRIPTION;
+        }
         if (stageLower === 'attention.output_projection') {
             return POST_ATTENTION_OUTPUT_DESCRIPTION;
         }
@@ -1761,6 +1776,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('value bias vector')) {
         return buildValueBiasVectorDescription(selectionInfo);
     }
+    if (lower.includes('output projection bias vector')) {
+        return OUTPUT_PROJECTION_BIAS_DESCRIPTION;
+    }
     if (lower.includes('output projection matrix')) {
         return OUTPUT_PROJECTION_MATRIX_DESCRIPTION;
     }
@@ -1853,6 +1871,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('value vector')) {
         return buildValueVectorDescription(selectionInfo);
     }
+    if (lower.includes('attention weighted sum') || stageLower === 'attention.weighted_sum') {
+        return buildAttentionWeightedSumDescription(selectionInfo);
+    }
     if (lower.includes('attention score') || stageLower.startsWith('attention.')) {
         if (stageLower === 'attention.pre') {
             return buildAttentionPreScoreDescription(selectionInfo);
@@ -1861,9 +1882,6 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
             return buildAttentionPostScoreDescription(selectionInfo);
         }
         return buildAttentionScoreGenericDescription(selectionInfo);
-    }
-    if (lower.includes('attention weighted sum')) {
-        return buildAttentionWeightedSumDescription(selectionInfo);
     }
     if (lower.includes('attention')) {
         return ATTENTION_GENERIC_DESCRIPTION;

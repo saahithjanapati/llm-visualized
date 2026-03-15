@@ -96,6 +96,7 @@ describe('output projection detail hover', () => {
         expect(hoverState?.info?.activationData?.headIndex).toBe(4);
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(1);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token B');
+        expect(hoverState?.info?.activationData?.values).toHaveLength(D_HEAD);
         expect(hoverState?.focusState?.activeNodeIds).toContain(matrixNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(copyMatrixNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).not.toContain(otherMatrixNode?.id);
@@ -310,5 +311,51 @@ describe('output projection detail hover', () => {
         expect(weightHoverState?.focusState?.activeNodeIds).toContain(projectionOutputNode?.id);
         expect(weightHoverState?.focusState?.activeConnectorIds).toContain(concatToProjectionConnectorNode?.id);
         expect(weightHoverState?.focusState?.activeConnectorIds).toContain(projectionOutputConnectorNode?.id);
+    });
+
+    it('maps the output-projection bias row to the bias tooltip payload and keeps the projection path focused', () => {
+        const scene = buildOutputProjectionDetailSceneModel({
+            activationSource: createMockActivationSource(),
+            outputProjectionDetailTarget: {
+                layerIndex: 3
+            },
+            tokenRefs: [
+                { rowIndex: 0, tokenIndex: 0, tokenLabel: 'Token A' },
+                { rowIndex: 1, tokenIndex: 1, tokenLabel: 'Token B' }
+            ]
+        });
+        const index = createMhsaDetailSceneIndex(scene);
+        const nodes = flattenSceneNodes(scene);
+        const concatOutputNode = nodes.find((node) => node?.role === 'concat-output-matrix') || null;
+        const concatOutputCopyNode = nodes.find((node) => node?.role === 'concat-output-copy-matrix') || null;
+        const projectionWeightNode = nodes.find((node) => node?.role === 'projection-weight') || null;
+        const projectionBiasNode = nodes.find((node) => node?.role === 'projection-bias') || null;
+        const projectionOutputNode = nodes.find((node) => node?.role === 'projection-output') || null;
+        const concatToProjectionConnectorNode = nodes.find((node) => (
+            node?.role === 'concat-output-projection-connector'
+        )) || null;
+        const projectionOutputConnectorNode = nodes.find((node) => (
+            node?.role === 'projection-output-connector'
+        )) || null;
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: projectionBiasNode,
+            rowHit: {
+                rowIndex: 0,
+                rowItem: projectionBiasNode?.rowItems?.[0]
+            }
+        });
+
+        expect(hoverState?.label).toBe('Output Projection Bias Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('attention.output_projection.bias');
+        expect(hoverState?.info?.activationData?.parameterType).toBe('bias');
+        expect(hoverState?.info?.activationData?.values).toHaveLength(12);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(concatOutputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(concatOutputCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionWeightNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionBiasNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(projectionOutputNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(concatToProjectionConnectorNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(projectionOutputConnectorNode?.id);
     });
 });

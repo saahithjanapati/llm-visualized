@@ -484,9 +484,17 @@ export function buildProjectionColumnHoverInfo(node = null, columnItem = null, k
 
 export function buildWeightedSumHoverInfo(node = null, rowItem = null) {
     const tokenInfo = createTokenInfo(rowItem) || {};
+    const values = Array.isArray(rowItem?.vectorValues) || ArrayBuffer.isView(rowItem?.vectorValues)
+        ? Array.from(rowItem.vectorValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : (
+            (Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues))
+                ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+                : null
+        );
     const info = buildProjectionHoverInfo(node, 'Attention Weighted Sum', {
         stage: 'attention.weighted_sum',
         isWeightedSum: true,
+        ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -501,6 +509,7 @@ export function buildWeightedSumHoverInfo(node = null, rowItem = null) {
             ...(info.activationData || {}),
             stage: 'attention.weighted_sum',
             isWeightedSum: true,
+            ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }

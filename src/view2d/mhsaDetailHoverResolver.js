@@ -615,9 +615,15 @@ function buildAttentionOutputProjectionHoverInfo(node = null, rowItem = null, {
     extraActivationData = {}
 } = {}) {
     const tokenInfo = createTokenInfo(rowItem) || {};
+    const extraActivationDataObject = extraActivationData && typeof extraActivationData === 'object'
+        ? extraActivationData
+        : {};
+    const stage = typeof extraActivationDataObject.stage === 'string' && extraActivationDataObject.stage.trim().length
+        ? extraActivationDataObject.stage.trim()
+        : 'attention.output_projection';
     const info = buildProjectionHoverInfo(node, label, {
-        stage: 'attention.output_projection',
-        ...(extraActivationData && typeof extraActivationData === 'object' ? extraActivationData : {}),
+        stage,
+        ...extraActivationDataObject,
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -629,8 +635,8 @@ function buildAttentionOutputProjectionHoverInfo(node = null, rowItem = null, {
         ...info,
         activationData: {
             ...(info.activationData || {}),
-            stage: 'attention.output_projection',
-            ...(extraActivationData && typeof extraActivationData === 'object' ? extraActivationData : {}),
+            stage,
+            ...extraActivationDataObject,
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
@@ -817,13 +823,19 @@ function buildOutputProjectionWeightResult(index = null, node = null, options = 
     }, options);
 }
 
-function buildOutputProjectionBiasResult(index = null, node = null, options = null) {
+function buildOutputProjectionBiasResult(index = null, node = null, rowHit = null, options = null) {
+    const biasRowItem = rowHit?.rowItem || node?.rowItems?.[0] || null;
+    const values = Array.isArray(biasRowItem?.rawValues) || ArrayBuffer.isView(biasRowItem?.rawValues)
+        ? Array.from(biasRowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
     return buildOutputProjectionEquationResult(index, {
         label: 'Output Projection Bias Vector',
-        info: buildAttentionOutputProjectionHoverInfo(node, null, {
+        info: buildAttentionOutputProjectionHoverInfo(node, biasRowItem, {
             label: 'Output Projection Bias Vector',
             extraActivationData: {
-                parameterType: 'bias'
+                parameterType: 'bias',
+                stage: 'attention.output_projection.bias',
+                ...(values?.length ? { values } : {})
             }
         })
     }, options);
@@ -1420,7 +1432,7 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
     }
 
     if (entity.type === 'output-projection-bias') {
-        return buildOutputProjectionBiasResult(index, entity.node, options);
+        return buildOutputProjectionBiasResult(index, entity.node, entity.rowHit, options);
     }
 
     if (entity.type === 'output-projection-output-row') {
