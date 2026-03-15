@@ -26,6 +26,14 @@ function logMhsaDebug(...args) {
     console.log(...args);
 }
 
+function getAttentionRowValue(row = null, keyTokenIndex = null) {
+    if (!Array.isArray(row) || !row.length || !Number.isFinite(keyTokenIndex)) return null;
+    const safeIndex = Math.floor(keyTokenIndex);
+    if (safeIndex < 0 || safeIndex >= row.length) return null;
+    const value = row[safeIndex];
+    return Number.isFinite(value) ? value : null;
+}
+
 // Shared lightweight geometry for self-attention highlight spheres
 const SHARED_SPHERE_GEOMETRY = new THREE.SphereGeometry(10, 12, 12);
 const BLUE_ENTRY_DURATION_MULT = 1.75;
@@ -1084,7 +1092,7 @@ export class SelfAttentionAnimator {
                 && Number.isFinite(queryTokenIndex) && Number.isFinite(keyTokenIndex)) {
                 const postRow = this._getAttentionScoresRow('post', layerIndex, headIdx, queryTokenIndex);
                 postScore = Array.isArray(postRow)
-                    ? postRow[Math.max(0, Math.min(postRow.length - 1, keyTokenIndex))]
+                    ? getAttentionRowValue(postRow, keyTokenIndex)
                     : this.ctx.activationSource.getAttentionScore(layerIndex, 'post', headIdx, queryTokenIndex, keyTokenIndex);
             }
             let targetColor;
@@ -2147,7 +2155,7 @@ export class SelfAttentionAnimator {
                                     ? this._getAttentionScoresRow('pre', layerIndex, headIdx, queryTokenIndex)
                                     : null;
                                 const preScore = Array.isArray(preRow) && preRow.length && Number.isFinite(keyTokenIndex)
-                                    ? preRow[Math.max(0, Math.min(preRow.length - 1, keyTokenIndex))]
+                                    ? getAttentionRowValue(preRow, keyTokenIndex)
                                     : ((this.ctx && this.ctx.activationSource && Number.isFinite(layerIndex) && Number.isFinite(headIdx))
                                         ? this.ctx.activationSource.getAttentionScore(layerIndex, 'pre', headIdx, queryTokenIndex, keyTokenIndex)
                                         : null);

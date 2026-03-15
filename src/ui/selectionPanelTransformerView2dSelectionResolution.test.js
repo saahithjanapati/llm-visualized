@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { CaptureActivationSource } from '../data/CaptureActivationSource.js';
 
 let SelectionPanel;
 
@@ -408,6 +409,55 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.activationData?.stage).toBe('attention.mask');
         expect(resolved?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
         expect(resolved?.info?.activationData?.isMasked).toBe(true);
+    });
+
+    it('keeps masked post-softmax 2D canvas selections at zero when packed capture rows stop at the diagonal', () => {
+        const panel = createPanelContext();
+        panel.activationSource = new CaptureActivationSource({
+            meta: {
+                token_strings: ['A', 'B', 'C']
+            },
+            activations: {
+                layers: [{
+                    attention_scores: {
+                        post: [{
+                            v: [0.6, 0.25, 0.75, 1],
+                            n: 3
+                        }]
+                    }
+                }]
+            }
+        });
+
+        const selection = {
+            label: 'Post-Softmax Attention Score',
+            info: {
+                activationData: {
+                    label: 'Post-Softmax Attention Score',
+                    stage: 'attention.post',
+                    layerIndex: 0,
+                    headIndex: 0,
+                    tokenIndex: 0,
+                    queryTokenIndex: 0,
+                    keyTokenIndex: 2,
+                    tokenLabel: 'A',
+                    keyTokenLabel: 'C',
+                    preScore: 0.4,
+                    postScore: 0,
+                    isMasked: true,
+                    maskValue: Number.NEGATIVE_INFINITY
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Post-Softmax Attention Score');
+        expect(resolved?.kind).toBe('attentionSphere');
+        expect(resolved?.info?.activationData?.stage).toBe('attention.post');
+        expect(resolved?.info?.activationData?.tokenIndex).toBe(0);
+        expect(resolved?.info?.activationData?.keyTokenIndex).toBe(2);
+        expect(resolved?.info?.activationData?.postScore).toBe(0);
     });
 
     it('renders causal-mask legends as a discrete black-or-zero palette', () => {

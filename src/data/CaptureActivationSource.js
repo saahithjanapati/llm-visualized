@@ -70,6 +70,14 @@ function clampIndex(value, max) {
     return Math.max(0, Math.min(max, Math.floor(value)));
 }
 
+function getArrayValueAtIndex(values, index) {
+    if (!Array.isArray(values) || !values.length || !Number.isFinite(index)) return null;
+    const safeIndex = Math.floor(index);
+    if (safeIndex < 0 || safeIndex >= values.length) return null;
+    const value = values[safeIndex];
+    return Number.isFinite(value) ? value : null;
+}
+
 function buildCacheKey(parts) {
     return parts.map((part) => String(part ?? '')).join('|');
 }
@@ -464,9 +472,7 @@ export class CaptureActivationSource {
 
     getAttentionScore(layerIndex, mode, headIndex, queryTokenIndex, keyTokenIndex) {
         const row = this.getAttentionScoresRow(layerIndex, mode, headIndex, queryTokenIndex);
-        if (!row || !row.length) return null;
-        const idx = clampIndex(keyTokenIndex, row.length - 1);
-        return row[idx] ?? null;
+        return getArrayValueAtIndex(row, keyTokenIndex);
     }
 
     getAttentionWeightedSum(layerIndex, headIndex, queryTokenIndex, targetLength = null) {
