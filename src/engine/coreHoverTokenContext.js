@@ -561,11 +561,12 @@ function resolveAssociatedHoverTokenEntry({
     if (isLayerNormParamHoverSelection(label, info, object)) {
         return null;
     }
-    if (isBottomPositionChipHoverSelection(label)) return null;
 
     const isBottomTokenChip = isBottomTokenChipHoverSelection(label);
-    if (!isBottomTokenChip && shouldSuppressTokenChipHover(info, object)) return null;
-    if (!isBottomTokenChip && !isVectorLikeHoverSelection(label, info, object)) return null;
+    const isBottomPositionChip = isBottomPositionChipHoverSelection(label);
+    const isBottomTokenLinkedChip = isBottomTokenChip || isBottomPositionChip;
+    if (!isBottomTokenLinkedChip && shouldSuppressTokenChipHover(info, object)) return null;
+    if (!isBottomTokenLinkedChip && !isVectorLikeHoverSelection(label, info, object)) return null;
 
     const tokenIndex = resolveAssociatedHoverTokenIndex(info, object);
     const tokenId = resolveAssociatedHoverTokenId(info, object, tokenIndex, activationSource);

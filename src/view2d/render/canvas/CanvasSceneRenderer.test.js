@@ -7,6 +7,7 @@ import {
     createMatrixNode,
     createOperatorNode,
     createSceneModel,
+    createTextNode,
     flattenSceneNodes,
     VIEW2D_ANCHOR_SIDES,
     VIEW2D_CONNECTOR_ROUTES,
@@ -614,6 +615,81 @@ describe('CanvasSceneRenderer', () => {
         expect(firstScreenFontPx).toBeGreaterThan(0);
         expect(secondScreenFontPx).toBeGreaterThan(firstScreenFontPx);
         expect(secondScreenFontPx / Math.max(1, firstScreenFontPx)).toBeCloseTo(2, 1);
+    });
+
+    it('reveals canvas text and captions together at the same zoom threshold', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+                    gapKey: 'default',
+                    children: [
+                        createMatrixNode({
+                            role: 'caption-card',
+                            semantic: {
+                                componentKind: 'test',
+                                role: 'caption-card'
+                            },
+                            label: {
+                                text: 'Caption'
+                            },
+                            dimensions: {
+                                rows: 1,
+                                cols: 1
+                            },
+                            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+                            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+                            visual: {
+                                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+                            },
+                            metadata: {
+                                card: {
+                                    width: 72,
+                                    height: 40
+                                },
+                                caption: {
+                                    position: 'top',
+                                    minScreenHeightPx: 28
+                                }
+                            }
+                        }),
+                        createTextNode({
+                            role: 'module-title',
+                            semantic: {
+                                componentKind: 'test',
+                                role: 'module-title'
+                            },
+                            text: 'Label',
+                            visual: {
+                                styleKey: VIEW2D_STYLE_KEYS.LABEL
+                            }
+                        })
+                    ]
+                })
+            ]
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 0.88,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const renderedTexts = ctx.operations
+            .filter((entry) => entry.type === 'fillText')
+            .map((entry) => entry.text);
+
+        expect(renderedTexts).toContain('Caption');
+        expect(renderedTexts).toContain('Label');
     });
 
     it('keeps connector arrowheads visible during interactive head-detail zoom renders', () => {
@@ -1448,6 +1524,114 @@ describe('CanvasSceneRenderer', () => {
 
         expect(renderer.getLastRenderState()?.detailTargetKind).toBe('output-projection');
         expect(renderer.getActiveCaptionSceneState()?.scene).toBe(outputProjectionDetailScene);
+    });
+
+    it('renders the scene-backed layer norm detail scene during deep detail mode', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const overviewNode = createMatrixNode({
+            role: 'module-card',
+            semantic: {
+                componentKind: 'layer-norm',
+                layerIndex: 0,
+                stage: 'ln1',
+                role: 'module-card'
+            },
+            dimensions: { rows: 1, cols: D_MODEL },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.LAYER_NORM
+            },
+            metadata: {
+                card: {
+                    width: 96,
+                    height: 48,
+                    cornerRadius: 999
+                }
+            }
+        });
+
+        const detailNode = createMatrixNode({
+            role: 'layer-norm-normalized',
+            semantic: {
+                componentKind: 'layer-norm',
+                layerIndex: 0,
+                stage: 'ln1.norm',
+                role: 'layer-norm-normalized'
+            },
+            dimensions: { rows: 2, cols: D_MODEL },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(120, 220, 255, 0.9)' },
+                { label: 'Token B', gradientCss: 'rgba(120, 220, 255, 0.9)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT,
+                    compactWidth: 104,
+                    rowHeight: 7,
+                    rowGap: 0,
+                    paddingX: 0,
+                    paddingY: 0,
+                    bandCount: 12,
+                    bandSeparatorOpacity: 0,
+                    hoverScaleY: 1.16,
+                    hoverGlowColor: 'rgba(255,255,255,0.08)',
+                    hoverGlowBlur: 12,
+                    hoverStrokeColor: 'rgba(255,255,255,0.10)',
+                    dimmedRowOpacity: 0.18,
+                    hideSurface: true
+                },
+                card: {
+                    cornerRadius: 10
+                }
+            }
+        });
+
+        const layerNormDetailScene = createSceneModel({
+            nodes: [detailNode],
+            metadata: {
+                visualContract: 'selection-panel-layer-norm-v1'
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [overviewNode],
+            metadata: {
+                layerNormDetailTarget: {
+                    layerNormKind: 'ln1',
+                    layerIndex: 0
+                },
+                layerNormDetailScene
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            headDetailDepthActive: true,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            detailViewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        expect(renderer.getLastRenderState()?.detailTargetKind).toBe('layer-norm');
+        expect(renderer.getActiveCaptionSceneState()?.scene).toBe(layerNormDetailScene);
     });
 
     it('applies stronger opacity dimming to explicitly dimmed nodes', () => {

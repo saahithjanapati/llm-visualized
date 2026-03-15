@@ -64,6 +64,50 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
     const projectionKind = normalizeProjectionKind(resolveProjectionKindForNode(node));
 
     if (hit?.rowHit) {
+        if (componentKind === 'layer-norm') {
+            if (node.role === 'layer-norm-input') {
+                return {
+                    type: 'layer-norm-input-row',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+            if (node.role === 'layer-norm-normalized' || node.role === 'layer-norm-normalized-copy') {
+                return {
+                    type: 'layer-norm-normalized-row',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+            if (node.role === 'layer-norm-scaled' || node.role === 'layer-norm-scaled-copy') {
+                return {
+                    type: 'layer-norm-scaled-row',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+            if (node.role === 'layer-norm-output') {
+                return {
+                    type: 'layer-norm-output-row',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+            if (node.role === 'layer-norm-scale') {
+                return {
+                    type: 'layer-norm-scale',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+            if (node.role === 'layer-norm-shift') {
+                return {
+                    type: 'layer-norm-shift',
+                    node,
+                    rowHit: hit.rowHit
+                };
+            }
+        }
         if (componentKind === 'output-projection') {
             if (node.role === 'projection-output') {
                 return {
@@ -230,6 +274,21 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
             type: 'mlp-down-bias',
             node
         };
+    }
+
+    if (componentKind === 'layer-norm') {
+        if (node.role === 'layer-norm-scale') {
+            return {
+                type: 'layer-norm-scale',
+                node
+            };
+        }
+        if (node.role === 'layer-norm-shift') {
+            return {
+                type: 'layer-norm-shift',
+                node
+            };
+        }
     }
 
     return {

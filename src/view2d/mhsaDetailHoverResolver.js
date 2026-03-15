@@ -31,6 +31,8 @@ import {
     buildAttentionCellHoverInfo,
     buildConcatenatedHeadOutputBandHoverInfo,
     buildConcatenatedHeadOutputHoverInfo,
+    buildLayerNormActivationHoverInfo,
+    buildLayerNormParamHoverInfo,
     buildMlpActivationHoverInfo,
     buildMlpDownBiasHoverInfo,
     buildMlpDownProjectionHoverInfo,
@@ -130,6 +132,112 @@ function buildPathFocusResult(index = null, {
     });
 }
 
+const LAYER_NORM_MATRIX_ROLES = Object.freeze([
+    'layer-norm-input',
+    'layer-norm-normalized',
+    'layer-norm-normalized-copy',
+    'layer-norm-scale',
+    'layer-norm-scaled',
+    'layer-norm-scaled-copy',
+    'layer-norm-shift',
+    'layer-norm-output'
+]);
+
+const LAYER_NORM_ROW_ROLES = Object.freeze([
+    'layer-norm-input',
+    'layer-norm-normalized',
+    'layer-norm-normalized-copy',
+    'layer-norm-scaled',
+    'layer-norm-scaled-copy',
+    'layer-norm-output'
+]);
+
+const LAYER_NORM_CONNECTOR_ROLES = Object.freeze([
+    'connector-layer-norm-input',
+    'connector-layer-norm-normalization',
+    'connector-layer-norm-copy-normalized',
+    'connector-layer-norm-copy-scaled',
+    'connector-layer-norm-output'
+]);
+
+function collectNodeIdsByRoles(index = null, roles = []) {
+    const nodeIds = [];
+    roles.forEach((role) => {
+        appendAllUnique(nodeIds, index?.nodeIdsByRole?.get(role) || []);
+    });
+    return nodeIds;
+}
+
+function collectConnectorIdsByRoles(index = null, roles = []) {
+    const connectorIds = [];
+    if (!index?.nodesById) return connectorIds;
+    const roleSet = new Set(roles.map((role) => String(role || '').trim()));
+    for (const node of index.nodesById.values()) {
+        if (!roleSet.has(String(node?.role || '').trim())) continue;
+        appendUnique(connectorIds, node.id);
+    }
+    return connectorIds;
+}
+
+function findSingleNodeIdByRole(index = null, role = '') {
+    return (index?.nodeIdsByRole?.get(role) || [])[0] || '';
+}
+
+function buildLayerNormRowSelections(index = null, rowIndex = null) {
+    if (!Number.isFinite(rowIndex)) return [];
+    const safeRowIndex = Math.max(0, Math.floor(rowIndex));
+    return LAYER_NORM_ROW_ROLES.reduce((selections, role) => {
+        const nodeId = findSingleNodeIdByRole(index, role);
+        if (nodeId) {
+            selections.push({
+                nodeId,
+                rowIndex: safeRowIndex
+            });
+        }
+        return selections;
+    }, []);
+}
+
+function buildLayerNormSharedFocusResult(index = null, {
+    label = '',
+    info = null,
+    rowIndex = null,
+    includeScaleSelection = false,
+    includeShiftSelection = false
+} = {}, options = null) {
+    const activeNodeIds = collectNodeIdsByRoles(index, LAYER_NORM_MATRIX_ROLES);
+    const activeConnectorIds = collectConnectorIdsByRoles(index, LAYER_NORM_CONNECTOR_ROLES);
+    const rowSelections = Number.isFinite(rowIndex)
+        ? buildLayerNormRowSelections(index, rowIndex)
+        : [];
+    if (includeScaleSelection) {
+        const scaleNodeId = findSingleNodeIdByRole(index, 'layer-norm-scale');
+        if (scaleNodeId) {
+            rowSelections.push({
+                nodeId: scaleNodeId,
+                rowIndex: 0
+            });
+        }
+    }
+    if (includeShiftSelection) {
+        const shiftNodeId = findSingleNodeIdByRole(index, 'layer-norm-shift');
+        if (shiftNodeId) {
+            rowSelections.push({
+                nodeId: shiftNodeId,
+                rowIndex: 0
+            });
+        }
+    }
+    return buildFocusResult({
+        label,
+        info,
+        activeNodeIds,
+        activeConnectorIds,
+        rowSelections,
+        includeFocusState: options?.includeFocusState !== false
+    });
+}
+
 function buildPostCopyMirrorCellSelections(index = null, rowIndex = null, colIndex = null) {
     if (!index || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) return [];
     const nodeId = index?.singleNodeIds?.attentionPostCopy;
@@ -157,6 +265,8 @@ function buildPreScoreCellResult(index = null, node = null, rowIndex = null, col
     const cellSelections = [
         { nodeId: index?.singleNodeIds?.attentionPreScore, rowIndex, colIndex },
         { nodeId: index?.singleNodeIds?.attentionMaskedInput, rowIndex, colIndex },
+        { nodeId: index?.singleNodeIds?.attentionMask, rowIndex, colIndex },
+        { nodeId: index?.singleNodeIds?.attentionPost, rowIndex, colIndex },
         ...buildPostCopyMirrorCellSelections(index, rowIndex, colIndex)
     ];
 
@@ -745,6 +855,79 @@ function buildProjectionSourceRowResult(index = null, rowHit = null, options = n
     }, options);
 }
 
+function buildLayerNormInputRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
+        variant: 'input'
+    });
+    return buildLayerNormSharedFocusResult(index, {
+        label: info?.activationData?.label || 'LayerNorm Input Vector',
+        info,
+        rowIndex,
+        includeScaleSelection: true,
+        includeShiftSelection: true
+    }, options);
+}
+
+function buildLayerNormNormalizedRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
+        variant: 'normalized'
+    });
+    return buildLayerNormSharedFocusResult(index, {
+        label: info?.activationData?.label || 'LayerNorm Normalized Vector',
+        info,
+        rowIndex,
+        includeScaleSelection: true,
+        includeShiftSelection: true
+    }, options);
+}
+
+function buildLayerNormScaledRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
+        variant: 'scaled'
+    });
+    return buildLayerNormSharedFocusResult(index, {
+        label: info?.activationData?.label || 'LayerNorm Product Vector',
+        info,
+        rowIndex,
+        includeScaleSelection: true,
+        includeShiftSelection: true
+    }, options);
+}
+
+function buildLayerNormOutputRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !node || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
+        variant: 'output'
+    });
+    return buildLayerNormSharedFocusResult(index, {
+        label: info?.activationData?.label || 'LayerNorm Output Vector',
+        info,
+        rowIndex,
+        includeScaleSelection: true,
+        includeShiftSelection: true
+    }, options);
+}
+
+function buildLayerNormParamResult(index = null, node = null, {
+    param = 'scale'
+} = {}, options = null) {
+    if (!index || !node) return null;
+    const info = buildLayerNormParamHoverInfo(node, { param });
+    return buildLayerNormSharedFocusResult(index, {
+        label: info?.activationData?.label || 'LayerNorm Parameter',
+        info,
+        includeScaleSelection: param === 'scale',
+        includeShiftSelection: param === 'shift'
+    }, options);
+}
+
 function buildMlpUpOutputRowResult(index = null, node = null, rowHit = null, options = null) {
     if (!index || !node || !rowHit) return null;
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
@@ -1110,6 +1293,34 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
 
     if (entity.type === 'projection-source-row') {
         return buildProjectionSourceRowResult(index, entity.rowHit, options);
+    }
+
+    if (entity.type === 'layer-norm-input-row') {
+        return buildLayerNormInputRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'layer-norm-normalized-row') {
+        return buildLayerNormNormalizedRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'layer-norm-scaled-row') {
+        return buildLayerNormScaledRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'layer-norm-output-row') {
+        return buildLayerNormOutputRowResult(index, entity.node, entity.rowHit, options);
+    }
+
+    if (entity.type === 'layer-norm-scale') {
+        return buildLayerNormParamResult(index, entity.node, {
+            param: 'scale'
+        }, options);
+    }
+
+    if (entity.type === 'layer-norm-shift') {
+        return buildLayerNormParamResult(index, entity.node, {
+            param: 'shift'
+        }, options);
     }
 
     if (entity.type === 'mlp-up-output-row') {

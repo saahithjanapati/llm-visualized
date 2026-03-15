@@ -740,6 +740,8 @@ describe('buildMlpDetailSceneModel', () => {
         expect(hoverState?.label).toBe(MLP_DOWN_TOOLTIP_LABEL);
         expect(hoverState?.info?.activationData?.label).toBe(MLP_DOWN_TOOLTIP_LABEL);
         expect(hoverState?.info?.activationData?.stage).toBe('mlp.down');
+        expect(hoverState?.info?.suppressTokenChip).toBe(true);
+        expect(hoverState?.info?.activationData?.suppressTokenChip).toBe(true);
         expect(hoverState?.info?.activationData?.layerIndex).toBe(4);
         expect(hoverState?.focusState?.activeNodeIds).toContain(weightNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(activationNode?.id);

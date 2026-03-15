@@ -188,4 +188,43 @@ describe('resolveHoverTokenContext attention metrics', () => {
         expect(context).toBeNull();
         expect(entry).toBeNull();
     });
+
+    it('resolves position-chip hovers to a token chip sync entry', () => {
+        const entry = resolveHoverTokenChipSyncEntry({
+            label: 'Position: 3',
+            object: {
+                userData: {
+                    tokenIndex: 2,
+                    tokenId: 102,
+                    tokenLabel: 'Token C'
+                }
+            }
+        });
+
+        expect(entry).toEqual({
+            tokenIndex: 2,
+            tokenId: 102,
+            tokenLabel: 'Token C'
+        });
+    });
+
+    it('resolves position-embedding vector hovers to a token chip sync entry', () => {
+        const entry = resolveHoverTokenChipSyncEntry({
+            label: 'Position Embedding - Token B',
+            info: {
+                activationData: {
+                    stage: 'embedding.position',
+                    tokenIndex: 1,
+                    tokenId: 101,
+                    tokenLabel: 'Token B'
+                }
+            }
+        });
+
+        expect(entry).toEqual({
+            tokenIndex: 1,
+            tokenId: 101,
+            tokenLabel: 'Token B'
+        });
+    });
 });

@@ -1070,6 +1070,37 @@ function buildMlpDetailSemanticTarget(target = null, role = 'module') {
     };
 }
 
+function normalizeLayerNormDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerNormKind = String(target.layerNormKind || '').trim().toLowerCase();
+    if (layerNormKind !== 'ln1' && layerNormKind !== 'ln2' && layerNormKind !== 'final') {
+        return null;
+    }
+    const layerIndex = Number.isFinite(target.layerIndex) ? Math.max(0, Math.floor(target.layerIndex)) : null;
+    if (layerNormKind === 'final') {
+        return {
+            layerNormKind,
+            ...(Number.isFinite(layerIndex) ? { layerIndex } : {})
+        };
+    }
+    if (!Number.isFinite(layerIndex)) return null;
+    return {
+        layerNormKind,
+        layerIndex
+    };
+}
+
+function buildLayerNormDetailSemanticTarget(target = null, role = 'module') {
+    const resolvedTarget = normalizeLayerNormDetailTarget(target);
+    if (!resolvedTarget) return null;
+    return {
+        componentKind: 'layer-norm',
+        ...(Number.isFinite(resolvedTarget.layerIndex) ? { layerIndex: resolvedTarget.layerIndex } : {}),
+        stage: resolvedTarget.layerNormKind === 'final' ? 'final-ln' : resolvedTarget.layerNormKind,
+        role
+    };
+}
+
 function drawHeadDetailStage(ctx, resolution, headDetailPreview = null, config = null) {
     if (!ctx || !resolution) return;
     const width = Math.max(1, Number(resolution.width) || 1);
@@ -1318,6 +1349,12 @@ function resolveMlpDetailFocusBounds(layout = null, target = null, role = 'modul
     return cloneBounds(registry.resolveBoundsForSemanticTarget(buildMlpDetailSemanticTarget(target, role)) || null);
 }
 
+function resolveLayerNormDetailFocusBounds(layout = null, target = null, role = 'module') {
+    const registry = layout?.registry || null;
+    if (!registry || typeof registry.resolveBoundsForSemanticTarget !== 'function') return null;
+    return cloneBounds(registry.resolveBoundsForSemanticTarget(buildLayerNormDetailSemanticTarget(target, role)) || null);
+}
+
 function resolveVisibleWorldBounds(resolution, {
     offsetX = 0,
     offsetY = 0,
@@ -1443,13 +1480,17 @@ function drawCaption(ctx, entry, node, config, worldScale = 1, detailScale = wor
     }
     const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
     const safeDetailScale = Math.max(0.0001, Number.isFinite(detailScale) ? detailScale : safeWorldScale);
+    const revealScreenFontPx = (
+        Number.isFinite(fixedTextSizing?.captionLabelScreenFontPx) && fixedTextSizing.captionLabelScreenFontPx > 0
+            ? Number(fixedTextSizing.captionLabelScreenFontPx)
+            : ((Number.isFinite(config?.component?.labelFontSize) ? Number(config.component.labelFontSize) : 12) * safeDetailScale)
+    );
+    if (revealScreenFontPx < TEXT_MIN_SCREEN_HEIGHT_PX) {
+        return;
+    }
     const captionLines = resolveView2dCaptionLines(node);
     if (!captionLines.length) return;
     const captionPosition = resolveView2dCaptionPosition(node);
-    const minScreenHeightPx = Number.isFinite(node?.metadata?.caption?.minScreenHeightPx)
-        && node.metadata.caption.minScreenHeightPx > 0
-        ? node.metadata.caption.minScreenHeightPx
-        : CAPTION_MIN_SCREEN_HEIGHT_PX;
     const lines = [];
 
     if (captionPosition === 'inside-top') {
@@ -1485,10 +1526,6 @@ function drawCaption(ctx, entry, node, config, worldScale = 1, detailScale = wor
     }
 
     if (!lines.length) return;
-    const maxHeight = Math.max(...lines.map(({ bounds }) => Number(bounds?.height) || 0));
-    if ((maxHeight * safeDetailScale) < minScreenHeightPx) {
-        return;
-    }
 
     const captionStyle = resolveView2dStyle(
         resolveView2dCaptionStyleKey(node, VIEW2D_STYLE_KEYS.CAPTION)
@@ -2469,11 +2506,19 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
         && Number.isFinite(fixedTextSizing?.operatorMinScreenHeightPx)
         ? Math.max(0, Number(fixedTextSizing.operatorMinScreenHeightPx))
         : null;
-    const minScreenHeightPx = Number.isFinite(node.metadata?.minScreenHeightPx)
-        ? Math.max(0, Number(node.metadata.minScreenHeightPx))
-        : TEXT_MIN_SCREEN_HEIGHT_PX;
-    const effectiveMinScreenHeightPx = detailOperatorMinScreenHeightPx ?? minScreenHeightPx;
-    if (!isPersistentOperator && (bounds.height * safeDetailScale) < effectiveMinScreenHeightPx) {
+    const revealScreenFontPx = node.kind === VIEW2D_NODE_KINDS.OPERATOR
+        ? (
+            Number.isFinite(fixedTextSizing?.textScreenFontPx) && fixedTextSizing.textScreenFontPx > 0
+                ? Number(fixedTextSizing.textScreenFontPx)
+                : ((Number.isFinite(config?.component?.labelFontSize) ? Number(config.component.labelFontSize) : 12) * safeDetailScale)
+        )
+        : (
+            Number.isFinite(fixedTextSizing?.textScreenFontPx) && fixedTextSizing.textScreenFontPx > 0
+                ? Number(fixedTextSizing.textScreenFontPx)
+                : ((Number.isFinite(config?.component?.labelFontSize) ? Number(config.component.labelFontSize) : 12) * safeDetailScale)
+        );
+    const effectiveRevealThresholdPx = detailOperatorMinScreenHeightPx ?? TEXT_MIN_SCREEN_HEIGHT_PX;
+    if (!isPersistentOperator && revealScreenFontPx < effectiveRevealThresholdPx) {
         return;
     }
     ctx.save();
@@ -2976,6 +3021,7 @@ export class CanvasSceneRenderer {
             || this.scene?.metadata?.headDetailScene
             || this.scene?.metadata?.outputProjectionDetailScene
             || this.scene?.metadata?.mlpDetailScene
+            || this.scene?.metadata?.layerNormDetailScene
             || null
         );
         return this.layout;
@@ -3161,6 +3207,9 @@ export class CanvasSceneRenderer {
         const activeMlpDetailTarget = normalizeMlpDetailTarget(
             this.scene?.metadata?.mlpDetailTarget
         );
+        const activeLayerNormDetailTarget = normalizeLayerNormDetailTarget(
+            this.scene?.metadata?.layerNormDetailTarget
+        );
         const activeHeadDetailBounds = activeHeadDetailTarget
             ? (
                 resolveHeadDetailFocusBounds(this.layout, activeHeadDetailTarget, 'head')
@@ -3186,12 +3235,23 @@ export class CanvasSceneRenderer {
                 || resolveMlpDetailFocusBounds(this.layout, activeMlpDetailTarget, 'module')
             )
             : null;
+        const activeLayerNormDetailBounds = activeLayerNormDetailTarget
+            ? (
+                resolveLayerNormDetailFocusBounds(this.layout, activeLayerNormDetailTarget, 'module-card')
+                || resolveLayerNormDetailFocusBounds(this.layout, activeLayerNormDetailTarget, 'module-title')
+                || resolveLayerNormDetailFocusBounds(this.layout, activeLayerNormDetailTarget, 'module')
+            )
+            : null;
         const activeDetailTargetKind = activeOutputProjectionDetailTarget
             ? 'output-projection'
             : (
                 activeConcatDetailTarget
                     ? 'concatenate'
-                    : (activeMlpDetailTarget ? 'mlp' : (activeHeadDetailTarget ? 'head' : ''))
+                    : (
+                        activeMlpDetailTarget
+                            ? 'mlp'
+                            : (activeLayerNormDetailTarget ? 'layer-norm' : (activeHeadDetailTarget ? 'head' : ''))
+                    )
             );
         this.activeDetailSceneRenderState = null;
         const renderState = {
@@ -3233,6 +3293,8 @@ export class CanvasSceneRenderer {
             outputProjectionDetailBounds: cloneBounds(activeOutputProjectionDetailBounds),
             mlpDetailTarget: activeMlpDetailTarget ? { ...activeMlpDetailTarget } : null,
             mlpDetailBounds: cloneBounds(activeMlpDetailBounds),
+            layerNormDetailTarget: activeLayerNormDetailTarget ? { ...activeLayerNormDetailTarget } : null,
+            layerNormDetailBounds: cloneBounds(activeLayerNormDetailBounds),
             detailTargetKind: activeDetailTargetKind,
             headDetailDepthActive: !!headDetailDepthActive
         };
@@ -3241,7 +3303,7 @@ export class CanvasSceneRenderer {
         try {
             if (
                 headDetailDepthActive
-                && ['head', 'mlp', 'output-projection'].includes(activeDetailTargetKind)
+                && ['head', 'mlp', 'output-projection', 'layer-norm'].includes(activeDetailTargetKind)
                 && this.headDetailSceneState?.layout?.registry
             ) {
                 const detailSceneBounds = this.headDetailSceneState.visibleBounds

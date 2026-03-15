@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
     hasView2dPointerExceededClickSlop,
-    resolveView2dClickSlopPx
+    resolveView2dClickSlopPx,
+    resolveView2dPointerMoveIntent,
+    shouldTreatView2dPointerReleaseAsClick
 } from './selectionPanelTransformerView2dInteractionUtils.js';
 
 describe('selectionPanelTransformerView2dInteractionUtils', () => {
@@ -36,6 +38,61 @@ describe('selectionPanelTransformerView2dInteractionUtils', () => {
             startClientY: 48,
             clientX: 64,
             clientY: 48
+        })).toBe(false);
+    });
+
+    it('waits for touch drags to exceed slop before panning', () => {
+        expect(resolveView2dPointerMoveIntent({
+            pointerType: 'touch',
+            startClientX: 100,
+            startClientY: 120,
+            previousClientX: 100,
+            previousClientY: 120,
+            clientX: 101,
+            clientY: 120,
+            moved: false,
+            suppressClick: false
+        })).toEqual({
+            deltaX: 1,
+            deltaY: 0,
+            moved: false,
+            suppressClick: false,
+            shouldPan: false
+        });
+
+        expect(resolveView2dPointerMoveIntent({
+            pointerType: 'touch',
+            startClientX: 100,
+            startClientY: 120,
+            previousClientX: 101,
+            previousClientY: 120,
+            clientX: 103,
+            clientY: 120,
+            moved: false,
+            suppressClick: false
+        })).toEqual({
+            deltaX: 2,
+            deltaY: 0,
+            moved: true,
+            suppressClick: true,
+            shouldPan: true
+        });
+    });
+
+    it('treats any completed pan or pinch-follow-up as non-clickable on release', () => {
+        expect(shouldTreatView2dPointerReleaseAsClick({
+            moved: false,
+            suppressClick: false
+        })).toBe(true);
+
+        expect(shouldTreatView2dPointerReleaseAsClick({
+            moved: true,
+            suppressClick: false
+        })).toBe(false);
+
+        expect(shouldTreatView2dPointerReleaseAsClick({
+            moved: false,
+            suppressClick: true
         })).toBe(false);
     });
 });

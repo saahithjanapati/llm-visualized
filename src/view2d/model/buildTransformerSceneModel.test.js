@@ -13,8 +13,12 @@ function createVector(seed = 0, length = D_MODEL) {
 
 function createMockActivationSource() {
     return {
+        meta: {
+            prompt_tokens: [101, 102],
+            completion_tokens: [103]
+        },
         getTokenCount() {
-            return 2;
+            return 3;
         },
         getTokenId(tokenIndex = 0) {
             return 100 + tokenIndex;
@@ -226,6 +230,201 @@ describe('buildTransformerSceneModel', () => {
         );
     });
 
+    it('stacks the active prompt tokens to the left of the vocabulary embedding card', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['Token A', 'Token B', 'Token C'],
+            layerCount: 1
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const tokenChipNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'input-token-chip'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+        ));
+        const tokenChipLabelNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.role === 'input-token-chip-label'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+        ));
+        const tokenChipStackNode = nodes.find((node) => (
+            node?.role === 'input-token-chip-stack'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+        ));
+        const vocabularyEmbeddingNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'vocabulary-embedding-card'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+        ));
+        const connectors = nodes.filter((node) => node?.kind === VIEW2D_NODE_KINDS.CONNECTOR);
+
+        expect(tokenChipNodes).toHaveLength(3);
+        expect(
+            tokenChipLabelNodes.map((node) => String(node?.text || '').replace(/\u00A0/g, ' '))
+        ).toEqual(['Token A', 'Token B', 'Token C']);
+        expect(tokenChipStackNode).toBeTruthy();
+        expect(vocabularyEmbeddingNode).toBeTruthy();
+        expect(connectors.some((connector) => (
+            connector?.source?.nodeId === tokenChipStackNode?.id
+            && connector?.target?.nodeId === vocabularyEmbeddingNode?.id
+        ))).toBe(true);
+
+        const layout = buildSceneLayout(scene);
+        const vocabularyEmbeddingEntry = layout?.registry?.getNodeEntry(vocabularyEmbeddingNode?.id);
+        const chipEntries = tokenChipNodes.map((node) => layout?.registry?.getNodeEntry(node.id));
+
+        chipEntries.forEach((chipEntry) => {
+            expect(chipEntry).toBeTruthy();
+            expect(
+                chipEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+            ).toBeLessThan(
+                vocabularyEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
+            );
+        });
+        expect(
+            chipEntries[1].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        ).toBeGreaterThan(
+            chipEntries[0].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        );
+        expect(
+            chipEntries[2].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        ).toBeGreaterThan(
+            chipEntries[1].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        );
+    });
+
+    it('stacks visible position chips to the left of the position embedding card', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['Token A', 'Token B', 'Token C'],
+            layerCount: 1
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const positionChipNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'input-position-chip'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.position'
+        ));
+        const positionChipLabelNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.role === 'input-position-chip-label'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.position'
+        ));
+        const positionChipStackNode = nodes.find((node) => (
+            node?.role === 'input-position-chip-stack'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.position'
+        ));
+        const positionEmbeddingNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'position-embedding-card'
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.position'
+        ));
+        const connectors = nodes.filter((node) => node?.kind === VIEW2D_NODE_KINDS.CONNECTOR);
+
+        expect(positionChipNodes).toHaveLength(3);
+        expect(
+            positionChipLabelNodes.map((node) => String(node?.text || '').replace(/\u00A0/g, ' '))
+        ).toEqual(['1', '2', '3']);
+        expect(positionChipStackNode).toBeTruthy();
+        expect(positionEmbeddingNode).toBeTruthy();
+        expect(connectors.some((connector) => (
+            connector?.source?.nodeId === positionChipStackNode?.id
+            && connector?.target?.nodeId === positionEmbeddingNode?.id
+        ))).toBe(true);
+
+        const layout = buildSceneLayout(scene);
+        const positionEmbeddingEntry = layout?.registry?.getNodeEntry(positionEmbeddingNode?.id);
+        const chipEntries = positionChipNodes.map((node) => layout?.registry?.getNodeEntry(node.id));
+
+        chipEntries.forEach((chipEntry) => {
+            expect(chipEntry).toBeTruthy();
+            expect(
+                chipEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+            ).toBeLessThan(
+                positionEmbeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
+            );
+        });
+        expect(
+            chipEntries[1].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        ).toBeGreaterThan(
+            chipEntries[0].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        );
+        expect(
+            chipEntries[2].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        ).toBeGreaterThan(
+            chipEntries[1].anchors[VIEW2D_ANCHOR_SIDES.CENTER].y
+        );
+    });
+
+    it('places chosen generated-token chips to the right of the unembedding card', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['Token A', 'Token B', 'Token C'],
+            layerCount: 1
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const unembeddingNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'unembedding'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'unembedding'
+        ));
+        const chosenTokenChipStackNode = nodes.find((node) => (
+            node?.role === 'chosen-token-chip-stack'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'output'
+        ));
+        const chosenTokenChipNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'chosen-token-chip'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'output'
+        ));
+        const chosenTokenChipLabelNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.role === 'chosen-token-chip-label'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'output'
+        ));
+        const connectors = nodes.filter((node) => node?.kind === VIEW2D_NODE_KINDS.CONNECTOR);
+
+        expect(unembeddingNode).toBeTruthy();
+        expect(chosenTokenChipStackNode).toBeTruthy();
+        expect(chosenTokenChipNodes).toHaveLength(1);
+        expect(
+            chosenTokenChipLabelNodes.map((node) => String(node?.text || '').replace(/\u00A0/g, ' '))
+        ).toEqual(['Token C']);
+        expect(connectors.some((connector) => (
+            connector?.source?.nodeId === unembeddingNode?.id
+            && connector?.target?.nodeId === chosenTokenChipStackNode?.id
+        ))).toBe(true);
+
+        const layout = buildSceneLayout(scene);
+        const unembeddingEntry = layout?.registry?.getNodeEntry(unembeddingNode?.id);
+        const chosenTokenChipEntry = layout?.registry?.getNodeEntry(chosenTokenChipNodes[0]?.id);
+
+        expect(chosenTokenChipEntry).toBeTruthy();
+        expect(
+            chosenTokenChipEntry.anchors[VIEW2D_ANCHOR_SIDES.LEFT].x
+        ).toBeGreaterThan(
+            unembeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
+        );
+    });
+
     it('maps outgoing residual hover rows to the post-MLP residual activation', () => {
         const payload = buildResidualRowHoverPayload({
             rowItem: {
@@ -283,6 +482,38 @@ describe('buildTransformerSceneModel', () => {
         expect(detailScene).toBeTruthy();
         expect(scene?.metadata?.outputProjectionDetailPreview?.arrowCount).toBe(12);
         expect(matrixNodes).toHaveLength(12);
+    });
+
+    it('builds a scene-backed layer norm detail scene when that detail target is active', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [0, 1],
+            tokenLabels: ['Token A', 'Token B'],
+            layerCount: 2,
+            layerNormDetailTarget: {
+                layerNormKind: 'ln1',
+                layerIndex: 0
+            }
+        });
+
+        const detailScene = scene?.metadata?.layerNormDetailScene || null;
+        const detailNodes = flattenSceneNodes(detailScene);
+        const normalizedNode = detailNodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'layer-norm-normalized'
+        ));
+        const outputNode = detailNodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'layer-norm-output'
+        ));
+
+        expect(scene?.metadata?.layerNormDetailTarget).toEqual({
+            layerNormKind: 'ln1',
+            layerIndex: 0
+        });
+        expect(detailScene).toBeTruthy();
+        expect(normalizedNode?.label?.tex).toBe('\\hat{x}');
+        expect(outputNode?.label?.tex).toBe('x_{\\ln}');
     });
 
     it('routes head outputs directly into output projection without a concat stage', () => {

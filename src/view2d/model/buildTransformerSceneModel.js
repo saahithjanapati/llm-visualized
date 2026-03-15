@@ -38,6 +38,7 @@ import {
     RESIDUAL_VECTOR_MEASURE_COLS
 } from './createResidualVectorMatrixNode.js';
 import { buildHeadDetailSceneModel } from './buildHeadDetailSceneModel.js';
+import { buildLayerNormDetailSceneModel } from './buildLayerNormDetailSceneModel.js';
 import { buildMlpDetailSceneModel } from './buildMlpDetailSceneModel.js';
 import { buildMhsaSceneModel } from './buildMhsaSceneModel.js';
 import { buildOutputProjectionDetailSceneModel } from './buildOutputProjectionDetailSceneModel.js';
@@ -46,6 +47,7 @@ import {
     buildUnembeddingModule,
     buildVocabularyEmbeddingModule
 } from './createPositionEmbeddingModule.js';
+import { buildTokenChipStackModule } from './createTokenChipStackModule.js';
 import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
@@ -131,6 +133,33 @@ function normalizeMlpDetailTarget(target = null) {
         return null;
     }
     return {
+        layerIndex
+    };
+}
+
+function normalizeLayerNormDetailTarget(target = null, layerCount = null) {
+    if (!target || typeof target !== 'object') return null;
+    const layerNormKind = String(target.layerNormKind || '').trim().toLowerCase();
+    if (layerNormKind !== 'ln1' && layerNormKind !== 'ln2' && layerNormKind !== 'final') {
+        return null;
+    }
+    const normalizedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : null;
+    const layerIndex = normalizeIndex(target.layerIndex);
+    if (layerNormKind === 'final') {
+        return {
+            layerNormKind,
+            ...(Number.isFinite(layerIndex)
+                ? { layerIndex }
+                : (normalizedLayerCount
+                    ? { layerIndex: normalizedLayerCount - 1 }
+                    : {}))
+        };
+    }
+    if (!Number.isFinite(layerIndex)) {
+        return null;
+    }
+    return {
+        layerNormKind,
         layerIndex
     };
 }
@@ -251,6 +280,48 @@ function resolveVisibleTokenRefs(activationSource = null, tokenIndices = null, t
             rowIndex
         )
     }));
+}
+
+function resolveVisiblePositionRefs(activationSource = null, tokenIndices = null) {
+    return resolveVisibleTokenIndices(activationSource, tokenIndices).map((tokenIndex, rowIndex) => ({
+        rowIndex,
+        tokenIndex,
+        positionIndex: tokenIndex + 1,
+        tokenLabel: `${tokenIndex + 1}`
+    }));
+}
+
+function resolvePromptTokenCount(activationSource = null) {
+    const promptTokens = Array.isArray(activationSource?.meta?.prompt_tokens)
+        ? activationSource.meta.prompt_tokens
+        : null;
+    if (promptTokens) {
+        return promptTokens.length;
+    }
+    const completionTokens = Array.isArray(activationSource?.meta?.completion_tokens)
+        ? activationSource.meta.completion_tokens
+        : null;
+    if (completionTokens) {
+        const tokenCount = typeof activationSource?.getTokenCount === 'function'
+            ? activationSource.getTokenCount()
+            : null;
+        if (Number.isFinite(tokenCount)) {
+            return Math.max(0, Math.floor(tokenCount) - completionTokens.length);
+        }
+    }
+    return null;
+}
+
+function resolveGeneratedTokenRefs(tokenRefs = [], activationSource = null) {
+    const safeTokenRefs = Array.isArray(tokenRefs) ? tokenRefs.filter(Boolean) : [];
+    const promptTokenCount = resolvePromptTokenCount(activationSource);
+    if (!Number.isFinite(promptTokenCount)) {
+        return [];
+    }
+    return safeTokenRefs.filter((tokenRef) => (
+        Number.isFinite(tokenRef?.tokenIndex)
+        && Math.floor(tokenRef.tokenIndex) >= promptTokenCount
+    ));
 }
 
 function buildVectorRowItems(tokenRefs = [], {
@@ -986,6 +1057,28 @@ function buildLayerGroup({
             }
         })
         : null;
+    const inputTokenChipStack = includeInputPositionEmbedding
+        ? buildTokenChipStackModule({
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.token'
+            },
+            tokenRefs
+        })
+        : null;
+    const inputPositionChipStack = includeInputPositionEmbedding
+        ? buildTokenChipStackModule({
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.position'
+            },
+            tokenRefs: resolveVisiblePositionRefs(activationSource, tokenIndices),
+            stackRole: 'input-position-chip-stack',
+            chipRole: 'input-position-chip',
+            chipLabelRole: 'input-position-chip-label',
+            chipGroupRole: 'input-position-chip-group'
+        })
+        : null;
     const inputPositionEmbedding = includeInputPositionEmbedding
         ? buildPositionEmbeddingModule({
             semantic: {
@@ -1132,6 +1225,49 @@ function buildLayerGroup({
             ]
         })
         : null;
+    const inputTokenChipYAnchor = inputTokenChipStack && inputVocabularyEmbedding
+        ? createGroupNode({
+            role: 'input-token-chip-y-anchor',
+            semantic: buildSemantic(layerSemantic, {
+                stage: 'input-token-chip-y-anchor',
+                role: 'input-token-chip-y-anchor'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                anchorAlign: {
+                    axis: 'y',
+                    selfNodeId: inputTokenChipStack.node.id,
+                    targetNodeId: inputVocabularyEmbedding.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+                }
+            },
+            children: [inputTokenChipStack.node]
+        })
+        : null;
+    const inputTokenChipOverlay = inputTokenChipYAnchor && inputVocabularyEmbedding
+        ? createGroupNode({
+            role: 'input-token-chip-overlay',
+            semantic: buildSemantic(layerSemantic, {
+                stage: 'input-token-chip-overlay',
+                role: 'input-token-chip-overlay'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                anchorAlign: {
+                    axis: 'x',
+                    selfNodeId: inputTokenChipYAnchor.id,
+                    targetNodeId: inputVocabularyEmbedding.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                    offset: -18
+                }
+            },
+            children: [inputTokenChipYAnchor]
+        })
+        : null;
     const positionEmbeddingOverlay = inputPositionEmbedding && inputVocabularyEmbedding
         ? createGroupNode({
             role: 'input-position-embedding-overlay',
@@ -1172,6 +1308,49 @@ function buildLayerGroup({
                     children: [inputPositionEmbedding.node]
                 })
             ]
+        })
+        : null;
+    const inputPositionChipYAnchor = inputPositionChipStack && inputPositionEmbedding
+        ? createGroupNode({
+            role: 'input-position-chip-y-anchor',
+            semantic: buildSemantic(layerSemantic, {
+                stage: 'input-position-chip-y-anchor',
+                role: 'input-position-chip-y-anchor'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                anchorAlign: {
+                    axis: 'y',
+                    selfNodeId: inputPositionChipStack.node.id,
+                    targetNodeId: inputPositionEmbedding.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+                }
+            },
+            children: [inputPositionChipStack.node]
+        })
+        : null;
+    const inputPositionChipOverlay = inputPositionChipYAnchor && inputPositionEmbedding
+        ? createGroupNode({
+            role: 'input-position-chip-overlay',
+            semantic: buildSemantic(layerSemantic, {
+                stage: 'input-position-chip-overlay',
+                role: 'input-position-chip-overlay'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                anchorAlign: {
+                    axis: 'x',
+                    selfNodeId: inputPositionChipYAnchor.id,
+                    targetNodeId: inputPositionEmbedding.cardNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                    offset: -18
+                }
+            },
+            children: [inputPositionChipYAnchor]
         })
         : null;
 
@@ -1297,6 +1476,16 @@ function buildLayerGroup({
     });
 
     const flow = [
+        ...(inputTokenChipStack && inputVocabularyEmbedding
+            ? [
+                {
+                    from: inputTokenChipStack.node,
+                    to: inputVocabularyEmbedding.cardNode,
+                    key: `layer-${layerIndex}-input-token-chip-to-vocabulary-embedding`,
+                    gap: 8
+                }
+            ]
+            : []),
         ...(inputVocabularyEmbedding && embeddingInputAdd
             ? [
                 {
@@ -1323,6 +1512,16 @@ function buildLayerGroup({
                     targetAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
                     route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                     gap: 10
+                }
+            ]
+            : []),
+        ...(inputPositionChipStack && inputPositionEmbedding
+            ? [
+                {
+                    from: inputPositionChipStack.node,
+                    to: inputPositionEmbedding.cardNode,
+                    key: `layer-${layerIndex}-input-position-chip-to-position-embedding`,
+                    gap: 8
                 }
             ]
             : []),
@@ -1398,7 +1597,9 @@ function buildLayerGroup({
         overlayNodes: [
             embeddingAddOverlay,
             vocabularyEmbeddingOverlay,
-            positionEmbeddingOverlay
+            inputTokenChipOverlay,
+            positionEmbeddingOverlay,
+            inputPositionChipOverlay
         ].filter(Boolean),
         flow
     };
@@ -1417,6 +1618,8 @@ function buildFinalOutputGroup({
     tokenRefs = [],
     anchorTargetNode = null
 } = {}) {
+    const UNEMBEDDING_CARD_WIDTH = 196;
+    const UNEMBEDDING_OUTPUT_GAP = 14;
     const COLUMN_WIDTHS = {
         residual: 136,
         layerNorm: 148,
@@ -1452,6 +1655,40 @@ function buildFinalOutputGroup({
             role: 'module'
         }
     });
+    const chosenTokenChipStack = buildTokenChipStackModule({
+        semantic: {
+            componentKind: 'logits',
+            stage: 'output'
+        },
+        tokenRefs: resolveGeneratedTokenRefs(tokenRefs, activationSource),
+        stackRole: 'chosen-token-chip-stack',
+        chipRole: 'chosen-token-chip',
+        chipLabelRole: 'chosen-token-chip-label',
+        chipGroupRole: 'chosen-token-chip-group'
+    });
+    const unembeddingBody = chosenTokenChipStack
+        ? createGroupNode({
+            role: 'chosen-token-output',
+            semantic: {
+                componentKind: 'logits',
+                stage: 'output',
+                role: 'chosen-token-output'
+            },
+            direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+            gapKey: 'inline',
+            align: 'center',
+            children: [
+                unembeddingModule.node,
+                chosenTokenChipStack.node
+            ],
+            metadata: {
+                gapOverride: UNEMBEDDING_OUTPUT_GAP
+            }
+        })
+        : unembeddingModule.node;
+    COLUMN_WIDTHS.unembedding = chosenTokenChipStack
+        ? (UNEMBEDDING_CARD_WIDTH + chosenTokenChipStack.width + UNEMBEDDING_OUTPUT_GAP + 10)
+        : COLUMN_WIDTHS.unembedding;
 
     const node = createGroupNode({
         role: 'final-output',
@@ -1487,7 +1724,7 @@ function buildFinalOutputGroup({
                 semantic: buildSemantic(baseSemantic, { stage: 'unembedding', role: 'unembedding' }),
                 width: COLUMN_WIDTHS.unembedding,
                 height: 156,
-                child: unembeddingModule.node
+                child: unembeddingBody
             })
         ]
     });
@@ -1510,6 +1747,13 @@ function buildFinalOutputGroup({
         to: unembeddingModule.cardNode,
         key: 'final-output-unembedding'
     });
+    if (chosenTokenChipStack) {
+        flow.push({
+            from: unembeddingModule.cardNode,
+            to: chosenTokenChipStack.node,
+            key: 'final-output-chosen-token'
+        });
+    }
 
     return {
         node,
@@ -1521,7 +1765,9 @@ function buildFinalOutputGroup({
 
 function buildLogitsModule({
     tokenRefs = [],
-    activationSource = null
+    activationSource = null,
+    includeUnembedding = true,
+    title = 'Logits'
 } = {}) {
     const baseSemantic = {
         componentKind: 'logits',
@@ -1557,30 +1803,34 @@ function buildLogitsModule({
         metadata: createMeasureMetadata(SUMMARY_LOGIT_COLS, Math.max(1, logitEntries.length))
     });
 
-    const unembeddingNode = createMatrixNode({
-        role: 'unembedding',
-        semantic: buildSemantic(baseSemantic, { stage: 'unembedding', role: 'unembedding' }),
-        label: buildLabel('W_U', 'W_U'),
-        dimensions: {
-            rows: D_MODEL,
-            cols: VOCAB_SIZE
-        },
-        presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
-        shape: VIEW2D_MATRIX_SHAPES.MATRIX,
-        visual: {
-            styleKey: VIEW2D_STYLE_KEYS.MATRIX_WEIGHT
-        }
-    });
+    const unembeddingNode = includeUnembedding
+        ? createMatrixNode({
+            role: 'unembedding',
+            semantic: buildSemantic(baseSemantic, { stage: 'unembedding', role: 'unembedding' }),
+            label: buildLabel('W_U', 'W_U'),
+            dimensions: {
+                rows: D_MODEL,
+                cols: VOCAB_SIZE
+            },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MATRIX_WEIGHT
+            }
+        })
+        : null;
 
-    const node = createModuleGroup(baseSemantic, 'Logits', [
-        unembeddingNode,
+    const node = createModuleGroup(baseSemantic, title, [
+        ...(unembeddingNode ? [unembeddingNode] : []),
         logitsNode
     ]);
 
     return {
         node,
-        entryNode: node,
-        exitNode: logitsNode
+        entryNode: unembeddingNode || logitsNode,
+        exitNode: logitsNode,
+        logitsNode,
+        unembeddingNode
     };
 }
 
@@ -1621,7 +1871,8 @@ export function buildTransformerSceneModel({
     headDetailTarget = null,
     concatDetailTarget = null,
     outputProjectionDetailTarget = null,
-    mlpDetailTarget = null
+    mlpDetailTarget = null,
+    layerNormDetailTarget = null
 } = {}) {
     const resolvedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : NUM_LAYERS;
     const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
@@ -1637,9 +1888,16 @@ export function buildTransformerSceneModel({
     const requestedMlpDetailTarget = requestedOutputProjectionDetailTarget
         ? null
         : normalizeMlpDetailTarget(mlpDetailTarget);
+    const requestedLayerNormDetailTarget = (
+        requestedOutputProjectionDetailTarget
+        || requestedMlpDetailTarget
+    )
+        ? null
+        : normalizeLayerNormDetailTarget(layerNormDetailTarget, resolvedLayerCount);
     const requestedHeadDetailTarget = (
         requestedOutputProjectionDetailTarget
         || requestedMlpDetailTarget
+        || requestedLayerNormDetailTarget
     )
         ? null
         : normalizeHeadDetailTarget(headDetailTarget);
@@ -1647,6 +1905,7 @@ export function buildTransformerSceneModel({
     const resolvedConcatDetailTarget = requestedConcatDetailTarget;
     const resolvedOutputProjectionDetailTarget = requestedOutputProjectionDetailTarget;
     const resolvedMlpDetailTarget = requestedMlpDetailTarget;
+    const resolvedLayerNormDetailTarget = requestedLayerNormDetailTarget;
     const headDetailPreview = buildHeadDetailPreview({
         activationSource,
         tokenRefs,
@@ -1687,6 +1946,16 @@ export function buildTransformerSceneModel({
             activationSource,
             mlpDetailTarget: resolvedMlpDetailTarget,
             tokenRefs,
+            visualTokens: resolvedTokens,
+            isSmallScreen
+        })
+        : null;
+    const layerNormDetailScene = resolvedLayerNormDetailTarget
+        ? buildLayerNormDetailSceneModel({
+            activationSource,
+            layerNormDetailTarget: resolvedLayerNormDetailTarget,
+            tokenRefs,
+            layerCount: resolvedLayerCount,
             visualTokens: resolvedTokens,
             isSmallScreen
         })
@@ -1791,7 +2060,9 @@ export function buildTransformerSceneModel({
             outputProjectionDetailPreview,
             outputProjectionDetailScene,
             mlpDetailTarget: resolvedMlpDetailTarget,
-            mlpDetailScene
+            mlpDetailScene,
+            layerNormDetailTarget: resolvedLayerNormDetailTarget,
+            layerNormDetailScene
         }
     });
 }

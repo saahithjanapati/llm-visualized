@@ -14,6 +14,8 @@ import {
 } from '../utils/layerNormLabels.js';
 import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
+export const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT-2 (124 M)';
+
 export function normalizeOptionalIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
 }
@@ -81,6 +83,31 @@ export function resolveMlpDetailTarget(target = null) {
         return null;
     }
     return {
+        layerIndex
+    };
+}
+
+export function resolveLayerNormDetailTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const explicitKind = String(target.layerNormKind || '').trim().toLowerCase();
+    const layerNormKind = (
+        explicitKind === 'ln1' || explicitKind === 'ln2' || explicitKind === 'final'
+    )
+        ? explicitKind
+        : resolveLayerNormKindFromSemanticStage(target.stage);
+    if (!layerNormKind) return null;
+    const layerIndex = normalizeOptionalIndex(target.layerIndex);
+    if (layerNormKind === 'final') {
+        return {
+            layerNormKind,
+            ...(Number.isFinite(layerIndex) ? { layerIndex } : {})
+        };
+    }
+    if (!Number.isFinite(layerIndex)) {
+        return null;
+    }
+    return {
+        layerNormKind,
         layerIndex
     };
 }
@@ -177,6 +204,26 @@ function buildSemanticHoverInfo({
     return info;
 }
 
+function resolveSemanticTokenLabel(hit = null, tokenIndex = null) {
+    return resolvePreferredTokenLabel({
+        tokenLabel: hit?.entry?.metadata?.tokenLabel
+            || hit?.node?.metadata?.tokenLabel
+            || '',
+        tokenIndex
+    });
+}
+
+function resolveSemanticPositionIndex(hit = null, tokenIndex = null) {
+    const rawPositionIndex = hit?.entry?.semantic?.positionIndex
+        ?? hit?.node?.semantic?.positionIndex
+        ?? hit?.entry?.metadata?.positionIndex
+        ?? hit?.node?.metadata?.positionIndex;
+    if (Number.isFinite(rawPositionIndex)) {
+        return Math.max(1, Math.floor(rawPositionIndex));
+    }
+    return Number.isFinite(tokenIndex) ? tokenIndex + 1 : null;
+}
+
 export function buildSemanticNodeHoverPayload(hit = null) {
     const entry = hit?.entry || null;
     const semantic = entry?.semantic || hit?.node?.semantic || null;
@@ -198,6 +245,81 @@ export function buildSemanticNodeHoverPayload(hit = null) {
                 layerNormKind,
                 suppressTokenChip: true
             })
+        };
+    }
+
+    if (
+        role === 'input-token-chip'
+        || role === 'input-token-chip-label'
+        || role === 'input-token-chip-group'
+    ) {
+        const tokenIndex = normalizeOptionalIndex(semantic.tokenIndex);
+        const tokenLabel = resolveSemanticTokenLabel(hit, tokenIndex);
+        const positionIndex = resolveSemanticPositionIndex(hit, tokenIndex);
+        return {
+            label: 'Input Token',
+            info: {
+                ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                ...(tokenLabel.length ? { tokenLabel } : {}),
+                ...(Number.isFinite(positionIndex) ? { positionIndex } : {}),
+                activationData: {
+                    label: 'Input Token',
+                    stage: 'embedding.token',
+                    ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                    ...(tokenLabel.length ? { tokenLabel } : {}),
+                    ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
+                }
+            }
+        };
+    }
+
+    if (
+        role === 'input-position-chip'
+        || role === 'input-position-chip-label'
+        || role === 'input-position-chip-group'
+    ) {
+        const tokenIndex = normalizeOptionalIndex(semantic.tokenIndex);
+        const tokenLabel = resolveSemanticTokenLabel(hit, tokenIndex);
+        const positionIndex = resolveSemanticPositionIndex(hit, tokenIndex);
+        return {
+            label: 'Input Position',
+            info: {
+                ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                ...(tokenLabel.length ? { tokenLabel } : {}),
+                ...(Number.isFinite(positionIndex) ? { positionIndex } : {}),
+                activationData: {
+                    label: 'Input Position',
+                    stage: 'embedding.position',
+                    ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                    ...(tokenLabel.length ? { tokenLabel } : {}),
+                    ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
+                }
+            }
+        };
+    }
+
+    if (
+        role === 'chosen-token-chip'
+        || role === 'chosen-token-chip-label'
+        || role === 'chosen-token-chip-group'
+    ) {
+        const tokenIndex = normalizeOptionalIndex(semantic.tokenIndex);
+        const tokenLabel = resolveSemanticTokenLabel(hit, tokenIndex);
+        const positionIndex = resolveSemanticPositionIndex(hit, tokenIndex);
+        return {
+            label: 'Chosen Token',
+            info: {
+                ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                ...(tokenLabel.length ? { tokenLabel } : {}),
+                ...(Number.isFinite(positionIndex) ? { positionIndex } : {}),
+                activationData: {
+                    label: 'Chosen Token',
+                    stage: 'generation.chosen',
+                    ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                    ...(tokenLabel.length ? { tokenLabel } : {}),
+                    ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
+                }
+            }
         };
     }
 
@@ -268,6 +390,17 @@ export function buildMlpDetailSemanticTarget(target = null, role = 'module') {
         componentKind: 'mlp',
         layerIndex: resolvedTarget.layerIndex,
         stage: 'mlp',
+        role
+    });
+}
+
+export function buildLayerNormDetailSemanticTarget(target = null, role = 'module') {
+    const resolvedTarget = resolveLayerNormDetailTarget(target);
+    if (!resolvedTarget) return null;
+    return buildSemanticTarget({
+        componentKind: 'layer-norm',
+        ...(Number.isFinite(resolvedTarget.layerIndex) ? { layerIndex: resolvedTarget.layerIndex } : {}),
+        stage: resolvedTarget.layerNormKind === 'final' ? 'final-ln' : resolvedTarget.layerNormKind,
         role
     });
 }
@@ -485,12 +618,24 @@ export function resolveDetailTargetsFromSemanticTarget(target = null) {
     )
         ? resolveMlpDetailTarget(safeTarget)
         : null;
+    const layerNormDetailTarget = (
+        !headDetailTarget
+        && !outputProjectionDetailTarget
+        && !mlpDetailTarget
+        && safeTarget?.componentKind === 'layer-norm'
+    )
+        ? resolveLayerNormDetailTarget({
+            layerNormKind: resolveLayerNormKindFromSemanticStage(safeTarget?.stage),
+            layerIndex: safeTarget?.layerIndex
+        })
+        : null;
 
     return {
         headDetailTarget,
         concatDetailTarget: null,
         outputProjectionDetailTarget,
-        mlpDetailTarget
+        mlpDetailTarget,
+        layerNormDetailTarget
     };
 }
 
@@ -508,6 +653,7 @@ export function resolveTransformerView2dOpenTransitionMode({
         detailTargets.concatDetailTarget
         || detailTargets.outputProjectionDetailTarget
         || detailTargets.mlpDetailTarget
+        || detailTargets.layerNormDetailTarget
     ) {
         return '';
     }
@@ -518,9 +664,16 @@ export function hasActiveDetailTarget({
     headDetailTarget = null,
     concatDetailTarget = null,
     outputProjectionDetailTarget = null,
-    mlpDetailTarget = null
+    mlpDetailTarget = null,
+    layerNormDetailTarget = null
 } = {}) {
-    return !!(headDetailTarget || concatDetailTarget || outputProjectionDetailTarget || mlpDetailTarget);
+    return !!(
+        headDetailTarget
+        || concatDetailTarget
+        || outputProjectionDetailTarget
+        || mlpDetailTarget
+        || layerNormDetailTarget
+    );
 }
 
 export function resolveActiveSemanticTarget({
@@ -528,7 +681,8 @@ export function resolveActiveSemanticTarget({
     headDetailTarget = null,
     concatDetailTarget = null,
     outputProjectionDetailTarget = null,
-    mlpDetailTarget = null
+    mlpDetailTarget = null,
+    layerNormDetailTarget = null
 } = {}) {
     if (headDetailTarget) return buildHeadDetailSemanticTarget(headDetailTarget);
     if (concatDetailTarget) {
@@ -538,6 +692,7 @@ export function resolveActiveSemanticTarget({
     }
     if (outputProjectionDetailTarget) return buildOutputProjectionDetailSemanticTarget(outputProjectionDetailTarget);
     if (mlpDetailTarget) return buildMlpDetailSemanticTarget(mlpDetailTarget);
+    if (layerNormDetailTarget) return buildLayerNormDetailSemanticTarget(layerNormDetailTarget);
     return buildSemanticTarget(baseSemanticTarget);
 }
 
@@ -547,16 +702,24 @@ export function resolveActiveFocusLabel({
     headDetailTarget = null,
     concatDetailTarget = null,
     outputProjectionDetailTarget = null,
-    mlpDetailTarget = null
+    mlpDetailTarget = null,
+    layerNormDetailTarget = null
 } = {}) {
     const semanticTarget = resolveActiveSemanticTarget({
         baseSemanticTarget,
         headDetailTarget,
         concatDetailTarget,
         outputProjectionDetailTarget,
-        mlpDetailTarget
+        mlpDetailTarget,
+        layerNormDetailTarget
     });
-    if (headDetailTarget || concatDetailTarget || outputProjectionDetailTarget || mlpDetailTarget) {
+    if (
+        headDetailTarget
+        || concatDetailTarget
+        || outputProjectionDetailTarget
+        || mlpDetailTarget
+        || layerNormDetailTarget
+    ) {
         return describeTransformerView2dTarget(semanticTarget);
     }
     return String(baseFocusLabel || '').trim() || describeTransformerView2dTarget(semanticTarget);
@@ -568,7 +731,8 @@ export function resolveFocusSemanticTargets({
     headDetailTarget = null,
     concatDetailTarget = null,
     outputProjectionDetailTarget = null,
-    mlpDetailTarget = null
+    mlpDetailTarget = null,
+    layerNormDetailTarget = null
 } = {}) {
     const candidates = [];
     if (headDetailTarget) {
@@ -593,6 +757,12 @@ export function resolveFocusSemanticTargets({
             buildMlpDetailSemanticTarget(mlpDetailTarget, 'module-title'),
             buildMlpDetailSemanticTarget(mlpDetailTarget, 'module')
         );
+    } else if (layerNormDetailTarget) {
+        candidates.push(
+            buildLayerNormDetailSemanticTarget(layerNormDetailTarget, 'module-card'),
+            buildLayerNormDetailSemanticTarget(layerNormDetailTarget, 'module-title'),
+            buildLayerNormDetailSemanticTarget(layerNormDetailTarget, 'module')
+        );
     } else {
         const activeTarget = buildSemanticTarget(semanticTarget)
             || resolveActiveSemanticTarget({
@@ -600,7 +770,8 @@ export function resolveFocusSemanticTargets({
                 headDetailTarget,
                 concatDetailTarget,
                 outputProjectionDetailTarget,
-                mlpDetailTarget
+                mlpDetailTarget,
+                layerNormDetailTarget
             });
         if (activeTarget?.componentKind === 'layer-norm') {
             candidates.push(
@@ -672,6 +843,16 @@ export function isMlpOverviewEntry(entry = null) {
         || entry.role === 'module';
 }
 
+export function isLayerNormOverviewEntry(entry = null) {
+    const semantic = entry?.semantic;
+    if (!semantic || semantic.componentKind !== 'layer-norm') return false;
+    const stage = String(semantic.stage || '').trim();
+    if (stage !== 'ln1' && stage !== 'ln2' && stage !== 'final-ln') return false;
+    return entry.role === 'module-card'
+        || entry.role === 'module-title'
+        || entry.role === 'module';
+}
+
 function isTopUnembeddingLabel(lower = '') {
     return lower.includes('vocab embedding (top)')
         || lower.includes('vocabulary embedding (top)')
@@ -691,8 +872,72 @@ function resolveLayerLabel(layerIndex = null) {
     return Number.isFinite(layerIndex) ? `Layer ${Math.floor(layerIndex) + 1}` : '';
 }
 
+function resolveTransformerView2dStageName(target = null) {
+    if (!target) return TRANSFORMER_VIEW2D_OVERVIEW_LABEL;
+
+    if (target.componentKind === 'layer-norm') {
+        if (target.stage === 'ln1') return 'LayerNorm 1';
+        if (target.stage === 'ln2') return 'LayerNorm 2';
+        if (target.stage === 'final-ln') return 'Final LayerNorm';
+        return 'LayerNorm';
+    }
+
+    if (target.componentKind === 'mhsa') {
+        if (Number.isFinite(target.headIndex)) {
+            return `Attention Head ${Math.floor(target.headIndex) + 1}`;
+        }
+        if (target.stage === 'concatenate') return 'Output Projection';
+        return 'Self-Attention';
+    }
+
+    if (target.componentKind === 'output-projection') {
+        return 'Output Projection';
+    }
+
+    if (target.componentKind === 'mlp') {
+        return 'Multilayer Perceptron';
+    }
+
+    if (target.componentKind === 'embedding') {
+        if (target.stage === 'token') return 'Token Embeddings';
+        if (target.stage === 'position') return 'Position Embeddings';
+        return 'Embeddings';
+    }
+
+    if (target.componentKind === 'residual') {
+        if (target.stage === 'incoming') return 'Incoming Residual';
+        if (target.stage === 'post-attn-add') return 'Post-Attention Residual';
+        if (target.stage === 'post-mlp-add') return 'Post-MLP Residual';
+        if (target.stage === 'outgoing') return 'Outgoing Residual';
+        return 'Residual Stream';
+    }
+
+    if (target.componentKind === 'logits') {
+        if (target.role === 'unembedding') return 'Unembedding';
+        return 'Logits';
+    }
+
+    const description = describeTransformerView2dTarget(target);
+    const layerLabel = resolveLayerLabel(target?.layerIndex);
+    if (layerLabel && description.startsWith(`${layerLabel} `)) {
+        return description.slice(layerLabel.length + 1);
+    }
+    return description;
+}
+
+export function resolveTransformerView2dStageHeader(target = null) {
+    const safeTarget = buildSemanticTarget(target);
+    const layerLabel = resolveLayerLabel(safeTarget?.layerIndex);
+    const stageLabel = resolveTransformerView2dStageName(safeTarget);
+    return {
+        layerLabel,
+        stageLabel,
+        fullLabel: layerLabel ? `${layerLabel} ${stageLabel}` : stageLabel
+    };
+}
+
 export function describeTransformerView2dTarget(target = null) {
-    if (!target) return 'Transformer overview';
+    if (!target) return TRANSFORMER_VIEW2D_OVERVIEW_LABEL;
     const layerLabel = resolveLayerLabel(target.layerIndex);
     if (target.componentKind === 'embedding') {
         if (target.stage === 'token') return 'Token embeddings';
@@ -743,7 +988,7 @@ export function describeTransformerView2dTarget(target = null) {
         if (target.role === 'logits-topk') return 'Logits';
         return 'Logits';
     }
-    return 'Transformer overview';
+    return TRANSFORMER_VIEW2D_OVERVIEW_LABEL;
 }
 
 export function resolveTransformerView2dActionContext(selectionInfo = null, normalizedLabel = '') {

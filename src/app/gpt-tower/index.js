@@ -33,6 +33,7 @@ import {
 import { initSelectionPanel } from '../../ui/selectionPanel.js';
 import { resolveTransformerView2dRoute } from '../../ui/selectionPanelTransformerView2d.js';
 import { initPromptTokenStrip } from '../../ui/promptTokenStrip.js';
+import { TRANSFORMER_VIEW2D_OVERVIEW_LABEL } from '../../view2d/transformerView2dTargets.js';
 import {
     dispatchTokenChipHoverSync,
     tokenChipEntryListsMatch
@@ -274,7 +275,7 @@ transformerView2dBtn?.addEventListener('click', (event) => {
     showTopControls();
     selectionPanel.openTransformerView2d({
         semanticTarget: null,
-        focusLabel: 'Transformer overview'
+        focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_LABEL
     });
 });
 

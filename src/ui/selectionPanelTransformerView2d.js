@@ -18,17 +18,21 @@ import {
     describeTransformerView2dTarget,
     hasActiveDetailTarget as hasActiveDetailTargetState,
     isConcatOverviewEntry,
+    isLayerNormOverviewEntry,
     isMlpOverviewEntry,
     isMhsaHeadOverviewEntry,
     isOutputProjectionOverviewEntry,
+    TRANSFORMER_VIEW2D_OVERVIEW_LABEL,
     resolveActiveFocusLabel,
     resolveActiveSemanticTarget,
     resolveConcatDetailTarget,
     resolveDetailTargetsFromSemanticTarget,
     resolveFocusSemanticTargets,
     resolveHeadDetailTarget,
+    resolveLayerNormDetailTarget,
     resolveMlpDetailTarget,
     resolveOutputProjectionDetailTarget,
+    resolveTransformerView2dStageHeader,
     resolveTransformerView2dActionContext,
     resolveTransformerView2dOpenTransitionMode
 } from '../view2d/transformerView2dTargets.js';
@@ -44,7 +48,10 @@ import {
     buildTransformerView2dOverviewState,
     TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL
 } from './selectionPanelTransformerView2dStateUtils.js';
-import { hasView2dPointerExceededClickSlop } from './selectionPanelTransformerView2dInteractionUtils.js';
+import {
+    resolveView2dPointerMoveIntent,
+    shouldTreatView2dPointerReleaseAsClick
+} from './selectionPanelTransformerView2dInteractionUtils.js';
 import {
     hasTransformerView2dLockedDetailSelection,
     isTransformerView2dDetailSelectionLockActive,
@@ -75,7 +82,6 @@ export {
     syncTransformerView2dRoute
 };
 
-const VIEW2D_DETAIL_ACTION_FOCUS = 'focus-selection';
 const VIEW2D_DETAIL_ACTION_FIT = 'fit-scene';
 const VIEW2D_DETAIL_ACTION_EXIT_DEEP = 'exit-deep-detail';
 const VIEW2D_INTERACTION_SETTLE_MS = 140;
@@ -173,7 +179,8 @@ function resolveView2dSelectedTokenContext({
 function resolveActiveDetailScene(scene = null, {
     headDetailTarget = null,
     outputProjectionDetailTarget = null,
-    mlpDetailTarget = null
+    mlpDetailTarget = null,
+    layerNormDetailTarget = null
 } = {}) {
     if (!scene?.metadata) return null;
     if (headDetailTarget) {
@@ -186,6 +193,9 @@ function resolveActiveDetailScene(scene = null, {
     }
     if (mlpDetailTarget) {
         return scene.metadata.mlpDetailScene || null;
+    }
+    if (layerNormDetailTarget) {
+        return scene.metadata.layerNormDetailScene || null;
     }
     return null;
 }
@@ -312,18 +322,20 @@ export function createTransformerView2dDetailView(panelEl) {
         <div class="detail-transformer-view2d-stage">
             <div class="detail-transformer-view2d-hud">
                 <div class="detail-transformer-view2d-toolbar">
-                    <div class="detail-transformer-view2d-toolbar-copy">
-                        <div class="detail-transformer-view2d-toolbar-title">2D canvas prototype</div>
-                        <div class="detail-transformer-view2d-hint">Drag or use one finger to pan. Scroll, pinch, or use +/- to zoom. Use arrows or WASD to move. Use Focus selection to return to the current component. Use Back to graph to return to the full transformer overview.</div>
+                    <div class="detail-transformer-view2d-toolbar-copy" aria-live="polite" aria-atomic="true">
+                        <div
+                            class="detail-transformer-view2d-toolbar-title"
+                            data-transformer-view2d-readout="layer"
+                            hidden
+                        ></div>
+                        <div
+                            class="detail-transformer-view2d-stage-title"
+                            data-transformer-view2d-readout="stage"
+                        >
+                            ${TRANSFORMER_VIEW2D_OVERVIEW_LABEL}
+                        </div>
                     </div>
                     <div class="detail-transformer-view2d-toolbar-actions">
-                        <button
-                            type="button"
-                            class="detail-transformer-view2d-action"
-                            data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FOCUS}"
-                        >
-                            Focus selection
-                        </button>
                         <button
                             type="button"
                             class="detail-transformer-view2d-action"
@@ -331,20 +343,15 @@ export function createTransformerView2dDetailView(panelEl) {
                         >
                             Fit scene
                         </button>
-                    </div>
-                </div>
-                <div class="detail-transformer-view2d-readout" aria-live="polite">
-                    <div class="detail-transformer-view2d-stat">
-                        <span class="detail-transformer-view2d-stat-label">Focus</span>
-                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="focus">${TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL}</span>
-                    </div>
-                    <div class="detail-transformer-view2d-stat">
-                        <span class="detail-transformer-view2d-stat-label">Zoom</span>
-                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="zoom">100%</span>
-                    </div>
-                    <div class="detail-transformer-view2d-stat">
-                        <span class="detail-transformer-view2d-stat-label">Scene</span>
-                        <span class="detail-transformer-view2d-stat-value" data-transformer-view2d-readout="scene">0 layers / 0 tokens</span>
+                        <button
+                            type="button"
+                            class="detail-transformer-view2d-action detail-transformer-view2d-action--back"
+                            data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_DEEP}"
+                            aria-hidden="true"
+                            hidden
+                        >
+                            Back to graph
+                        </button>
                     </div>
                 </div>
             </div>
@@ -354,15 +361,6 @@ export function createTransformerView2dDetailView(panelEl) {
                 role="group"
                 aria-label="Scalable 2D transformer canvas. Drag or use one finger to pan, pinch or scroll to zoom, and use arrow keys or W A S D to move around."
             >
-                <div class="detail-transformer-view2d-deep-controls" aria-hidden="true" hidden>
-                    <button
-                        type="button"
-                        class="detail-transformer-view2d-action detail-transformer-view2d-action--deep-exit"
-                        data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_DEEP}"
-                    >
-                        Back to graph
-                    </button>
-                </div>
                 <div class="detail-transformer-view2d-detail-frame" aria-hidden="true"></div>
                 <canvas class="detail-transformer-view2d-canvas" aria-label="Scalable 2D transformer canvas"></canvas>
                 <div
@@ -388,8 +386,6 @@ export function createTransformerView2dDetailView(panelEl) {
 
     const canvas = root.querySelector('.detail-transformer-view2d-canvas');
     const canvasCard = root.querySelector('.detail-transformer-view2d-canvas-card');
-    const deepControls = root.querySelector('.detail-transformer-view2d-deep-controls');
-    const deepExitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_DEEP}"]`);
     const detailFrame = root.querySelector('.detail-transformer-view2d-detail-frame');
     const tokenStrip = root.querySelector('.detail-transformer-view2d-token-strip');
     const tokenStripTokens = root.querySelector('[data-transformer-view2d-role="token-strip-tokens"]');
@@ -397,11 +393,10 @@ export function createTransformerView2dDetailView(panelEl) {
         container: tokenStripTokens
     });
     const hud = root.querySelector('.detail-transformer-view2d-hud');
-    const focusBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FOCUS}"]`);
     const fitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"]`);
-    const focusReadout = root.querySelector('[data-transformer-view2d-readout="focus"]');
-    const zoomReadout = root.querySelector('[data-transformer-view2d-readout="zoom"]');
-    const sceneReadout = root.querySelector('[data-transformer-view2d-readout="scene"]');
+    const backToGraphBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_DEEP}"]`);
+    const stageLayerReadout = root.querySelector('[data-transformer-view2d-readout="layer"]');
+    const stageTitleReadout = root.querySelector('[data-transformer-view2d-readout="stage"]');
     const hoverLabelOverlay = createHoverLabelOverlay({
         zIndex: 12
     });
@@ -438,6 +433,7 @@ export function createTransformerView2dDetailView(panelEl) {
         concatDetailTarget: null,
         outputProjectionDetailTarget: null,
         mlpDetailTarget: null,
+        layerNormDetailTarget: null,
         detailSemanticTargets: [],
         detailFocusLabel: '',
         pendingDetailInteractionTargets: [],
@@ -447,7 +443,6 @@ export function createTransformerView2dDetailView(panelEl) {
         headDetailDepthAutoReentryBlocked: false,
         semanticTarget: null,
         focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL,
-        sceneLabel: '0 layers / 0 tokens',
         detailSceneIndex: null,
         detailSceneFocus: null,
         detailSceneHoverSignature: '',
@@ -566,14 +561,20 @@ export function createTransformerView2dDetailView(panelEl) {
     }
 
     function hasSceneBackedDetailTarget() {
-        return !!(state.headDetailTarget || state.outputProjectionDetailTarget || state.mlpDetailTarget);
+        return !!(
+            state.headDetailTarget
+            || state.outputProjectionDetailTarget
+            || state.mlpDetailTarget
+            || state.layerNormDetailTarget
+        );
     }
 
     function setDetailTargets({
         headDetailTarget = null,
         concatDetailTarget = null,
         outputProjectionDetailTarget = null,
-        mlpDetailTarget = null
+        mlpDetailTarget = null,
+        layerNormDetailTarget = null
     } = {}) {
         const redirectedConcatDetailTarget = resolveConcatDetailTarget(concatDetailTarget);
         const resolvedOutputProjectionDetailTarget = resolveOutputProjectionDetailTarget(outputProjectionDetailTarget)
@@ -586,9 +587,16 @@ export function createTransformerView2dDetailView(panelEl) {
         const resolvedMlpDetailTarget = resolvedOutputProjectionDetailTarget
             ? null
             : resolveMlpDetailTarget(mlpDetailTarget);
+        const resolvedLayerNormDetailTarget = (
+            resolvedOutputProjectionDetailTarget
+            || resolvedMlpDetailTarget
+        )
+            ? null
+            : resolveLayerNormDetailTarget(layerNormDetailTarget);
         const resolvedHeadDetailTarget = (
             resolvedOutputProjectionDetailTarget
             || resolvedMlpDetailTarget
+            || resolvedLayerNormDetailTarget
         )
             ? null
             : resolveHeadDetailTarget(headDetailTarget);
@@ -596,6 +604,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.concatDetailTarget = resolvedConcatDetailTarget;
         state.outputProjectionDetailTarget = resolvedOutputProjectionDetailTarget;
         state.mlpDetailTarget = resolvedMlpDetailTarget;
+        state.layerNormDetailTarget = resolvedLayerNormDetailTarget;
     }
 
     function setDetailFocusTarget({
@@ -1499,7 +1508,7 @@ export function createTransformerView2dDetailView(panelEl) {
 
         const semanticHoverKey = buildCanvasHoverTargetKey(worldHit, 'overview-node');
         if (semanticHoverKey === state.hoverTargetKey) {
-            tokenHoverSync.clearCanvasEntry({ emit: true });
+            tokenHoverSync.setCanvasEntryFromHoverPayload(semanticHoverPayload, { emit: true });
             hoverLabelOverlay.move({
                 clientX: event.clientX,
                 clientY: event.clientY
@@ -1520,7 +1529,7 @@ export function createTransformerView2dDetailView(panelEl) {
         state.hoveredResidualRow = null;
         state.detailSceneFocus = state.detailScenePinnedFocus || null;
         state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
-        tokenHoverSync.clearCanvasEntry({ emit: true });
+        tokenHoverSync.setCanvasEntryFromHoverPayload(semanticHoverPayload, { emit: true });
         resetHoverRowBlend();
         setHoverDimmingTarget(0, {
             immediate: true,
@@ -1620,7 +1629,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const isHeadDetailActive = isDetailDeepActive && hasActiveDetailTarget();
         const isHeadDetailSceneActive = isDetailDeepActive && hasSceneBackedDetailTarget();
         const isConcatDetailActive = isDetailDeepActive && !!state.concatDetailTarget;
-        const canReturnToGraphOverview = hasActiveDetailTarget();
+        const canReturnToGraphOverview = !!state.semanticTarget;
         root.classList.toggle('is-head-detail-active', isHeadDetailActive);
         root.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         root.classList.toggle('is-concat-detail-active', isConcatDetailActive);
@@ -1630,13 +1639,13 @@ export function createTransformerView2dDetailView(panelEl) {
         canvas?.classList.toggle('is-head-detail-active', isHeadDetailActive);
         canvas?.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         canvas?.classList.toggle('is-concat-detail-active', isConcatDetailActive);
-        if (deepControls) {
-            deepControls.hidden = !canReturnToGraphOverview;
-            deepControls.setAttribute('aria-hidden', canReturnToGraphOverview ? 'false' : 'true');
+        if (backToGraphBtn) {
+            backToGraphBtn.hidden = !canReturnToGraphOverview;
+            backToGraphBtn.setAttribute('aria-hidden', canReturnToGraphOverview ? 'false' : 'true');
         }
         if (hud) {
-            hud.hidden = isHeadDetailActive;
-            hud.setAttribute('aria-hidden', isHeadDetailActive ? 'true' : 'false');
+            hud.hidden = false;
+            hud.setAttribute('aria-hidden', 'false');
         }
     }
 
@@ -1764,12 +1773,14 @@ export function createTransformerView2dDetailView(panelEl) {
             headDetailTarget: state.headDetailTarget,
             concatDetailTarget: state.concatDetailTarget,
             outputProjectionDetailTarget: state.outputProjectionDetailTarget,
-            mlpDetailTarget: state.mlpDetailTarget
+            mlpDetailTarget: state.mlpDetailTarget,
+            layerNormDetailTarget: state.layerNormDetailTarget
         });
         const activeDetailScene = resolveActiveDetailScene(state.scene, {
             headDetailTarget: state.headDetailTarget,
             outputProjectionDetailTarget: state.outputProjectionDetailTarget,
-            mlpDetailTarget: state.mlpDetailTarget
+            mlpDetailTarget: state.mlpDetailTarget,
+            layerNormDetailTarget: state.layerNormDetailTarget
         });
         state.detailSceneIndex = activeDetailScene
             ? createMhsaDetailSceneIndex(activeDetailScene)
@@ -1802,7 +1813,6 @@ export function createTransformerView2dDetailView(panelEl) {
         });
         renderer.setScene(state.scene, state.layout);
         viewportController.setSceneBounds(state.layout?.sceneBounds || null);
-        state.sceneLabel = `${state.scene?.metadata?.layerCount || 0} layers / ${state.scene?.metadata?.tokenCount || 0} tokens`;
         return !!state.scene && !!state.layout;
     }
 
@@ -1853,12 +1863,13 @@ export function createTransformerView2dDetailView(panelEl) {
         return commitSceneSelection({ animate, nextDepthActive: false });
     }
 
-    function closeDetail({ animate = true } = {}) {
-        if (!hasActiveDetailTarget()) return false;
+    function openLayerNormDetail(layerNormDetailTarget = null, { animate = true } = {}) {
+        const resolvedTarget = resolveLayerNormDetailTarget(layerNormDetailTarget);
+        if (!resolvedTarget) return false;
         stopAnimation();
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
-        setDetailTargets();
+        setDetailTargets({ layerNormDetailTarget: resolvedTarget });
         return commitSceneSelection({ animate, nextDepthActive: false });
     }
 
@@ -1886,25 +1897,14 @@ export function createTransformerView2dDetailView(panelEl) {
 
     function updateReadouts() {
         syncHeadDetailChrome();
-        const activeViewportController = getActiveViewportController();
-        if (focusReadout) {
-            setNodeText(focusReadout, state.focusLabel);
+        const stageHeader = resolveTransformerView2dStageHeader(state.semanticTarget);
+        if (stageLayerReadout) {
+            setNodeText(stageLayerReadout, stageHeader.layerLabel);
+            stageLayerReadout.hidden = !stageHeader.layerLabel;
         }
-        if (zoomReadout) {
-            setNodeText(zoomReadout, `${Math.round((activeViewportController.getState().scale || 1) * 100)}%`);
-        }
-        if (sceneReadout) {
-            setNodeText(sceneReadout, state.sceneLabel);
-        }
-        if (focusBtn) {
-            const isDisabled = !state.semanticTarget;
-            if (focusBtn.disabled !== isDisabled) {
-                focusBtn.disabled = isDisabled;
-            }
-            const ariaDisabled = isDisabled ? 'true' : 'false';
-            if (focusBtn.getAttribute('aria-disabled') !== ariaDisabled) {
-                focusBtn.setAttribute('aria-disabled', ariaDisabled);
-            }
+        if (stageTitleReadout) {
+            setNodeText(stageTitleReadout, stageHeader.stageLabel);
+            stageTitleReadout.setAttribute('aria-label', stageHeader.fullLabel);
         }
     }
 
@@ -2074,7 +2074,8 @@ export function createTransformerView2dDetailView(panelEl) {
             headDetailTarget: state.headDetailTarget,
             concatDetailTarget: state.concatDetailTarget,
             outputProjectionDetailTarget: state.outputProjectionDetailTarget,
-            mlpDetailTarget: state.mlpDetailTarget
+            mlpDetailTarget: state.mlpDetailTarget,
+            layerNormDetailTarget: state.layerNormDetailTarget
         });
         for (const focusTarget of focusTargets) {
             const bounds = resolveSemanticTargetBounds(state.layout.registry, focusTarget);
@@ -2179,6 +2180,7 @@ export function createTransformerView2dDetailView(panelEl) {
             || isConcatOverviewEntry(entry)
             || isOutputProjectionOverviewEntry(entry)
             || isMlpOverviewEntry(entry)
+            || isLayerNormOverviewEntry(entry)
         ) ? 'pointer' : '';
     }
 
@@ -2208,6 +2210,14 @@ export function createTransformerView2dDetailView(panelEl) {
         }
         if (isMlpOverviewEntry(entry)) {
             return openMlpDetail({
+                layerIndex: entry.semantic.layerIndex
+            }, {
+                animate: true
+            });
+        }
+        if (isLayerNormOverviewEntry(entry)) {
+            return openLayerNormDetail({
+                layerNormKind: entry.semantic.stage === 'final-ln' ? 'final' : entry.semantic.stage,
                 layerIndex: entry.semantic.layerIndex
             }, {
                 animate: true
@@ -2391,7 +2401,8 @@ export function createTransformerView2dDetailView(panelEl) {
         pointerId = null,
         pointerType = '',
         clientX = 0,
-        clientY = 0
+        clientY = 0,
+        suppressClick = false
     } = {}) {
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
@@ -2402,7 +2413,8 @@ export function createTransformerView2dDetailView(panelEl) {
             clientY: Number.isFinite(clientY) ? clientY : 0,
             startClientX: Number.isFinite(clientX) ? clientX : 0,
             startClientY: Number.isFinite(clientY) ? clientY : 0,
-            moved: false
+            moved: false,
+            suppressClick: suppressClick === true
         };
         if (Number.isFinite(state.pointer.pointerId) && typeof canvas?.setPointerCapture === 'function') {
             try {
@@ -2524,7 +2536,8 @@ export function createTransformerView2dDetailView(panelEl) {
                     pointerId,
                     pointerType: 'touch',
                     clientX: point.clientX,
-                    clientY: point.clientY
+                    clientY: point.clientY,
+                    suppressClick: true
                 });
                 return;
             }
@@ -2567,23 +2580,27 @@ export function createTransformerView2dDetailView(panelEl) {
             return;
         }
         if (!state.pointer || state.pointer.pointerId !== event.pointerId) return;
-        const deltaX = event.clientX - state.pointer.clientX;
-        const deltaY = event.clientY - state.pointer.clientY;
+        const pointerIntent = resolveView2dPointerMoveIntent({
+            pointerType: state.pointer.pointerType,
+            startClientX: state.pointer.startClientX,
+            startClientY: state.pointer.startClientY,
+            previousClientX: state.pointer.clientX,
+            previousClientY: state.pointer.clientY,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            moved: state.pointer.moved,
+            suppressClick: state.pointer.suppressClick
+        });
         state.pointer.clientX = event.clientX;
         state.pointer.clientY = event.clientY;
-        if (!state.pointer.moved) {
-            state.pointer.moved = hasView2dPointerExceededClickSlop({
-                pointerType: state.pointer.pointerType,
-                startClientX: state.pointer.startClientX,
-                startClientY: state.pointer.startClientY,
-                clientX: event.clientX,
-                clientY: event.clientY
-            });
+        state.pointer.moved = pointerIntent.moved;
+        state.pointer.suppressClick = pointerIntent.suppressClick;
+        if (pointerIntent.shouldPan) {
+            getActiveViewportController().panBy(pointerIntent.deltaX, pointerIntent.deltaY);
+            disableAutoFrameState();
+            markInteraction(true);
+            scheduleRender();
         }
-        getActiveViewportController().panBy(deltaX, deltaY);
-        disableAutoFrameState();
-        markInteraction(true);
-        scheduleRender();
         event.preventDefault();
     }
 
@@ -2615,7 +2632,18 @@ export function createTransformerView2dDetailView(panelEl) {
             }
         }
         if (!state.pointer || state.pointer.pointerId !== event.pointerId) return;
-        const shouldTreatAsClick = state.pointer.moved !== true;
+        const pointerReleaseIntent = resolveView2dPointerMoveIntent({
+            pointerType: state.pointer.pointerType,
+            startClientX: state.pointer.startClientX,
+            startClientY: state.pointer.startClientY,
+            previousClientX: state.pointer.clientX,
+            previousClientY: state.pointer.clientY,
+            clientX: Number.isFinite(event?.clientX) ? event.clientX : state.pointer.clientX,
+            clientY: Number.isFinite(event?.clientY) ? event.clientY : state.pointer.clientY,
+            moved: state.pointer.moved,
+            suppressClick: state.pointer.suppressClick
+        });
+        const shouldTreatAsClick = shouldTreatView2dPointerReleaseAsClick(pointerReleaseIntent);
         const clickedHit = shouldTreatAsClick ? resolveCanvasScreenHit(event) : null;
         const clickedEntry = clickedHit?.entry || null;
         clearPointer(event);
@@ -2668,20 +2696,12 @@ export function createTransformerView2dDetailView(panelEl) {
         focusCanvasSurface();
         focusSelection({ animate: true });
     });
-    focusBtn?.addEventListener('click', () => {
-        clearStagedHeadDetailTransition();
-        focusSelection({ animate: true });
-        focusCanvasSurface();
-    });
     fitBtn?.addEventListener('click', () => {
         clearStagedHeadDetailTransition();
-        if (hasActiveDetailTarget()) {
-            closeDetail({ animate: false });
-        }
         fitScene({ animate: true });
         focusCanvasSurface();
     });
-    deepExitBtn?.addEventListener('click', () => {
+    backToGraphBtn?.addEventListener('click', () => {
         clearStagedHeadDetailTransition();
         returnToGraphOverview({ animate: true });
         focusCanvasSurface();
@@ -2763,6 +2783,7 @@ export function createTransformerView2dDetailView(panelEl) {
                 resolvedDetailTargets.concatDetailTarget
                 || resolvedDetailTargets.outputProjectionDetailTarget
                 || resolvedDetailTargets.mlpDetailTarget
+                || resolvedDetailTargets.layerNormDetailTarget
                 || resolvedDetailTargets.headDetailTarget
             );
             const shouldStageFocusEntry = (

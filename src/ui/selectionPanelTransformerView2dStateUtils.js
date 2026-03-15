@@ -10,7 +10,8 @@ export function buildTransformerView2dOverviewState() {
             headDetailTarget: null,
             concatDetailTarget: null,
             outputProjectionDetailTarget: null,
-            mlpDetailTarget: null
+            mlpDetailTarget: null,
+            layerNormDetailTarget: null
         },
         detailSemanticTargets: [],
         detailFocusLabel: '',

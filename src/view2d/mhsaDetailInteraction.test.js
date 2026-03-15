@@ -1264,6 +1264,8 @@ describe('MHSA detail transpose view', () => {
             index,
             projectionSourceNode,
             preScoreNode,
+            maskNode,
+            postNode,
             postCopyNode,
             headOutputNode,
             valuePostNode,
@@ -1304,6 +1306,16 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.focusState?.activeNodeIds).toContain(headOutputNode.id);
         expect(hoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode.id);
         expect(hoverState?.focusState?.activeConnectorIds).not.toContain(connectorVNode.id);
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: maskNode?.id,
+            rowIndex: 1,
+            colIndex: 0
+        });
+        expect(hoverState?.focusState?.cellSelections).toContainEqual({
+            nodeId: postNode?.id,
+            rowIndex: 1,
+            colIndex: 0
+        });
         expect(hoverState?.focusState?.cellSelections).toContainEqual({
             nodeId: postCopyNode?.id,
             rowIndex: 1,

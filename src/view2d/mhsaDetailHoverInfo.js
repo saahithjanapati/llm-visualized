@@ -1,5 +1,10 @@
 import { buildAttentionHoverInfo } from '../ui/attentionHoverInfo.js';
-import { resolvePostLayerNormResidualLabel } from '../utils/layerNormLabels.js';
+import {
+    formatLayerNormLabel,
+    formatLayerNormParamLabel,
+    resolveLayerNormKind,
+    resolvePostLayerNormResidualLabel
+} from '../utils/layerNormLabels.js';
 import {
     MLP_ACTIVATION_TOOLTIP_LABEL,
     MLP_DOWN_BIAS_TOOLTIP_LABEL,
@@ -209,14 +214,17 @@ export function buildMlpUpBiasHoverInfo(node = null) {
 export function buildMlpDownWeightHoverInfo(node = null) {
     const label = MLP_DOWN_TOOLTIP_LABEL;
     const info = buildProjectionHoverInfo(node, label, {
-        stage: 'mlp.down'
+        stage: 'mlp.down',
+        suppressTokenChip: true
     }) || {};
 
     return {
         ...info,
+        suppressTokenChip: true,
         activationData: {
             ...(info.activationData || {}),
-            stage: 'mlp.down'
+            stage: 'mlp.down',
+            suppressTokenChip: true
         }
     };
 }
@@ -259,6 +267,111 @@ export function buildPostLayerNormResidualHoverInfo(node = null, rowItem = null)
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
                 : {})
+        }
+    };
+}
+
+function resolveLayerNormStageKey(node = null, rowItem = null) {
+    const rowStage = String(rowItem?.semantic?.stage || '').trim();
+    if (rowStage.length) return rowStage;
+    return String(node?.semantic?.stage || '').trim();
+}
+
+function resolveLayerNormHoverKind(node = null, rowItem = null) {
+    const stage = resolveLayerNormStageKey(node, rowItem);
+    return resolveLayerNormKind({
+        stage,
+        explicitKind: node?.semantic?.layerNormKind || rowItem?.semantic?.layerNormKind || null
+    });
+}
+
+function buildLayerNormHoverInfo(node = null, rowItem = null, {
+    label = '',
+    stage = '',
+    sourceStage = ''
+} = {}) {
+    const tokenInfo = createTokenInfo(rowItem) || {};
+    const layerNormKind = resolveLayerNormHoverKind(node, rowItem);
+    const resolvedStage = String(stage || resolveLayerNormStageKey(node, rowItem) || '').trim().toLowerCase();
+    const resolvedSourceStage = String(sourceStage || resolveLayerNormStageKey(node, rowItem) || '').trim().toLowerCase();
+    const info = buildProjectionHoverInfo(node, label, {
+        stage: resolvedStage,
+        ...(resolvedSourceStage.length ? { sourceStage: resolvedSourceStage } : {}),
+        ...(layerNormKind ? { layerNormKind } : {}),
+        ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+        ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+            ? { tokenLabel: tokenInfo.tokenLabel }
+            : {})
+    }) || {};
+
+    return {
+        ...tokenInfo,
+        ...info,
+        ...(layerNormKind ? { layerNormKind } : {}),
+        activationData: {
+            ...(info.activationData || {}),
+            stage: resolvedStage,
+            ...(resolvedSourceStage.length ? { sourceStage: resolvedSourceStage } : {}),
+            ...(layerNormKind ? { layerNormKind } : {}),
+            ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
+            ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
+                ? { tokenLabel: tokenInfo.tokenLabel }
+                : {})
+        }
+    };
+}
+
+export function buildLayerNormActivationHoverInfo(node = null, rowItem = null, {
+    variant = 'input'
+} = {}) {
+    const layerNormKind = resolveLayerNormHoverKind(node, rowItem);
+    const layerNormLabel = formatLayerNormLabel(layerNormKind);
+    const actualStage = resolveLayerNormStageKey(node, rowItem).toLowerCase();
+    if (variant === 'output' && (actualStage === 'ln1.shift' || actualStage === 'ln2.shift')) {
+        return buildPostLayerNormResidualHoverInfo(node, rowItem);
+    }
+
+    let label = `${layerNormLabel} Input Vector`;
+    let hoverStage = layerNormKind === 'final' ? 'final_ln.input' : `${layerNormKind || 'ln1'}.input`;
+    if (variant === 'normalized') {
+        label = `${layerNormLabel} Normalized Vector`;
+        hoverStage = actualStage || (layerNormKind === 'final' ? 'final_ln.norm' : `${layerNormKind || 'ln1'}.norm`);
+    } else if (variant === 'scaled') {
+        label = `${layerNormLabel} Product Vector`;
+        hoverStage = layerNormKind === 'final' ? 'final_ln.product' : `${layerNormKind || 'ln1'}.product`;
+    } else if (variant === 'output') {
+        label = `${layerNormLabel} Output Vector`;
+        hoverStage = layerNormKind === 'final' ? 'final_ln.output' : `${layerNormKind || 'ln1'}.output`;
+    }
+
+    return buildLayerNormHoverInfo(node, rowItem, {
+        label,
+        stage: hoverStage,
+        sourceStage: actualStage
+    });
+}
+
+export function buildLayerNormParamHoverInfo(node = null, {
+    param = 'scale'
+} = {}) {
+    const layerNormKind = resolveLayerNormHoverKind(node, null);
+    const safeParam = String(param || '').trim().toLowerCase() === 'shift' ? 'shift' : 'scale';
+    const stage = resolveLayerNormStageKey(node, null).toLowerCase();
+    const label = formatLayerNormParamLabel(layerNormKind, safeParam);
+    const info = buildProjectionHoverInfo(node, label, {
+        stage,
+        parameterType: safeParam,
+        ...(layerNormKind ? { layerNormKind } : {})
+    }) || {};
+
+    return {
+        ...info,
+        ...(layerNormKind ? { layerNormKind } : {}),
+        activationData: {
+            ...(info.activationData || {}),
+            stage,
+            parameterType: safeParam,
+            ...(layerNormKind ? { layerNormKind } : {})
         }
     };
 }

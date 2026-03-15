@@ -14,7 +14,8 @@ describe('selectionPanelTransformerView2dStateUtils', () => {
                 headDetailTarget: null,
                 concatDetailTarget: null,
                 outputProjectionDetailTarget: null,
-                mlpDetailTarget: null
+                mlpDetailTarget: null,
+                layerNormDetailTarget: null
             },
             detailSemanticTargets: [],
             detailFocusLabel: '',
