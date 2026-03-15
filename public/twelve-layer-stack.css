@@ -4842,8 +4842,10 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     flex-direction: column;
     gap: 12px;
     min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
     padding: 0 0 max(18px, env(safe-area-inset-bottom));
 }
 .detail-transformer-view2d-selection-sidebar-body > .detail-preview,
@@ -4857,6 +4859,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .detail-transformer-view2d-selection-sidebar-body > .detail-copy-context {
     width: auto;
     max-width: none;
+    min-width: 0;
     align-self: stretch;
 }
 .detail-transformer-view2d-selection-sidebar-body > .detail-preview {
@@ -5256,27 +5259,38 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar {
     position: absolute;
-    top: max(96px, calc(env(safe-area-inset-top) + 72px));
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
-    width: min(
-        var(--hud-stack-desktop-width, clamp(320px, 27vw, 560px)),
-        calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 32px)
-    );
-    max-width: min(
-        var(--hud-stack-desktop-max-width, calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px)),
-        calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 32px)
-    );
+    top: 56px;
+    right: var(--hud-stack-desktop-right, env(safe-area-inset-right));
+    bottom: 0;
+    width: var(--hud-stack-desktop-width, clamp(320px, 27vw, 560px));
+    max-width: var(--hud-stack-desktop-max-width, calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px));
+    gap: 0;
     min-height: 0;
     max-height: none;
-    border-color: rgba(255,255,255,0.1);
-    background: rgba(7, 10, 16, 0.96);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-top: 1px solid rgba(255,255,255,0.16);
+    border-right: 0;
+    border-bottom: 0;
+    border-top-left-radius: 22px;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-left-radius: 0;
+    background: rgba(10,10,12,0.94);
+    box-shadow: 0 16px 36px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.04);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     z-index: 5;
 }
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    align-items: center;
+    background: rgba(10, 10, 12, 0.992);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.28);
+}
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body {
-    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-preview,
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .vector-legend,
@@ -5289,6 +5303,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-copy-context {
     width: auto;
     max-width: none;
+    min-width: 0;
     align-self: stretch;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-token-strip {
@@ -5302,7 +5317,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     );
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card.is-head-detail-active {
-    inset: auto;
+    /* Keep direct detail opens full-bleed; the renderer frames the focused scene internally. */
+    inset: 0;
     border-width: 5px;
     border-color: transparent;
     border-radius: 28px;
@@ -5312,7 +5328,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     box-shadow: none;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card.is-head-detail-scene-active {
-    inset: auto;
+    inset: 0;
     border-width: 0;
     border-radius: 0;
     background: transparent;
@@ -5332,6 +5348,39 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas.is-head-detail-active {
     border-radius: inherit;
     background: #000;
+}
+
+@media (max-aspect-ratio: 1/1), (max-width: 880px) {
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-hud {
+        inset:
+            max(10px, calc(env(safe-area-inset-top) + 6px))
+            max(12px, env(safe-area-inset-right))
+            auto
+            max(12px, env(safe-area-inset-left));
+        gap: 10px;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar {
+        display: flex;
+        flex-direction: column-reverse;
+        align-items: stretch;
+        gap: 10px;
+        padding: 10px 12px;
+        pointer-events: auto;
+        background: rgba(10, 10, 12, 0.992);
+        border: 1px solid rgba(255,255,255,0.14);
+        border-radius: 16px;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.28);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-copy {
+        flex: 0 0 auto;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-actions {
+        align-self: stretch;
+        justify-content: flex-start;
+        flex: 0 0 auto;
+    }
 }
 
 @media (max-width: 700px) {
@@ -5395,6 +5444,35 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body {
         padding-top: 0;
         padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+}
+
+@media (max-width: 880px) and (orientation: landscape) {
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar {
+        top: max(56px, env(safe-area-inset-top));
+        left: auto;
+        right: 0;
+        bottom: 0;
+        width: min(
+            clamp(320px, 42vw, 440px),
+            calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 96px)
+        );
+        max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 96px);
+        border-right: none;
+        border-bottom: none;
+        border-left: 1px solid rgba(255,255,255,0.12);
+        background: rgba(10, 10, 12, 0.94);
+        box-shadow: 0 16px 36px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.04);
+        transform: none;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar.is-visible {
+        animation: none;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar.is-closing {
+        display: flex;
+        pointer-events: none;
+        animation: none;
+        transform: translateX(100%);
     }
 }
 
