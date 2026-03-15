@@ -1,4 +1,5 @@
 import { mapValueToColor } from '../../utils/colors.js';
+import { PRISM_DIMENSIONS_PER_UNIT } from '../../utils/constants.js';
 import {
     D_MODEL,
     FINAL_MLP_COLOR,
@@ -194,6 +195,14 @@ function resolveMeasureCols(columnCount = D_MODEL) {
     );
 }
 
+function resolvePrismAlignedMeasureCols(columnCount = D_MODEL) {
+    const safeColumnCount = Math.max(1, Math.floor(Number(columnCount) || D_MODEL));
+    return Math.max(
+        INPUT_MEASURE_COLS,
+        Math.ceil(safeColumnCount / PRISM_DIMENSIONS_PER_UNIT)
+    );
+}
+
 function resolveCompactWidth(columnCount = D_MODEL, {
     isSmallScreen = false
 } = {}) {
@@ -261,7 +270,7 @@ function buildResidualRowItems(tokenRefs = [], {
         const semantic = {
             componentKind: 'residual',
             layerIndex,
-            stage: 'ln2.shift',
+            stage: 'ln2.output',
             role: 'x-ln-row',
             rowIndex: tokenRef.rowIndex,
             tokenIndex: tokenRef.tokenIndex
@@ -428,10 +437,14 @@ export function buildMlpDetailSceneModel({
         isSmallScreen,
         columnCount: D_MODEL
     });
-    const mlpUpVectorMetrics = resolveVectorMetrics(rowCount, {
+    const mlpExpandedMetrics = resolveVectorMetrics(rowCount, {
         isSmallScreen,
         columnCount: MLP_INTERMEDIATE_SIZE
     });
+    const mlpExpandedStripMetrics = {
+        ...mlpExpandedMetrics,
+        measureCols: resolvePrismAlignedMeasureCols(MLP_INTERMEDIATE_SIZE)
+    };
     const residualRows = buildResidualRowItems(tokenRefs, {
         layerIndex,
         measureCols: vectorMetrics.measureCols,
@@ -443,7 +456,7 @@ export function buildMlpDetailSceneModel({
     });
     const mlpUpRows = buildMlpUpRowItems(tokenRefs, {
         layerIndex,
-        measureCols: mlpUpVectorMetrics.measureCols,
+        measureCols: mlpExpandedStripMetrics.measureCols,
         getVector: (tokenRef) => (
             typeof activationSource?.getMlpUp === 'function'
                 ? activationSource.getMlpUp(layerIndex, tokenRef.tokenIndex, MLP_INTERMEDIATE_SIZE)
@@ -452,7 +465,7 @@ export function buildMlpDetailSceneModel({
     });
     const mlpUpCopyRows = buildMlpUpRowItems(tokenRefs, {
         layerIndex,
-        measureCols: mlpUpVectorMetrics.measureCols,
+        measureCols: mlpExpandedStripMetrics.measureCols,
         rowRole: 'mlp-up-copy-row',
         getVector: (tokenRef) => (
             typeof activationSource?.getMlpUp === 'function'
@@ -462,7 +475,7 @@ export function buildMlpDetailSceneModel({
     });
     const mlpActivationRows = buildMlpUpRowItems(tokenRefs, {
         layerIndex,
-        measureCols: mlpUpVectorMetrics.measureCols,
+        measureCols: mlpExpandedStripMetrics.measureCols,
         stage: 'mlp.activation',
         rowRole: 'mlp-activation-row',
         getVector: (tokenRef) => (
@@ -473,7 +486,7 @@ export function buildMlpDetailSceneModel({
     });
     const mlpActivationCopyRows = buildMlpUpRowItems(tokenRefs, {
         layerIndex,
-        measureCols: mlpUpVectorMetrics.measureCols,
+        measureCols: mlpExpandedStripMetrics.measureCols,
         stage: 'mlp.activation',
         rowRole: 'mlp-activation-copy-row',
         getVector: (tokenRef) => (
@@ -495,7 +508,7 @@ export function buildMlpDetailSceneModel({
     });
     const mlpUpBiasRows = buildMlpBiasRowItems(layerIndex, {
         kind: 'up',
-        measureCols: mlpUpVectorMetrics.measureCols
+        measureCols: mlpExpandedMetrics.measureCols
     });
     const mlpDownBiasRows = buildMlpBiasRowItems(layerIndex, {
         kind: 'down',
@@ -544,7 +557,7 @@ export function buildMlpDetailSceneModel({
         stage: 'mlp-up'
     });
     const weightReferenceExtent = Math.round(
-        Math.max(vectorMetrics.compactWidth, mlpUpVectorMetrics.compactWidth) * MLP_WEIGHT_REFERENCE_EXTENT_SCALE
+        Math.max(vectorMetrics.compactWidth, mlpExpandedMetrics.compactWidth) * MLP_WEIGHT_REFERENCE_EXTENT_SCALE
     );
     const weightCardSize = resolveRelativeCardSize({
         rows: D_MODEL,
@@ -562,7 +575,7 @@ export function buildMlpDetailSceneModel({
     );
     weightCardSize.width = Math.max(
         isSmallScreen ? MLP_WEIGHT_MIN_WIDTH_SMALL : MLP_WEIGHT_MIN_WIDTH,
-        Math.round(mlpUpVectorMetrics.compactWidth)
+        Math.round(mlpExpandedMetrics.compactWidth)
     );
     const weightNode = createCaptionedCardMatrixNode({
         role: 'mlp-up-weight',
@@ -595,20 +608,20 @@ export function buildMlpDetailSceneModel({
         rowItems: mlpUpRows,
         rowCount,
         columnCount: MLP_INTERMEDIATE_SIZE,
-        measureCols: mlpUpVectorMetrics.measureCols,
-        compactWidth: mlpUpVectorMetrics.compactWidth,
-        rowHeight: mlpUpVectorMetrics.rowHeight,
+        measureCols: mlpExpandedStripMetrics.measureCols,
+        compactWidth: mlpExpandedStripMetrics.compactWidth,
+        rowHeight: mlpExpandedStripMetrics.rowHeight,
         captionPosition: 'bottom',
         captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
         stripMetadata: createView2dVectorStripMetadata({
-            compactWidth: mlpUpVectorMetrics.compactWidth,
-            rowHeight: mlpUpVectorMetrics.rowHeight,
-            rowGap: mlpUpVectorMetrics.rowGap,
-            paddingX: mlpUpVectorMetrics.paddingX,
-            paddingY: mlpUpVectorMetrics.paddingY,
+            compactWidth: mlpExpandedStripMetrics.compactWidth,
+            rowHeight: mlpExpandedStripMetrics.rowHeight,
+            rowGap: mlpExpandedStripMetrics.rowGap,
+            paddingX: mlpExpandedStripMetrics.paddingX,
+            paddingY: mlpExpandedStripMetrics.paddingY,
             cornerRadius: 10,
-            bandCount: Math.max(12, mlpUpVectorMetrics.measureCols),
+            bandCount: Math.max(12, mlpExpandedStripMetrics.measureCols),
             hoverScaleY: 1.12,
             hoverGlowBlur: 10,
             hideSurface: true
@@ -628,21 +641,21 @@ export function buildMlpDetailSceneModel({
         rowItems: mlpUpBiasRows,
         rowCount: 1,
         columnCount: MLP_INTERMEDIATE_SIZE,
-        measureCols: mlpUpVectorMetrics.measureCols,
-        compactWidth: mlpUpVectorMetrics.compactWidth,
+        measureCols: mlpExpandedMetrics.measureCols,
+        compactWidth: mlpExpandedMetrics.compactWidth,
         rowHeight: isSmallScreen ? MLP_BIAS_ROW_HEIGHT_SMALL : MLP_BIAS_ROW_HEIGHT,
         captionPosition: 'bottom',
         captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
         captionPreferStandardSizing: true,
         visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
         stripMetadata: createView2dVectorStripMetadata({
-            compactWidth: mlpUpVectorMetrics.compactWidth,
+            compactWidth: mlpExpandedMetrics.compactWidth,
             rowHeight: isSmallScreen ? MLP_BIAS_ROW_HEIGHT_SMALL : MLP_BIAS_ROW_HEIGHT,
             rowGap: 0,
             paddingX: 0,
             paddingY: 0,
             cornerRadius: MLP_BIAS_CORNER_RADIUS,
-            bandCount: Math.max(12, mlpUpVectorMetrics.measureCols),
+            bandCount: Math.max(12, mlpExpandedMetrics.measureCols),
             hoverScaleY: 1.12,
             hoverGlowBlur: 10,
             hideSurface: true
@@ -662,20 +675,20 @@ export function buildMlpDetailSceneModel({
         rowItems: mlpUpCopyRows,
         rowCount,
         columnCount: MLP_INTERMEDIATE_SIZE,
-        measureCols: mlpUpVectorMetrics.measureCols,
-        compactWidth: mlpUpVectorMetrics.compactWidth,
-        rowHeight: mlpUpVectorMetrics.rowHeight,
+        measureCols: mlpExpandedStripMetrics.measureCols,
+        compactWidth: mlpExpandedStripMetrics.compactWidth,
+        rowHeight: mlpExpandedStripMetrics.rowHeight,
         captionPosition: 'bottom',
         captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
         stripMetadata: createView2dVectorStripMetadata({
-            compactWidth: mlpUpVectorMetrics.compactWidth,
-            rowHeight: mlpUpVectorMetrics.rowHeight,
-            rowGap: mlpUpVectorMetrics.rowGap,
-            paddingX: mlpUpVectorMetrics.paddingX,
-            paddingY: mlpUpVectorMetrics.paddingY,
+            compactWidth: mlpExpandedStripMetrics.compactWidth,
+            rowHeight: mlpExpandedStripMetrics.rowHeight,
+            rowGap: mlpExpandedStripMetrics.rowGap,
+            paddingX: mlpExpandedStripMetrics.paddingX,
+            paddingY: mlpExpandedStripMetrics.paddingY,
             cornerRadius: 10,
-            bandCount: Math.max(12, mlpUpVectorMetrics.measureCols),
+            bandCount: Math.max(12, mlpExpandedStripMetrics.measureCols),
             hoverScaleY: 1.12,
             hoverGlowBlur: 10,
             hideSurface: true
@@ -695,20 +708,20 @@ export function buildMlpDetailSceneModel({
         rowItems: mlpActivationRows,
         rowCount,
         columnCount: MLP_INTERMEDIATE_SIZE,
-        measureCols: mlpUpVectorMetrics.measureCols,
-        compactWidth: mlpUpVectorMetrics.compactWidth,
-        rowHeight: mlpUpVectorMetrics.rowHeight,
+        measureCols: mlpExpandedStripMetrics.measureCols,
+        compactWidth: mlpExpandedStripMetrics.compactWidth,
+        rowHeight: mlpExpandedStripMetrics.rowHeight,
         captionPosition: 'bottom',
         captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
         stripMetadata: createView2dVectorStripMetadata({
-            compactWidth: mlpUpVectorMetrics.compactWidth,
-            rowHeight: mlpUpVectorMetrics.rowHeight,
-            rowGap: mlpUpVectorMetrics.rowGap,
-            paddingX: mlpUpVectorMetrics.paddingX,
-            paddingY: mlpUpVectorMetrics.paddingY,
+            compactWidth: mlpExpandedStripMetrics.compactWidth,
+            rowHeight: mlpExpandedStripMetrics.rowHeight,
+            rowGap: mlpExpandedStripMetrics.rowGap,
+            paddingX: mlpExpandedStripMetrics.paddingX,
+            paddingY: mlpExpandedStripMetrics.paddingY,
             cornerRadius: 10,
-            bandCount: Math.max(12, mlpUpVectorMetrics.measureCols),
+            bandCount: Math.max(12, mlpExpandedStripMetrics.measureCols),
             hoverScaleY: 1.12,
             hoverGlowBlur: 10,
             hideSurface: true
@@ -728,20 +741,20 @@ export function buildMlpDetailSceneModel({
         rowItems: mlpActivationCopyRows,
         rowCount,
         columnCount: MLP_INTERMEDIATE_SIZE,
-        measureCols: mlpUpVectorMetrics.measureCols,
-        compactWidth: mlpUpVectorMetrics.compactWidth,
-        rowHeight: mlpUpVectorMetrics.rowHeight,
+        measureCols: mlpExpandedStripMetrics.measureCols,
+        compactWidth: mlpExpandedStripMetrics.compactWidth,
+        rowHeight: mlpExpandedStripMetrics.rowHeight,
         captionPosition: 'bottom',
         captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
         stripMetadata: createView2dVectorStripMetadata({
-            compactWidth: mlpUpVectorMetrics.compactWidth,
-            rowHeight: mlpUpVectorMetrics.rowHeight,
-            rowGap: mlpUpVectorMetrics.rowGap,
-            paddingX: mlpUpVectorMetrics.paddingX,
-            paddingY: mlpUpVectorMetrics.paddingY,
+            compactWidth: mlpExpandedStripMetrics.compactWidth,
+            rowHeight: mlpExpandedStripMetrics.rowHeight,
+            rowGap: mlpExpandedStripMetrics.rowGap,
+            paddingX: mlpExpandedStripMetrics.paddingX,
+            paddingY: mlpExpandedStripMetrics.paddingY,
             cornerRadius: 10,
-            bandCount: Math.max(12, mlpUpVectorMetrics.measureCols),
+            bandCount: Math.max(12, mlpExpandedStripMetrics.measureCols),
             hoverScaleY: 1.12,
             hoverGlowBlur: 10,
             hideSurface: true
@@ -765,7 +778,7 @@ export function buildMlpDetailSceneModel({
     });
     downWeightCardSize.height = Math.max(
         isSmallScreen ? MLP_WEIGHT_MIN_HEIGHT_SMALL : MLP_WEIGHT_MIN_HEIGHT,
-        Math.round(mlpUpVectorMetrics.compactWidth)
+        Math.round(mlpExpandedMetrics.compactWidth)
     );
     downWeightCardSize.width = Math.max(
         isSmallScreen ? MLP_WEIGHT_MIN_WIDTH_SMALL : MLP_WEIGHT_MIN_WIDTH,

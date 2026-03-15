@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { D_MODEL, FINAL_MLP_COLOR } from '../../ui/selectionPanelConstants.js';
+import { PRISM_DIMENSIONS_PER_UNIT } from '../../utils/constants.js';
 import {
     MLP_ACTIVATION_TOOLTIP_LABEL,
     MLP_DOWN_BIAS_TOOLTIP_LABEL,
@@ -20,6 +21,8 @@ function toKatexColorHex(hex = 0xFFFFFF) {
         Number.isFinite(hex) ? hex : 0xFFFFFF
     ))).toString(16).padStart(6, '0')}`;
 }
+
+const MLP_EXPANDED_VECTOR_BAND_COUNT = Math.ceil((D_MODEL * 4) / PRISM_DIMENSIONS_PER_UNIT);
 
 function createMockActivationSource() {
     return {
@@ -108,7 +111,7 @@ describe('buildMlpDetailSceneModel', () => {
         expect(inputNode?.rowItems).toHaveLength(2);
         expect(inputNode?.rowItems?.every((rowItem) => (
             rowItem?.semantic?.componentKind === 'residual'
-            && rowItem?.semantic?.stage === 'ln2.shift'
+            && rowItem?.semantic?.stage === 'ln2.output'
             && rowItem?.semantic?.role === 'x-ln-row'
         ))).toBe(true);
         expect(weightNode?.label?.tex).toBe('W_{\\mathrm{up}}');
@@ -144,6 +147,9 @@ describe('buildMlpDetailSceneModel', () => {
             cols: D_MODEL * 4
         });
         expect(outputNode?.metadata?.caption?.dimensionsText).toBe('(2, 3072)');
+        expect(outputNode?.metadata?.measure?.cols).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
+        expect(outputNode?.metadata?.compactRows?.bandCount).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
+        expect(outputNode?.rowItems?.every((rowItem) => rowItem?.rawValues?.length === MLP_EXPANDED_VECTOR_BAND_COUNT)).toBe(true);
         expect(outputNode?.rowItems).toHaveLength(2);
         expect(outputNode?.rowItems?.every((rowItem) => (
             rowItem?.semantic?.componentKind === 'mlp'
@@ -156,6 +162,8 @@ describe('buildMlpDetailSceneModel', () => {
             cols: D_MODEL * 4
         });
         expect(outputCopyNode?.metadata?.caption?.dimensionsText).toBe('(2, 3072)');
+        expect(outputCopyNode?.metadata?.measure?.cols).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
+        expect(outputCopyNode?.metadata?.compactRows?.bandCount).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
         expect(outputCopyNode?.rowItems?.every((rowItem) => (
             rowItem?.semantic?.componentKind === 'mlp'
             && rowItem?.semantic?.stage === 'mlp-up'
@@ -168,6 +176,9 @@ describe('buildMlpDetailSceneModel', () => {
             cols: D_MODEL * 4
         });
         expect(activationNode?.metadata?.caption?.dimensionsText).toBe('(2, 3072)');
+        expect(activationNode?.metadata?.measure?.cols).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
+        expect(activationNode?.metadata?.compactRows?.bandCount).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
+        expect(activationNode?.rowItems?.every((rowItem) => rowItem?.rawValues?.length === MLP_EXPANDED_VECTOR_BAND_COUNT)).toBe(true);
         expect(activationNode?.rowItems?.every((rowItem) => (
             rowItem?.semantic?.componentKind === 'mlp'
             && rowItem?.semantic?.stage === 'mlp.activation'
@@ -180,11 +191,15 @@ describe('buildMlpDetailSceneModel', () => {
             cols: D_MODEL * 4
         });
         expect(activationCopyNode?.metadata?.caption?.dimensionsText).toBe('(2, 3072)');
+        expect(activationCopyNode?.metadata?.measure?.cols).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
+        expect(activationCopyNode?.metadata?.compactRows?.bandCount).toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
         expect(activationCopyNode?.rowItems?.every((rowItem) => (
             rowItem?.semantic?.componentKind === 'mlp'
             && rowItem?.semantic?.stage === 'mlp.activation'
             && rowItem?.semantic?.role === 'mlp-activation-copy-row'
         ))).toBe(true);
+        expect(biasNode?.metadata?.measure?.cols).not.toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
+        expect(biasNode?.metadata?.compactRows?.bandCount).not.toBe(MLP_EXPANDED_VECTOR_BAND_COUNT);
         expect(downWeightNode?.label?.tex).toBe('W_{\\mathrm{down}}');
         expect(downWeightNode?.label?.text).toBe('W_down');
         expect(downWeightNode?.dimensions).toMatchObject({
@@ -409,7 +424,8 @@ describe('buildMlpDetailSceneModel', () => {
         });
 
         expect(hoverState?.label).toBe('Post LayerNorm 2 Residual Vector');
-        expect(hoverState?.info?.activationData?.stage).toBe('ln2.shift');
+        expect(hoverState?.info?.activationData?.stage).toBe('ln2.output');
+        expect(hoverState?.info?.activationData?.sourceStage).toBe('ln2.shift');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(1);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token B');
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);

@@ -2,6 +2,8 @@ import { buildAttentionHoverInfo } from '../ui/attentionHoverInfo.js';
 import {
     formatLayerNormLabel,
     formatLayerNormParamLabel,
+    normalizeLayerNormOutputStage,
+    normalizePostLayerNormResidualStage,
     resolveLayerNormKind,
     resolvePostLayerNormResidualLabel
 } from '../utils/layerNormLabels.js';
@@ -247,10 +249,14 @@ export function buildMlpDownBiasHoverInfo(node = null) {
 export function buildPostLayerNormResidualHoverInfo(node = null, rowItem = null) {
     const tokenInfo = createTokenInfo(rowItem) || {};
     const rowStage = String(rowItem?.semantic?.stage || '').trim().toLowerCase();
-    const activationStage = rowStage === 'ln2.shift' ? 'ln2.shift' : 'ln1.shift';
+    const activationStage = normalizePostLayerNormResidualStage(
+        rowStage === 'ln2.output' || rowStage === 'ln2.shift' ? rowStage : 'ln1.output'
+    ) || 'ln1.output';
+    const sourceStage = normalizePostLayerNormResidualStage(activationStage, { preferLegacy: true });
     const label = resolvePostLayerNormResidualLabel({ stage: activationStage });
     const info = buildProjectionHoverInfo(node, label, {
         stage: activationStage,
+        sourceStage,
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -263,6 +269,7 @@ export function buildPostLayerNormResidualHoverInfo(node = null, rowItem = null)
         activationData: {
             ...(info.activationData || {}),
             stage: activationStage,
+            sourceStage,
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
@@ -327,7 +334,7 @@ export function buildLayerNormActivationHoverInfo(node = null, rowItem = null, {
     const layerNormKind = resolveLayerNormHoverKind(node, rowItem);
     const layerNormLabel = formatLayerNormLabel(layerNormKind);
     const actualStage = resolveLayerNormStageKey(node, rowItem).toLowerCase();
-    if (variant === 'output' && (actualStage === 'ln1.shift' || actualStage === 'ln2.shift')) {
+    if (variant === 'output' && normalizePostLayerNormResidualStage(actualStage)) {
         return buildPostLayerNormResidualHoverInfo(node, rowItem);
     }
 
@@ -343,11 +350,14 @@ export function buildLayerNormActivationHoverInfo(node = null, rowItem = null, {
         label = `${layerNormLabel} Output Vector`;
         hoverStage = layerNormKind === 'final' ? 'final_ln.output' : `${layerNormKind || 'ln1'}.output`;
     }
+    const sourceStage = variant === 'output'
+        ? (normalizeLayerNormOutputStage(hoverStage, { preferLegacy: true }) || actualStage)
+        : actualStage;
 
     return buildLayerNormHoverInfo(node, rowItem, {
         label,
         stage: hoverStage,
-        sourceStage: actualStage
+        sourceStage
     });
 }
 

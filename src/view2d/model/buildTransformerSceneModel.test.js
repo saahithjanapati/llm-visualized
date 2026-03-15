@@ -522,7 +522,7 @@ describe('buildTransformerSceneModel', () => {
                 semantic: {
                     componentKind: 'residual',
                     layerIndex: 3,
-                    stage: 'ln1.shift',
+                    stage: 'ln1.output',
                     tokenIndex: 0
                 }
             }
@@ -530,7 +530,8 @@ describe('buildTransformerSceneModel', () => {
 
         expect(payload?.label).toBe('Post LayerNorm 1 Residual Vector');
         expect(payload?.info?.activationData?.label).toBe('Post LayerNorm 1 Residual Vector');
-        expect(payload?.info?.activationData?.stage).toBe('ln1.shift');
+        expect(payload?.info?.activationData?.stage).toBe('ln1.output');
+        expect(payload?.info?.activationData?.sourceStage).toBe('ln1.shift');
     });
 
     it('builds a stacked output-projection detail scene when that detail target is active', () => {

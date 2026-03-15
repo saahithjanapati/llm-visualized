@@ -259,7 +259,7 @@ function resolveLayerNormStageConfig(layerNormKind = 'ln1', layerIndex = null, l
             inputStage: 'layer.incoming',
             normStage: 'ln1.norm',
             scaleStage: 'ln1.scale',
-            shiftStage: 'ln1.shift',
+            outputStage: 'ln1.output',
             paramScaleStage: 'ln1.param.scale',
             paramShiftStage: 'ln1.param.shift',
             outputLabelTex: 'x_{\\ln}',
@@ -274,7 +274,7 @@ function resolveLayerNormStageConfig(layerNormKind = 'ln1', layerIndex = null, l
             inputStage: 'residual.post_attention',
             normStage: 'ln2.norm',
             scaleStage: 'ln2.scale',
-            shiftStage: 'ln2.shift',
+            outputStage: 'ln2.output',
             paramScaleStage: 'ln2.param.scale',
             paramShiftStage: 'ln2.param.shift',
             outputLabelTex: 'x_{\\ln}',
@@ -288,7 +288,7 @@ function resolveLayerNormStageConfig(layerNormKind = 'ln1', layerIndex = null, l
         inputStage: 'residual.post_mlp',
         normStage: 'final_ln.norm',
         scaleStage: 'final_ln.scale',
-        shiftStage: 'final_ln.shift',
+        outputStage: 'final_ln.output',
         paramScaleStage: 'final_ln.param.scale',
         paramShiftStage: 'final_ln.param.shift',
         outputLabelTex: 'x_{\\mathrm{final}}',
@@ -625,7 +625,7 @@ export function buildLayerNormDetailSceneModel({
     const outputRows = buildLayerNormActivationRows(tokenRefs, {
         stageConfig,
         componentKind: stageConfig.layerNormKind === 'final' ? 'layer-norm' : 'residual',
-        stage: stageConfig.shiftStage,
+        stage: stageConfig.outputStage,
         role: 'layer-norm-output-row',
         measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => {
@@ -761,7 +761,7 @@ export function buildLayerNormDetailSceneModel({
     const outputNode = createLayerNormVectorNode({
         role: 'layer-norm-output',
         semantic: buildSemantic(baseSemantic, {
-            stage: stageConfig.shiftStage,
+            stage: stageConfig.outputStage,
             role: 'layer-norm-output'
         }),
         labelTex: stageConfig.outputLabelTex,
@@ -801,7 +801,7 @@ export function buildLayerNormDetailSceneModel({
     });
     const outgoingArrowSpacerNode = createHiddenSpacer({
         semantic: buildSemantic(baseSemantic, {
-            stage: stageConfig.shiftStage,
+            stage: stageConfig.outputStage,
             role: 'outgoing-arrow-spacer'
         }),
         role: 'outgoing-arrow-spacer',
@@ -897,11 +897,11 @@ export function buildLayerNormDetailSceneModel({
             gapOverride: isSmallScreen ? EQUATION_STAGE_GAP_SMALL : EQUATION_STAGE_GAP
         }
     });
-    const shiftStageNode = createGroupNode({
-        role: 'layer-norm-shift-stage',
+    const outputStageNode = createGroupNode({
+        role: 'layer-norm-output-stage',
         semantic: buildSemantic(baseSemantic, {
-            stage: stageConfig.shiftStage,
-            role: 'layer-norm-shift-stage'
+            stage: stageConfig.outputStage,
+            role: 'layer-norm-output-stage'
         }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
         align: 'center',
@@ -909,10 +909,10 @@ export function buildLayerNormDetailSceneModel({
         children: [
             scaledCopyNode,
             createLayerNormOperatorNode({
-                role: 'layer-norm-shift-plus',
+                role: 'layer-norm-output-plus',
                 semantic: buildSemantic(baseSemantic, {
-                    stage: stageConfig.shiftStage,
-                    role: 'layer-norm-shift-plus',
+                    stage: stageConfig.outputStage,
+                    role: 'layer-norm-output-plus',
                     operatorKey: 'plus'
                 }),
                 text: '+',
@@ -922,10 +922,10 @@ export function buildLayerNormDetailSceneModel({
             }),
             shiftNode,
             createLayerNormOperatorNode({
-                role: 'layer-norm-shift-equals',
+                role: 'layer-norm-output-equals',
                 semantic: buildSemantic(baseSemantic, {
-                    stage: stageConfig.shiftStage,
-                    role: 'layer-norm-shift-equals',
+                    stage: stageConfig.outputStage,
+                    role: 'layer-norm-output-equals',
                     operatorKey: 'equals'
                 }),
                 text: '=',
@@ -1083,7 +1083,7 @@ export function buildLayerNormDetailSceneModel({
                         }
                     }),
                     scalingStageNode,
-                    shiftStageNode
+                    outputStageNode
                 ],
                 metadata: {
                     gapOverride: isSmallScreen ? PIPELINE_STACK_GAP_SMALL : PIPELINE_STACK_GAP

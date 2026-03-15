@@ -1,4 +1,7 @@
-import { formatLayerNormLabel } from '../utils/layerNormLabels.js';
+import {
+    formatLayerNormLabel,
+    isLayerNormOutputStage
+} from '../utils/layerNormLabels.js';
 import {
     MHA_FINAL_K_COLOR,
     MHA_FINAL_Q_COLOR,
@@ -21,8 +24,9 @@ function isLayerNormScaleStage(stageLower = '', kind = '') {
     return stageLower === `${kind}.scale` || stageLower === `${kind}.param.scale`;
 }
 
-function isLayerNormShiftStage(stageLower = '', kind = '') {
-    return stageLower === `${kind}.shift` || stageLower === `${kind}.param.shift`;
+function isLayerNormOutputVectorStage(stageLower = '', kind = '') {
+    return isLayerNormOutputStage(stageLower)
+        && String(stageLower || '').toLowerCase().startsWith(`${kind}.`);
 }
 
 export function buildChatPromptInstructionText() {
@@ -69,7 +73,7 @@ export function describeSceneStage(stage = '', normalizedLabel = '') {
     if (isLayerNormScaleStage(lower, 'ln1')) {
         return `The selected object is in the scale step of ${formatLayerNormLabel('ln1')}, where learned per-dimension gains are being applied before the final shift.`;
     }
-    if (isLayerNormShiftStage(lower, 'ln1')) {
+    if (isLayerNormOutputVectorStage(lower, 'ln1')) {
         return `The selected object is at the output of ${formatLayerNormLabel('ln1')}, immediately before self-attention reads the token state.`;
     }
     if (lower === 'attention.pre') {
@@ -102,7 +106,7 @@ export function describeSceneStage(stage = '', normalizedLabel = '') {
     if (isLayerNormScaleStage(lower, 'ln2')) {
         return `The selected object is in the scale step of ${formatLayerNormLabel('ln2')}, where learned gains are being applied before the final shift into the MLP path.`;
     }
-    if (isLayerNormShiftStage(lower, 'ln2')) {
+    if (isLayerNormOutputVectorStage(lower, 'ln2')) {
         return `The selected object is at the output of ${formatLayerNormLabel('ln2')}, immediately before the MLP reads the token state.`;
     }
     if (lower.startsWith('mlp.up')) {
@@ -123,7 +127,7 @@ export function describeSceneStage(stage = '', normalizedLabel = '') {
     if (isLayerNormScaleStage(lower, 'final_ln')) {
         return `The scene is showing the scale step of ${formatLayerNormLabel('final')}, where learned gains are being applied before the final shift into the unembedding path.`;
     }
-    if (isLayerNormShiftStage(lower, 'final_ln')) {
+    if (isLayerNormOutputVectorStage(lower, 'final_ln')) {
         return `The scene is showing the output of ${formatLayerNormLabel('final')}, immediately before the model maps the token state into vocabulary logits.`;
     }
     return `The active animation stage is ${JSON.stringify(stage)}.`;
@@ -157,7 +161,7 @@ export function buildVisualizationStateLines({
         lines.push(`We are between the incoming residual stream and the learned affine output of ${formatLayerNormLabel('ln1')}.`);
     } else if (isLayerNormScaleStage(stageLower, 'ln1')) {
         lines.push(`We are in the middle of ${formatLayerNormLabel('ln1')}, after normalization and during the learned scaling step.`);
-    } else if (isLayerNormShiftStage(stageLower, 'ln1')) {
+    } else if (isLayerNormOutputVectorStage(stageLower, 'ln1')) {
         lines.push('We are at the handoff from LayerNorm 1 into self-attention, right before Q/K/V projections are read from this token state.');
     } else if (stageLower === 'qkv.q') {
         lines.push('We are in the query-projection view for one attention head, where this token prepares the vector that will look outward across the context.');
@@ -179,7 +183,7 @@ export function buildVisualizationStateLines({
         lines.push(`We are between the post-attention residual stream and the learned affine output of ${formatLayerNormLabel('ln2')}.`);
     } else if (isLayerNormScaleStage(stageLower, 'ln2')) {
         lines.push(`We are in the middle of ${formatLayerNormLabel('ln2')}, after normalization and during the learned scaling step.`);
-    } else if (isLayerNormShiftStage(stageLower, 'ln2')) {
+    } else if (isLayerNormOutputVectorStage(stageLower, 'ln2')) {
         lines.push('We are at the handoff from LayerNorm 2 into the MLP, right before the feed-forward sublayer reads this token state.');
     } else if (stageLower === 'mlp.up') {
         lines.push('We are in the MLP expansion step, where residual-width features fan out into a wider hidden representation.');
@@ -193,7 +197,7 @@ export function buildVisualizationStateLines({
         lines.push('We are in the final normalization path, just before the last token state is sent into the vocabulary projection.');
     } else if (isLayerNormScaleStage(stageLower, 'final_ln')) {
         lines.push(`We are in the middle of ${formatLayerNormLabel('final')}, after normalization and during the learned scaling step before logits are computed.`);
-    } else if (isLayerNormShiftStage(stageLower, 'final_ln')) {
+    } else if (isLayerNormOutputVectorStage(stageLower, 'final_ln')) {
         lines.push('We are at the output of the final normalization path, immediately before the unembedding produces vocabulary logits.');
     }
 

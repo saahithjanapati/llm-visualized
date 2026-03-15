@@ -637,7 +637,7 @@ function buildProjectionInputRowItems(rows = [], baseSemantic = {}, branchKey = 
             componentKind: 'residual',
             layerIndex: baseSemantic?.layerIndex,
             headIndex: baseSemantic?.headIndex,
-            stage: 'ln1.shift',
+            stage: 'ln1.output',
             role: 'x-ln-row',
             rowIndex: rowData.rowIndex,
             tokenIndex: rowData.tokenIndex,

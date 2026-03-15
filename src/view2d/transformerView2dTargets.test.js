@@ -278,7 +278,7 @@ describe('transformerView2dTargets', () => {
                 semantic: {
                     componentKind: 'residual',
                     layerIndex: 0,
-                    stage: 'ln2.shift',
+                    stage: 'ln2.output',
                     tokenIndex: 0
                 }
             }
@@ -290,7 +290,8 @@ describe('transformerView2dTargets', () => {
 
         expect(payload?.label).toBe('Post LayerNorm 2 Residual Vector');
         expect(payload?.info?.activationData?.label).toBe('Post LayerNorm 2 Residual Vector');
-        expect(payload?.info?.activationData?.stage).toBe('ln2.shift');
+        expect(payload?.info?.activationData?.stage).toBe('ln2.output');
+        expect(payload?.info?.activationData?.sourceStage).toBe('ln2.shift');
     });
 
     it('exposes hover token context for input token chips', () => {

@@ -45,6 +45,18 @@ export function isMlpMatrixSelectionLabel(label = '') {
     return lower.includes('mlp up weight matrix') || lower.includes('mlp down weight matrix');
 }
 
+export function isGeluDetailSelection({
+    label = '',
+    stage = ''
+} = {}) {
+    const lower = String(label || '').toLowerCase();
+    const stageLower = String(stage || '').toLowerCase();
+    return isMlpMatrixSelectionLabel(label)
+        || stageLower === 'mlp.activation'
+        || lower.includes('mlp activation')
+        || lower.includes('post gelu');
+}
+
 export function setDescriptionGeluAction(descriptionEl, enabled = false) {
     if (!descriptionEl) return;
 

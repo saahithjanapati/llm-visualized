@@ -21,6 +21,36 @@ function toNumericArray(values) {
     });
 }
 
+function extractMlpExpandedSamplingValues(selectionInfo = null) {
+    const vectorRef = selectionInfo?.info?.vectorRef || null;
+    const batchRefs = vectorRef?.isBatchedVectorRef && Array.isArray(vectorRef?._batch?._vectorRefs)
+        ? vectorRef._batch._vectorRefs
+        : null;
+    if (!batchRefs?.length) return null;
+
+    const combined = [];
+    const orderedRefs = batchRefs
+        .filter((candidate) => candidate && typeof candidate === 'object')
+        .slice()
+        .sort((a, b) => {
+            const left = Number.isFinite(a?._index) ? Math.floor(a._index) : 0;
+            const right = Number.isFinite(b?._index) ? Math.floor(b._index) : 0;
+            return left - right;
+        });
+
+    orderedRefs.forEach((candidate) => {
+        const segmentValues = toNumericArray(candidate?.userData?.activationData?.values)
+            || toNumericArray(candidate?.rawData)
+            || toNumericArray(candidate?.group?.userData?.activationData?.values)
+            || toNumericArray(candidate?.mesh?.userData?.activationData?.values);
+        if (segmentValues?.length) {
+            combined.push(...segmentValues);
+        }
+    });
+
+    return combined.length ? combined : null;
+}
+
 function resolveConfiguredStride(config, key) {
     return clampPositiveInt(config?.[key], DEFAULT_VECTOR_STRIDE);
 }
@@ -250,11 +280,13 @@ export function resolveSelectionVectorSamplingData({
     const activationData = getActivationDataFromSelection(selectionInfo);
     const activationValues = toNumericArray(activationData?.values);
     const fallbackNumericValues = toNumericArray(fallbackValues);
-    const values = activationValues || fallbackNumericValues;
-    if (!values) return null;
-
     const family = resolveSamplingFamily(label, activationData?.stage);
     if (!family) return null;
+    const mlpExpandedValues = family === 'mlp'
+        ? extractMlpExpandedSamplingValues(selectionInfo)
+        : null;
+    const values = mlpExpandedValues || activationValues || fallbackNumericValues;
+    if (!values) return null;
 
     const config = activationSource?.meta?.config || null;
     const configuredStride = family === 'attention'
@@ -262,7 +294,10 @@ export function resolveSelectionVectorSamplingData({
         : family === 'mlp'
             ? resolveConfiguredStride(config, 'mlp_stride')
             : resolveConfiguredStride(config, 'residual_stride');
-    const domain = resolveVectorDomain(family, activationData?.segmentIndex);
+    const segmentIndex = family === 'mlp' && mlpExpandedValues
+        ? null
+        : activationData?.segmentIndex;
+    const domain = resolveVectorDomain(family, segmentIndex);
     const weightedSumSampling = family === 'attention'
         && isWeightedSumSampling(label, activationData?.stage)
         && !!activationValues;

@@ -11,6 +11,7 @@ import {
     formatLayerNormLabel,
     formatLayerNormParamLabel,
     isPostLayerNormResidualSelection,
+    normalizePostLayerNormResidualStage,
     resolvePostLayerNormResidualLabel,
     resolveLayerNormParamSpec
 } from '../utils/layerNormLabels.js';
@@ -53,6 +54,7 @@ import {
 import {
     GELU_PANEL_ACTION_OPEN,
     createGeluDetailView,
+    isGeluDetailSelection,
     isMlpMatrixSelectionLabel,
     setDescriptionGeluAction
 } from './selectionPanelGeluPreview.js';
@@ -1096,6 +1098,82 @@ function stripPreviewTrails(object) {
     });
 }
 
+function isPlainPreviewUserDataObject(value) {
+    if (!value || Object.prototype.toString.call(value) !== '[object Object]') return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+
+function sanitizePreviewUserDataValue(value, seen = new WeakSet()) {
+    if (value === null) return null;
+    const type = typeof value;
+    if (type === 'string' || type === 'number' || type === 'boolean') return value;
+    if (Array.isArray(value)) {
+        if (seen.has(value)) return undefined;
+        seen.add(value);
+        const sanitized = value
+            .map((entry) => sanitizePreviewUserDataValue(entry, seen))
+            .filter((entry) => entry !== undefined);
+        seen.delete(value);
+        return sanitized;
+    }
+    if (type !== 'object') return undefined;
+    if (
+        value.isObject3D
+        || value.isMaterial
+        || value.isBufferGeometry
+        || value.isTexture
+        || value.isColor
+        || value.isVector2
+        || value.isVector3
+        || value.isVector4
+        || value.isMatrix3
+        || value.isMatrix4
+        || value.isQuaternion
+    ) {
+        return undefined;
+    }
+    if (!isPlainPreviewUserDataObject(value)) return undefined;
+    if (seen.has(value)) return undefined;
+    seen.add(value);
+    const sanitized = {};
+    Object.entries(value).forEach(([key, entry]) => {
+        const nextValue = sanitizePreviewUserDataValue(entry, seen);
+        if (nextValue !== undefined) {
+            sanitized[key] = nextValue;
+        }
+    });
+    seen.delete(value);
+    return sanitized;
+}
+
+function cloneObjectForPreview(root) {
+    if (!root || root.isScene) return null;
+    const originals = [];
+    if (typeof root.traverse === 'function') {
+        root.traverse((child) => {
+            originals.push({
+                child,
+                userData: child.userData
+            });
+            child.userData = sanitizePreviewUserDataValue(child.userData) || {};
+        });
+    } else {
+        originals.push({
+            child: root,
+            userData: root.userData
+        });
+        root.userData = sanitizePreviewUserDataValue(root.userData) || {};
+    }
+    try {
+        return root.clone(true);
+    } finally {
+        originals.forEach(({ child, userData }) => {
+            child.userData = userData;
+        });
+    }
+}
+
 function buildSelectionClonePreview(selectionInfo, label) {
     const source = selectionInfo?.object || selectionInfo?.hit?.object;
     if (!source || !label) return null;
@@ -1108,8 +1186,8 @@ function buildSelectionClonePreview(selectionInfo, label) {
         current = current.parent;
     }
     const root = match || source;
-    if (!root || root.isScene) return null;
-    const clone = root.clone(true);
+    const clone = cloneObjectForPreview(root);
+    if (!clone) return null;
     stripPreviewTrails(clone);
     clone.traverse((child) => {
         child.matrixAutoUpdate = true;
@@ -1144,8 +1222,8 @@ function buildSharedClonePreview(selectionInfo, label) {
         current = current.parent;
     }
     const root = match || source;
-    if (!root || root.isScene) return null;
-    const clone = root.clone(true);
+    const clone = cloneObjectForPreview(root);
+    if (!clone) return null;
     clone.traverse((child) => {
         child.matrixAutoUpdate = true;
         if (child.isInstancedMesh) {
@@ -1161,8 +1239,8 @@ function buildSharedClonePreview(selectionInfo, label) {
 
 function buildDirectClonePreview(selectionInfo) {
     const source = selectionInfo?.object || selectionInfo?.hit?.object;
-    if (!source || source.isScene) return null;
-    const clone = source.clone(true);
+    const clone = cloneObjectForPreview(source);
+    if (!clone) return null;
     clone.traverse((child) => {
         child.matrixAutoUpdate = true;
     });
@@ -1828,6 +1906,131 @@ function extractPreviewVectorData(selectionInfo) {
     return null;
 }
 
+function normalizePreviewVectorDataArray(values) {
+    if (!(Array.isArray(values) || ArrayBuffer.isView(values)) || values.length <= 0) {
+        return null;
+    }
+    return Array.from(values).map((value) => (Number.isFinite(value) ? value : 0));
+}
+
+function extractMlpMiddlePreviewVectorData(selectionInfo) {
+    const vectorRef = selectionInfo?.info?.vectorRef || null;
+    const batchRefs = vectorRef?.isBatchedVectorRef && Array.isArray(vectorRef?._batch?._vectorRefs)
+        ? vectorRef._batch._vectorRefs
+        : null;
+    if (batchRefs?.length) {
+        const combined = [];
+        const orderedRefs = batchRefs
+            .filter((candidate) => candidate && typeof candidate === 'object')
+            .slice()
+            .sort((a, b) => {
+                const left = Number.isFinite(a?._index) ? Math.floor(a._index) : 0;
+                const right = Number.isFinite(b?._index) ? Math.floor(b._index) : 0;
+                return left - right;
+            });
+        orderedRefs.forEach((candidate) => {
+            const segmentData = normalizePreviewVectorDataArray(
+                candidate?.userData?.activationData?.values
+                || candidate?.rawData
+            );
+            if (segmentData?.length) {
+                combined.push(...segmentData);
+            }
+        });
+        if (combined.length) return combined;
+    }
+
+    const candidates = [
+        selectionInfo?.info?.values,
+        selectionInfo?.info?.vectorData,
+        selectionInfo?.info?.activationData?.values,
+        selectionInfo?.object?.userData?.activationData?.values,
+        selectionInfo?.hit?.object?.userData?.activationData?.values,
+        vectorRef?.userData?.activationData?.values,
+        vectorRef?.rawData
+    ];
+    for (const candidate of candidates) {
+        const normalized = normalizePreviewVectorDataArray(candidate);
+        if (normalized?.length) return normalized;
+    }
+    return null;
+}
+
+function resolveMlpMiddlePreviewInstanceCount(selectionInfo, previewData = null) {
+    const vectorRef = selectionInfo?.info?.vectorRef || null;
+    const batch = vectorRef?.isBatchedVectorRef ? vectorRef?._batch : null;
+    const batchPrismCount = Number.isFinite(batch?.prismCount)
+        ? Math.max(1, Math.floor(batch.prismCount))
+        : null;
+    const batchVectorCount = Number.isFinite(batch?.vectorCount)
+        ? Math.max(1, Math.floor(batch.vectorCount))
+        : (
+            Array.isArray(batch?._vectorRefs) && batch._vectorRefs.length
+                ? Math.max(1, batch._vectorRefs.length)
+                : null
+        );
+    if (batchPrismCount && batchVectorCount) {
+        return batchPrismCount * batchVectorCount;
+    }
+
+    const sourceMesh = findVectorSourceMesh(selectionInfo);
+    const meshPrismCount = Number.isFinite(sourceMesh?.userData?.prismCount)
+        ? Math.max(1, Math.floor(sourceMesh.userData.prismCount))
+        : null;
+    const meshCount = Number.isFinite(sourceMesh?.count)
+        ? Math.max(1, Math.floor(sourceMesh.count))
+        : Math.max(0, Math.floor(sourceMesh?.instanceMatrix?.count || 0));
+    if (meshPrismCount && meshCount > meshPrismCount) {
+        return meshCount;
+    }
+
+    const dataLength = Array.isArray(previewData) || ArrayBuffer.isView(previewData)
+        ? previewData.length
+        : 0;
+    if (dataLength > 0) {
+        const maxExpandedPrismCount = Math.max(1, Math.ceil((D_MODEL * 4) / PRISM_DIMENSIONS_PER_UNIT));
+        if (dataLength <= maxExpandedPrismCount) {
+            return Math.max(1, dataLength);
+        }
+        return Math.max(1, Math.ceil(dataLength / PRISM_DIMENSIONS_PER_UNIT));
+    }
+    return null;
+}
+
+function buildMlpMiddleVectorPreview(selectionInfo, label = '') {
+    const previewData = extractMlpMiddlePreviewVectorData(selectionInfo);
+    const instanceCount = resolveMlpMiddlePreviewInstanceCount(selectionInfo, previewData);
+    if (!(Number.isFinite(instanceCount) && instanceCount > 0)) return null;
+
+    const vec = createPreviewVector({
+        colorHex: resolveVectorPreviewColor(label, selectionInfo),
+        data: null,
+        instanceCount
+    });
+
+    if (Array.isArray(previewData) && previewData.length > 0) {
+        applyDataToPreviewVector(vec, previewData);
+    }
+
+    const batchMesh = selectionInfo?.info?.vectorRef?.isBatchedVectorRef
+        ? selectionInfo.info.vectorRef?._batch?.mesh
+        : null;
+    const colorSourceMesh = batchMesh?.isInstancedMesh
+        ? batchMesh
+        : findVectorSourceMesh(selectionInfo);
+    if (colorSourceMesh?.isInstancedMesh) {
+        copyInstancedVectorColorsToPreview(vec, colorSourceMesh, 0, instanceCount);
+    }
+
+    return {
+        object: vec.group,
+        dispose: () => {
+            if (vec.mesh?.geometry) vec.mesh.geometry.dispose();
+            if (vec.mesh?.material) vec.mesh.material.dispose();
+        }
+    };
+}
+
 function applyDataToPreviewVector(vec, data, { colorOptions = null, minimumKeyColors = 2 } = {}) {
     const isArrayLike = Array.isArray(data) || ArrayBuffer.isView(data);
     if (!vec || !isArrayLike || data.length === 0) return;
@@ -2197,8 +2400,12 @@ function resolveVectorPreviewInstanceCount(selectionInfo, label = '') {
         return Math.max(1, Math.ceil(headLength / PRISM_DIMENSIONS_PER_UNIT));
     }
     const candidates = [
+        selectionInfo?.info?.prismCount,
+        selectionInfo?.object?.userData?.prismCount,
+        selectionInfo?.hit?.object?.userData?.prismCount,
         vectorRef?.instanceCount,
         vectorRef?._batch?.prismCount,
+        vectorRef?.mesh?.userData?.prismCount,
         vectorRef?.mesh?.count,
         vectorRef?.mesh?.instanceMatrix?.count
     ];
@@ -2220,6 +2427,10 @@ function resolveVectorPreviewInstanceCount(selectionInfo, label = '') {
 export function buildVectorClonePreview(selectionInfo, label = '') {
     const weightedSumSelection = isWeightedSumSelection(label, selectionInfo);
     const kvCacheVectorSelection = isKvCacheVectorSelection(selectionInfo);
+    const mlpMiddleVectorSelection = isMlpMiddleVectorSelection(label, selectionInfo);
+    const activationStageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    const isMlpDownVectorSelection = activationStageLower === 'mlp.down'
+        || String(label || '').toLowerCase().startsWith('mlp down projection');
     if (weightedSumSelection) {
         // Use the exact runtime vector geometry for weighted-sum selections.
         const directClone = buildDirectClonePreview(selectionInfo)
@@ -2227,12 +2438,44 @@ export function buildVectorClonePreview(selectionInfo, label = '') {
         if (directClone) return directClone;
     }
 
+    if (mlpMiddleVectorSelection) {
+        const expandedVectorPreview = buildMlpMiddleVectorPreview(selectionInfo, label);
+        if (expandedVectorPreview) return expandedVectorPreview;
+    }
+
     const exactVectorSlicePreview = buildExactVectorMeshSlicePreview(selectionInfo, label);
     if (exactVectorSlicePreview) return exactVectorSlicePreview;
 
     const vectorRef = selectionInfo?.info?.vectorRef || null;
     const vectorMesh = findVectorSourceMesh(selectionInfo);
-    if (!vectorRef && !vectorMesh) return null;
+    if (!vectorRef && !vectorMesh) {
+        const fallbackData = extractPreviewVectorData(selectionInfo);
+        if (
+            (isResidualVectorSelection(label, selectionInfo)
+            || isPostLayerNormResidualSelection({
+                label,
+                stage: getActivationDataFromSelection(selectionInfo)?.stage || ''
+            })
+            || isMlpDownVectorSelection)
+            && Array.isArray(fallbackData)
+            && fallbackData.length > 0
+        ) {
+            const vec = createPreviewVector({
+                colorHex: resolveVectorPreviewColor(label, selectionInfo),
+                data: null,
+                instanceCount: Math.max(1, Math.floor(resolveVectorPreviewInstanceCount(selectionInfo, label) || PREVIEW_VECTOR_BODY_INSTANCES))
+            });
+            applyDataToPreviewVector(vec, fallbackData);
+            return {
+                object: vec.group,
+                dispose: () => {
+                    if (vec.mesh?.geometry) vec.mesh.geometry.dispose();
+                    if (vec.mesh?.material) vec.mesh.material.dispose();
+                }
+            };
+        }
+        return null;
+    }
 
     const prismCount = resolveVectorPreviewInstanceCount(selectionInfo, label);
     const vec = createPreviewVector({
@@ -5279,6 +5522,7 @@ export class SelectionPanel {
         vectorRef = null,
         label = 'Vector',
         kind = 'vector',
+        activationData = null,
         layerIndex = null,
         headIndex = null,
         tokenIndex = null,
@@ -5286,7 +5530,9 @@ export class SelectionPanel {
         tokenLabel = ''
     } = {}) {
         if (!vectorRef) return null;
-        const activationData = vectorRef.userData?.activationData || null;
+        const resolvedActivationData = activationData && typeof activationData === 'object'
+            ? activationData
+            : (vectorRef.userData?.activationData || null);
         const normalizedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
         const normalizedHeadIndex = Number.isFinite(headIndex) ? Math.floor(headIndex) : null;
         const normalizedTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
@@ -5304,8 +5550,8 @@ export class SelectionPanel {
         const info = {
             vectorRef
         };
-        if (activationData && typeof activationData === 'object') {
-            info.activationData = activationData;
+        if (resolvedActivationData && typeof resolvedActivationData === 'object') {
+            info.activationData = resolvedActivationData;
         }
         if (Number.isFinite(normalizedLayerIndex)) info.layerIndex = normalizedLayerIndex;
         if (Number.isFinite(normalizedHeadIndex)) info.headIndex = normalizedHeadIndex;
@@ -5332,6 +5578,7 @@ export class SelectionPanel {
             : null;
         if (Number.isFinite(vectorRef?._index)) info.vectorIndex = Math.max(0, Math.floor(vectorRef._index));
         if (Number.isFinite(sharedPrismCount)) info.prismIndex = 0;
+        if (Number.isFinite(sharedPrismCount)) info.prismCount = sharedPrismCount;
 
         return {
             label: resolvedLabel,
@@ -5495,13 +5742,187 @@ export class SelectionPanel {
         const vSideCopy = getSideCopyEntry(lane, resolvedHeadIndex, 'V')?.vec || null;
         const vectorRef = qSideCopy || kCopy || vSideCopy;
         if (!vectorRef) return null;
+        const outputStage = normalizePostLayerNormResidualStage('ln1.output') || 'ln1.output';
+        const sourceStage = normalizePostLayerNormResidualStage(outputStage, { preferLegacy: true });
+        const resolvedLabel = resolvePostLayerNormResidualLabel({ stage: outputStage });
 
         return this._buildRuntimeVectorSelection({
             vectorRef,
-            label: resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' }),
+            label: resolvedLabel,
             kind: 'vector',
+            activationData: {
+                label: resolvedLabel,
+                stage: outputStage,
+                sourceStage,
+                layerIndex: resolvedLayerIndex,
+                ...(Number.isFinite(resolvedHeadIndex) ? { headIndex: resolvedHeadIndex } : {}),
+                ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
+                ...(Number.isFinite(tokenId) ? { tokenId: Math.floor(tokenId) } : {}),
+                ...(typeof tokenLabel === 'string' && tokenLabel.trim().length
+                    ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) }
+                    : {})
+            },
             layerIndex: resolvedLayerIndex,
             headIndex: resolvedHeadIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+    }
+
+    _findRuntimeResidualVectorSelection({
+        stage = 'ln1.output',
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const resolvedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
+        if (!Number.isFinite(resolvedLayerIndex)) return null;
+
+        const { lane } = this._findLayerLaneByToken({
+            layerIndex: resolvedLayerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+        if (!lane) return null;
+
+        const normalizedStage = normalizePostLayerNormResidualStage(stage) || 'ln1.output';
+        const sourceStage = normalizePostLayerNormResidualStage(normalizedStage, { preferLegacy: true });
+        let vectorRef = null;
+        if (normalizedStage === 'ln2.output') {
+            vectorRef = lane.resultVecLN2 || lane.movingVecLN2 || lane.finalVecAfterMlp || null;
+        } else if (normalizedStage === 'ln1.output') {
+            vectorRef = lane.resultVec || lane.postAdditionVec || lane.originalVec || null;
+        }
+        if (!vectorRef) return null;
+
+        const resolvedLabel = resolvePostLayerNormResidualLabel({ stage: normalizedStage || 'ln1.output' });
+        const activationData = {
+            label: resolvedLabel,
+            stage: normalizedStage || 'ln1.output',
+            sourceStage,
+            layerIndex: resolvedLayerIndex,
+            ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
+            ...(Number.isFinite(tokenId) ? { tokenId: Math.floor(tokenId) } : {}),
+            ...(typeof tokenLabel === 'string' && tokenLabel.trim().length
+                ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) }
+                : {})
+        };
+
+        return this._buildRuntimeVectorSelection({
+            vectorRef,
+            label: resolvedLabel,
+            kind: 'vector',
+            activationData,
+            layerIndex: resolvedLayerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+    }
+
+    _findRuntimeMlpMiddleVectorSelection({
+        stage = 'mlp.up',
+        label = '',
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const resolvedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
+        if (!Number.isFinite(resolvedLayerIndex)) return null;
+
+        const { lane } = this._findLayerLaneByToken({
+            layerIndex: resolvedLayerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+        if (!lane || !Array.isArray(lane.expandedVecSegments) || !lane.expandedVecSegments.length) return null;
+
+        const normalizedStage = String(stage || '').trim().toLowerCase();
+        const vectorRef = lane.expandedVecSegments.find((candidate) => {
+            const candidateStage = String(candidate?.userData?.activationData?.stage || '').toLowerCase();
+            return normalizedStage && candidateStage === normalizedStage;
+        }) || lane.expandedVecSegments[0] || null;
+        if (!vectorRef) return null;
+
+        const resolvedLabel = String(
+            label
+            || vectorRef.userData?.activationData?.label
+            || vectorRef.group?.userData?.label
+            || vectorRef.mesh?.userData?.label
+            || 'MLP Up Projection'
+        ).trim() || 'MLP Up Projection';
+        const activationData = {
+            ...(vectorRef.userData?.activationData && typeof vectorRef.userData.activationData === 'object'
+                ? vectorRef.userData.activationData
+                : {}),
+            label: resolvedLabel,
+            ...(normalizedStage ? { stage: normalizedStage } : {}),
+            layerIndex: resolvedLayerIndex,
+            ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
+            ...(Number.isFinite(tokenId) ? { tokenId: Math.floor(tokenId) } : {}),
+            ...(typeof tokenLabel === 'string' && tokenLabel.trim().length
+                ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) }
+                : {})
+        };
+
+        return this._buildRuntimeVectorSelection({
+            vectorRef,
+            label: resolvedLabel,
+            kind: 'vector',
+            activationData,
+            layerIndex: resolvedLayerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+    }
+
+    _findRuntimeMlpDownVectorSelection({
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const resolvedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
+        if (!Number.isFinite(resolvedLayerIndex)) return null;
+
+        const { lane } = this._findLayerLaneByToken({
+            layerIndex: resolvedLayerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+        if (!lane) return null;
+
+        const vectorRef = lane.finalVecAfterMlp || null;
+        if (!vectorRef) return null;
+
+        const resolvedLabel = 'MLP Down Projection';
+        const activationData = {
+            ...(vectorRef.userData?.activationData && typeof vectorRef.userData.activationData === 'object'
+                ? vectorRef.userData.activationData
+                : {}),
+            label: resolvedLabel,
+            stage: 'mlp.down',
+            layerIndex: resolvedLayerIndex,
+            ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
+            ...(Number.isFinite(tokenId) ? { tokenId: Math.floor(tokenId) } : {}),
+            ...(typeof tokenLabel === 'string' && tokenLabel.trim().length
+                ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) }
+                : {})
+        };
+
+        return this._buildRuntimeVectorSelection({
+            vectorRef,
+            label: resolvedLabel,
+            kind: 'vector',
+            activationData,
+            layerIndex: resolvedLayerIndex,
             tokenIndex,
             tokenId,
             tokenLabel
@@ -5538,7 +5959,8 @@ export class SelectionPanel {
             candidates.push({
                 entry,
                 vectorIndex: safeVectorIndex,
-                instanceId: safeVectorIndex * prismCount
+                instanceId: safeVectorIndex * prismCount,
+                prismCount
             });
         };
 
@@ -5631,6 +6053,7 @@ export class SelectionPanel {
                 if (entryTokenText) info.tokenLabel = entryTokenText;
                 if (Number.isFinite(candidate.vectorIndex)) info.vectorIndex = candidate.vectorIndex;
                 if (Number.isFinite(candidate.instanceId)) info.prismIndex = 0;
+                if (Number.isFinite(candidate.prismCount)) info.prismCount = candidate.prismCount;
 
                 bestSelection = {
                     label,
@@ -5963,8 +6386,10 @@ export class SelectionPanel {
                 continue;
             }
 
-            if (stage === 'ln1.norm' || stage === 'ln1.scale' || stage === 'ln1.shift') {
-                const lnStage = stage.slice('ln1.'.length);
+            if (stage === 'ln1.norm' || stage === 'ln1.scale' || stage === 'ln1.output' || stage === 'ln1.shift') {
+                const lnStage = stage === 'ln1.output'
+                    ? 'shift'
+                    : stage.slice('ln1.'.length);
                 const values = Number.isFinite(layerIndex)
                     && Number.isFinite(tokenIndex)
                     && typeof source.getLayerLn1 === 'function'
@@ -5974,8 +6399,10 @@ export class SelectionPanel {
                 continue;
             }
 
-            if (stage === 'ln2.norm' || stage === 'ln2.scale' || stage === 'ln2.shift') {
-                const lnStage = stage.slice('ln2.'.length);
+            if (stage === 'ln2.norm' || stage === 'ln2.scale' || stage === 'ln2.output' || stage === 'ln2.shift') {
+                const lnStage = stage === 'ln2.output'
+                    ? 'shift'
+                    : stage.slice('ln2.'.length);
                 const values = Number.isFinite(layerIndex)
                     && Number.isFinite(tokenIndex)
                     && typeof source.getLayerLn2 === 'function'
@@ -5985,8 +6412,10 @@ export class SelectionPanel {
                 continue;
             }
 
-            if (stage === 'final_ln.input' || stage === 'final_ln.norm' || stage === 'final_ln.scale' || stage === 'final_ln.shift') {
-                const finalStage = stage.slice('final_ln.'.length);
+            if (stage === 'final_ln.input' || stage === 'final_ln.norm' || stage === 'final_ln.scale' || stage === 'final_ln.output' || stage === 'final_ln.shift') {
+                const finalStage = stage === 'final_ln.output'
+                    ? 'shift'
+                    : stage.slice('final_ln.'.length);
                 const values = Number.isFinite(tokenIndex)
                     && typeof source.getFinalLayerNorm === 'function'
                     ? tryRead(() => source.getFinalLayerNorm(finalStage, tokenIndex, baseVectorLength))
@@ -6304,6 +6733,7 @@ export class SelectionPanel {
     } = {}) {
         const scene = this.engine?.scene || null;
         if (!scene || typeof scene.traverse !== 'function') return null;
+        const postLayerNormStage = normalizePostLayerNormResidualStage('ln1.output') || 'ln1.output';
 
         if (Number.isFinite(headIndex)) {
             const copiedSelection = this._findSceneVectorEntrySelection({
@@ -6326,14 +6756,14 @@ export class SelectionPanel {
                 tokenIndex,
                 tokenId,
                 tokenLabel,
-                defaultLabel: resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' })
+                defaultLabel: resolvePostLayerNormResidualLabel({ stage: postLayerNormStage })
             });
             if (copiedSelection) return copiedSelection;
         }
 
         const instancedSelection = this._findSceneVectorEntrySelection({
             stageMatcher: (stageLower, entry, node) => {
-                if (stageLower !== 'ln1.shift') return false;
+                if (normalizePostLayerNormResidualStage(stageLower) !== postLayerNormStage) return false;
                 const entryCategory = entry?.category || entry?.vectorRef?.userData?.vectorCategory;
                 const entryActivationLabel = entry?.activationData?.label || '';
                 const vectorRefGroupLabel = entry?.vectorRef?.group?.userData?.label || '';
@@ -6352,7 +6782,7 @@ export class SelectionPanel {
             tokenIndex,
             tokenId,
             tokenLabel,
-            defaultLabel: resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' })
+            defaultLabel: resolvePostLayerNormResidualLabel({ stage: postLayerNormStage })
         });
         if (instancedSelection) return instancedSelection;
 
@@ -6363,7 +6793,8 @@ export class SelectionPanel {
         scene.traverse((node) => {
             if (!node || node.isScene || !node.userData) return;
             const stageLower = String(node.userData.activationData?.stage || '').toLowerCase();
-            if (stageLower !== 'ln1.shift') return;
+            const normalizedStage = normalizePostLayerNormResidualStage(stageLower);
+            if (normalizedStage !== postLayerNormStage) return;
             if (isRelabeledQkvVectorCandidate({
                 label: node.userData.label || node.userData.activationData?.label || '',
                 category: node.userData.vectorCategory
@@ -6402,12 +6833,18 @@ export class SelectionPanel {
             const label = typeof node.userData.label === 'string' && node.userData.label.trim().length
                 ? resolvePostLayerNormResidualLabel({
                     label: node.userData.label,
-                    stage: stageLower
+                    stage: normalizedStage
                 })
-                : resolvePostLayerNormResidualLabel({ stage: stageLower || 'ln1.shift' });
+                : resolvePostLayerNormResidualLabel({ stage: normalizedStage || postLayerNormStage });
             const info = {};
             if (node.userData.activationData && typeof node.userData.activationData === 'object') {
-                info.activationData = node.userData.activationData;
+                const sourceStage = node.userData.activationData.sourceStage
+                    || normalizePostLayerNormResidualStage(normalizedStage, { preferLegacy: true });
+                info.activationData = {
+                    ...node.userData.activationData,
+                    stage: normalizedStage || node.userData.activationData.stage,
+                    ...(sourceStage ? { sourceStage } : {})
+                };
             }
             if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
             if (Number.isFinite(nodeTokenIndex)) info.tokenIndex = nodeTokenIndex;
@@ -6891,7 +7328,9 @@ export class SelectionPanel {
         tokenId = null,
         tokenLabel = ''
     } = {}) {
-        const label = resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' });
+        const outputStage = normalizePostLayerNormResidualStage('ln1.output') || 'ln1.output';
+        const sourceStage = normalizePostLayerNormResidualStage(outputStage, { preferLegacy: true });
+        const label = resolvePostLayerNormResidualLabel({ stage: outputStage });
         const info = {};
         if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
         if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
@@ -6901,7 +7340,8 @@ export class SelectionPanel {
         }
         info.activationData = {
             label,
-            stage: 'ln1.shift',
+            stage: outputStage,
+            sourceStage,
             ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
             ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
             ...(typeof tokenLabel === 'string' && tokenLabel.trim().length ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) } : {})
@@ -6929,6 +7369,36 @@ export class SelectionPanel {
         };
     }
 
+    _buildFallbackMlpDownVectorSelection({
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const label = 'MLP Down Projection';
+        const info = {};
+        if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
+        if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
+        if (Number.isFinite(tokenId)) info.tokenId = Math.floor(tokenId);
+        if (typeof tokenLabel === 'string' && tokenLabel.trim().length) {
+            info.tokenLabel = formatTokenLabelForPreview(tokenLabel);
+        }
+        info.activationData = {
+            label,
+            stage: 'mlp.down',
+            ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
+            ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
+            ...(typeof tokenLabel === 'string' && tokenLabel.trim().length
+                ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) }
+                : {})
+        };
+        return this._attachActivationSourceValuesToSelection({
+            label,
+            kind: 'vector',
+            info
+        });
+    }
+
     _resolveTransformerView2dCanvasSelection(selection = null) {
         const fallbackSelection = this._buildTransformerView2dFallbackSelection(selection);
         if (!fallbackSelection?.label) return null;
@@ -6942,9 +7412,13 @@ export class SelectionPanel {
         const activation = getActivationDataFromSelection(fallbackSelection);
         const stageLower = String(activation?.stage || '').toLowerCase();
         const sourceStageLower = String(activation?.sourceStage || '').toLowerCase();
+        const normalizedPostLayerNormStage = normalizePostLayerNormResidualStage(stageLower);
+        const normalizedPostLayerNormSourceStage = normalizePostLayerNormResidualStage(sourceStageLower);
         const liveVectorStages = [...new Set([
             sourceStageLower,
-            stageLower
+            stageLower,
+            normalizedPostLayerNormSourceStage,
+            normalizedPostLayerNormStage
         ].filter(Boolean))];
         const layerIndex = findUserDataNumber(fallbackSelection, 'layerIndex');
         const headIndex = findUserDataNumber(fallbackSelection, 'headIndex');
@@ -7108,10 +7582,16 @@ export class SelectionPanel {
             });
         }
 
-        if (stageLower === 'ln1.shift' || sourceStageLower === 'ln1.shift') {
+        if (normalizedPostLayerNormStage === 'ln1.output' || normalizedPostLayerNormSourceStage === 'ln1.output') {
             return this._findRuntimeQkvSourceVectorSelection({
                 layerIndex,
                 headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || this._findRuntimeResidualVectorSelection({
+                stage: 'ln1.output',
+                layerIndex,
                 tokenIndex: tokenContext.tokenIndex,
                 tokenId: tokenContext.tokenId,
                 tokenLabel: tokenContext.tokenLabel
@@ -7127,6 +7607,24 @@ export class SelectionPanel {
                 tokenId: tokenContext.tokenId,
                 tokenLabel: tokenContext.tokenLabel
             });
+        }
+
+        if (normalizedPostLayerNormStage === 'ln2.output' || normalizedPostLayerNormSourceStage === 'ln2.output') {
+            return this._findRuntimeResidualVectorSelection({
+                stage: 'ln2.output',
+                layerIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || this._findGenericSceneVectorSelection({
+                activationStages: ['ln2.output', 'ln2.shift'],
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: label
+            }) || sceneLabelFallbackSelection() || fallbackSelection;
         }
 
         const genericMatrixSelection = (
@@ -7147,6 +7645,58 @@ export class SelectionPanel {
             }) || sceneLabelFallbackSelection() || fallbackSelection;
         }
 
+        const mlpMiddleVectorStage = liveVectorStages.find((stage) => (
+            stage === 'mlp.up'
+            || stage === 'mlp.activation'
+        )) || '';
+        const mlpMiddleVectorSelection = (
+            lower.includes('mlp up projection')
+            || lower.includes('mlp activation')
+            || lower.includes('mlp expanded segments')
+            || mlpMiddleVectorStage === 'mlp.up'
+            || mlpMiddleVectorStage === 'mlp.activation'
+        );
+        if (mlpMiddleVectorSelection) {
+            return this._findRuntimeMlpMiddleVectorSelection({
+                stage: mlpMiddleVectorStage || (lower.includes('mlp activation') ? 'mlp.activation' : 'mlp.up'),
+                label,
+                layerIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || this._findGenericSceneVectorSelection({
+                activationStages: mlpMiddleVectorStage ? [mlpMiddleVectorStage] : liveVectorStages,
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: label
+            }) || sceneLabelFallbackSelection() || fallbackSelection;
+        }
+
+        if (stageLower === 'mlp.down' || lower.startsWith('mlp down projection')) {
+            return this._findRuntimeMlpDownVectorSelection({
+                layerIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || this._findGenericSceneVectorSelection({
+                activationStages: ['mlp.down'],
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: label
+            }) || sceneLabelFallbackSelection() || this._buildFallbackMlpDownVectorSelection({
+                layerIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            });
+        }
+
         const genericVectorSelection = (
             isResidualVectorSelection(label, fallbackSelection)
             || isWeightedSumSelection(label, fallbackSelection)
@@ -7155,7 +7705,7 @@ export class SelectionPanel {
             || liveVectorStages.includes('layer.incoming')
             || liveVectorStages.includes('residual.post_attention')
             || liveVectorStages.includes('residual.post_mlp')
-            || liveVectorStages.includes('ln2.shift')
+            || liveVectorStages.some((stage) => Boolean(normalizePostLayerNormResidualStage(stage)))
             || liveVectorStages.includes('ln1.scale')
             || liveVectorStages.includes('ln2.scale')
             || liveVectorStages.includes('final_ln.scale')
@@ -7396,7 +7946,8 @@ export class SelectionPanel {
         const resolvedLabel = resolvedSelection?.label
             ? normalizeSelectionLabel(resolvedSelection.label, resolvedSelection)
             : sourceLabel;
-        if (!resolvedSelection || !isMlpMatrixSelectionLabel(resolvedLabel)) return;
+        const activationStage = getActivationDataFromSelection(resolvedSelection)?.stage || '';
+        if (!resolvedSelection || !isGeluDetailSelection({ label: resolvedLabel, stage: activationStage })) return;
         this._geluSourceSelection = resolvedSelection;
         this._geluDetailOpen = true;
         this.panel.classList.add('is-gelu-view-open');
@@ -13629,9 +14180,7 @@ export class SelectionPanel {
             || activationStage.startsWith('embedding.sum')
             || activationStage.startsWith('layer.incoming')
             || activationStage === 'residual.post_attention'
-            || activationStage === 'residual.post_mlp'
-            || activationStage === 'ln1.shift'
-            || activationStage === 'ln2.shift';
+            || activationStage === 'residual.post_mlp';
         if (isResidualStreamSelection) {
             hideRows();
             return metadata;
@@ -14181,7 +14730,10 @@ export class SelectionPanel {
             this._currentSelectionDescription = getDescriptionPlainText(desc || '');
             setDescriptionContent(this.description, desc || '');
             setDescriptionSoftmaxAction(this.description, isPostSoftmaxAttentionSelection(descriptionSelection, label));
-            setDescriptionGeluAction(this.description, isMlpMatrixSelectionLabel(label));
+            setDescriptionGeluAction(this.description, isGeluDetailSelection({
+                label,
+                stage: getActivationDataFromSelection(descriptionSelection)?.stage || ''
+            }));
             setDescriptionMhsaInfoAction(this.description, false);
         } else {
             this._currentSelectionDescription = '';

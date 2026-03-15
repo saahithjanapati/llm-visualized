@@ -11,6 +11,19 @@ function normalizePostLayerNormResidualKind(kind = null) {
     return safeKind === 'ln1' || safeKind === 'ln2' ? safeKind : null;
 }
 
+const POST_LAYER_NORM_OUTPUT_STAGE_KIND = Object.freeze({
+    'ln1.output': 'ln1',
+    'ln1.shift': 'ln1',
+    'ln2.output': 'ln2',
+    'ln2.shift': 'ln2'
+});
+
+const LAYER_NORM_OUTPUT_STAGE_KIND = Object.freeze({
+    ...POST_LAYER_NORM_OUTPUT_STAGE_KIND,
+    'final_ln.output': 'final',
+    'final_ln.shift': 'final'
+});
+
 function matchPostLayerNormResidualLabel(label = '') {
     return String(label || '')
         .toLowerCase()
@@ -22,6 +35,41 @@ function normalizeLayerNormParam(param = null) {
     if (lower === 'scale' || lower === 'gamma') return 'scale';
     if (lower === 'shift' || lower === 'beta') return 'shift';
     return null;
+}
+
+export function normalizePostLayerNormResidualStage(stage = '', {
+    preferLegacy = false
+} = {}) {
+    const stageLower = String(stage || '').toLowerCase();
+    const kind = POST_LAYER_NORM_OUTPUT_STAGE_KIND[stageLower] || null;
+    if (!kind) return '';
+    return preferLegacy
+        ? `${kind}.shift`
+        : `${kind}.output`;
+}
+
+export function isPostLayerNormResidualStage(stage = '') {
+    return !!normalizePostLayerNormResidualStage(stage);
+}
+
+export function normalizeLayerNormOutputStage(stage = '', {
+    preferLegacy = false
+} = {}) {
+    const stageLower = String(stage || '').toLowerCase();
+    const kind = LAYER_NORM_OUTPUT_STAGE_KIND[stageLower] || null;
+    if (!kind) return '';
+    if (preferLegacy) {
+        return kind === 'final'
+            ? 'final_ln.shift'
+            : `${kind}.shift`;
+    }
+    return kind === 'final'
+        ? 'final_ln.output'
+        : `${kind}.output`;
+}
+
+export function isLayerNormOutputStage(stage = '') {
+    return !!normalizeLayerNormOutputStage(stage);
 }
 
 export function resolveLayerNormKind({
@@ -71,9 +119,7 @@ export function isPostLayerNormResidualSelection({
     label = '',
     stage = ''
 } = {}) {
-    const stageLower = String(stage || '').toLowerCase();
-    return stageLower === 'ln1.shift'
-        || stageLower === 'ln2.shift'
+    return isPostLayerNormResidualStage(stage)
         || Boolean(matchPostLayerNormResidualLabel(label));
 }
 
@@ -83,9 +129,9 @@ export function resolvePostLayerNormResidualKind({
     explicitKind = null
 } = {}) {
     const safeExplicit = normalizePostLayerNormResidualKind(explicitKind);
-    const stageLower = String(stage || '').toLowerCase();
-    if (stageLower === 'ln1.shift') return 'ln1';
-    if (stageLower === 'ln2.shift') return 'ln2';
+    const normalizedStage = normalizePostLayerNormResidualStage(stage);
+    if (normalizedStage === 'ln1.output') return 'ln1';
+    if (normalizedStage === 'ln2.output') return 'ln2';
 
     const labelMatch = matchPostLayerNormResidualLabel(label);
     if (!labelMatch) return null;

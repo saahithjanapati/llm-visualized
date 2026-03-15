@@ -14,6 +14,8 @@ import {
 } from './schema/sceneTypes.js';
 import { buildFocusResult } from './mhsaDetailFocusResult.js';
 import {
+    isPostLayerNormResidualStage,
+    normalizePostLayerNormResidualStage,
     resolveLayerNormKind,
     resolvePostLayerNormResidualLabel
 } from '../utils/layerNormLabels.js';
@@ -124,8 +126,7 @@ function resolveResidualHoverActivationStage(rowSemantic = null) {
     if (stage === 'post-attn-residual') return 'residual.post_attention';
     if (stage === 'post-mlp-residual') return 'residual.post_mlp';
     if (stage === 'outgoing') return 'residual.post_mlp';
-    if (stage === 'ln1.shift') return 'ln1.shift';
-    if (stage === 'ln2.shift') return 'ln2.shift';
+    if (isPostLayerNormResidualStage(stage)) return normalizePostLayerNormResidualStage(stage);
     return '';
 }
 
@@ -145,11 +146,14 @@ export function buildResidualRowHoverPayload(rowHit = null, activationSource = n
         tokenIndex,
         activationSource
     });
-    const isPostLayerNormResidual = activationStage === 'ln1.shift' || activationStage === 'ln2.shift';
+    const isPostLayerNormResidual = isPostLayerNormResidualStage(activationStage);
     const headIndex = normalizeOptionalIndex(semantic.headIndex);
     const label = isPostLayerNormResidual
         ? resolvePostLayerNormResidualLabel({ stage: activationStage })
         : 'Residual Stream Vector';
+    const sourceStage = isPostLayerNormResidual
+        ? normalizePostLayerNormResidualStage(activationStage, { preferLegacy: true })
+        : '';
     const info = {
         ...(Number.isFinite(layerIndex) ? { layerIndex } : {}),
         ...(Number.isFinite(headIndex) ? { headIndex } : {}),
@@ -159,6 +163,7 @@ export function buildResidualRowHoverPayload(rowHit = null, activationSource = n
         activationData: {
             label,
             stage: activationStage,
+            ...(sourceStage ? { sourceStage } : {}),
             ...(Number.isFinite(layerIndex) ? { layerIndex } : {}),
             ...(Number.isFinite(headIndex) ? { headIndex } : {}),
             ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),

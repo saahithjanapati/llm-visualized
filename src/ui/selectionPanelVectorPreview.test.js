@@ -1,0 +1,365 @@
+import * as THREE from 'three';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+
+let buildVectorClonePreview;
+
+beforeAll(async () => {
+    vi.stubGlobal('localStorage', {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {}
+    });
+    ({ buildVectorClonePreview } = await import('./selectionPanel.js'));
+});
+
+function createSceneBackedVectorMesh({
+    prismCount = 3,
+    vectorColors = [0xFF0000, 0x00FF00, 0x0000FF]
+} = {}) {
+    const totalInstances = prismCount * vectorColors.length;
+    const mesh = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshBasicMaterial({ color: 0xFFFFFF }),
+        totalInstances
+    );
+    mesh.userData = {
+        isVector: true,
+        prismCount,
+        instanceKind: 'instanced'
+    };
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(totalInstances * 3), 3);
+
+    for (let instanceId = 0; instanceId < totalInstances; instanceId += 1) {
+        const matrix = new THREE.Matrix4().makeTranslation(instanceId * 1.5, 0, 0);
+        mesh.setMatrixAt(instanceId, matrix);
+    }
+
+    vectorColors.forEach((hex, vectorIndex) => {
+        const color = new THREE.Color(hex);
+        const baseInstanceId = vectorIndex * prismCount;
+        for (let prismIndex = 0; prismIndex < prismCount; prismIndex += 1) {
+            mesh.setColorAt(baseInstanceId + prismIndex, color);
+        }
+    });
+
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor.needsUpdate = true;
+    return mesh;
+}
+
+function createExpandedMlpBatch({
+    prismCount = 12,
+    vectorColors = [0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00],
+    segmentGap = 120
+} = {}) {
+    const segmentCount = vectorColors.length;
+    const totalInstances = prismCount * segmentCount;
+    const mesh = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshBasicMaterial({ color: 0xFFFFFF }),
+        totalInstances
+    );
+    mesh.userData = {
+        isVector: true,
+        prismCount,
+        instanceKind: 'batchedVector',
+        label: 'MLP Expanded Segments'
+    };
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(totalInstances * 3), 3);
+
+    const vectorRefs = vectorColors.map((hex, vectorIndex) => {
+        const values = new Array(prismCount * 64).fill(vectorIndex + 1);
+        return {
+            isBatchedVectorRef: true,
+            _index: vectorIndex,
+            _batch: null,
+            instanceCount: prismCount,
+            rawData: values.slice(),
+            userData: {
+                activationData: {
+                    label: 'MLP Up Projection',
+                    stage: 'mlp.up',
+                    segmentIndex: vectorIndex,
+                    values
+                }
+            },
+            currentKeyColors: [],
+            group: new THREE.Object3D(),
+            mesh
+        };
+    });
+    const batch = {
+        prismCount,
+        vectorCount: segmentCount,
+        mesh,
+        _vectorRefs: vectorRefs
+    };
+    vectorRefs.forEach((vectorRef) => {
+        vectorRef._batch = batch;
+        vectorRef.group.userData = {
+            isVector: true,
+            label: 'MLP Up Projection'
+        };
+    });
+
+    vectorColors.forEach((hex, vectorIndex) => {
+        const color = new THREE.Color(hex);
+        const baseInstanceId = vectorIndex * prismCount;
+        const segmentOffsetX = vectorIndex * segmentGap;
+        for (let prismIndex = 0; prismIndex < prismCount; prismIndex += 1) {
+            const instanceId = baseInstanceId + prismIndex;
+            const matrix = new THREE.Matrix4().makeTranslation(segmentOffsetX + prismIndex * 1.5, 0, 0);
+            mesh.setMatrixAt(instanceId, matrix);
+            mesh.setColorAt(instanceId, color);
+        }
+    });
+
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor.needsUpdate = true;
+    return {
+        mesh,
+        vectorRefs
+    };
+}
+
+function findPreviewMesh(root = null) {
+    if (!root) return null;
+    let previewMesh = null;
+    root.traverse((child) => {
+        if (!previewMesh && child?.isInstancedMesh) {
+            previewMesh = child;
+        }
+    });
+    return previewMesh;
+}
+
+function countPreviewMeshes(root = null) {
+    let count = 0;
+    root?.traverse?.((child) => {
+        if (child?.isInstancedMesh) count += 1;
+    });
+    return count;
+}
+
+function getInstanceX(mesh, instanceId) {
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    mesh.getMatrixAt(instanceId, matrix);
+    matrix.decompose(position, quaternion, scale);
+    return position.x;
+}
+
+describe('buildVectorClonePreview', () => {
+    it('copies only the selected scene-backed vector slice when prismCount metadata is present', () => {
+        const prismCount = 3;
+        const sourceMesh = createSceneBackedVectorMesh({
+            prismCount,
+            vectorColors: [0xFF0000, 0x00FF00, 0x0000FF]
+        });
+        const selection = {
+            label: 'Post-LayerNorm Residual Vector',
+            kind: 'instanced',
+            object: sourceMesh,
+            hit: {
+                object: sourceMesh,
+                instanceId: prismCount
+            },
+            info: {
+                activationData: {
+                    stage: 'ln1.output',
+                    sourceStage: 'ln1.shift'
+                },
+                layerIndex: 2,
+                tokenIndex: 1
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(prismCount);
+
+        const copiedColor = new THREE.Color();
+        previewMesh.getColorAt(0, copiedColor);
+        expect(copiedColor.r).toBeCloseTo(0, 5);
+        expect(copiedColor.g).toBeCloseTo(1, 5);
+        expect(copiedColor.b).toBeCloseTo(0, 5);
+
+        preview.dispose?.();
+        sourceMesh.geometry.dispose();
+        sourceMesh.material.dispose();
+    });
+
+    it('renders MLP-up as one expanded preview vector with the full batch colors', () => {
+        const prismCount = 12;
+        const { mesh: sourceMesh, vectorRefs } = createExpandedMlpBatch({
+            prismCount,
+            vectorColors: [0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00],
+            segmentGap: 120
+        });
+        const circularVectorRef = vectorRefs[1];
+        sourceMesh.userData.vectorRef = circularVectorRef;
+
+        const selection = {
+            label: 'MLP Up Projection',
+            kind: 'instanced',
+            object: sourceMesh,
+            hit: {
+                object: sourceMesh,
+                instanceId: prismCount
+            },
+            info: {
+                vectorIndex: 1,
+                vectorRef: circularVectorRef,
+                activationData: {
+                    label: 'MLP Up Projection',
+                    stage: 'mlp.up',
+                    layerIndex: 2,
+                    tokenIndex: 1,
+                    segmentIndex: 1
+                },
+                layerIndex: 2,
+                tokenIndex: 1,
+                prismCount
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(prismCount * 4);
+
+        const sourceSegmentGap = getInstanceX(sourceMesh, prismCount) - getInstanceX(sourceMesh, prismCount - 1);
+        const previewSegmentGap = getInstanceX(previewMesh, prismCount) - getInstanceX(previewMesh, prismCount - 1);
+        expect(sourceSegmentGap).toBeGreaterThan(50);
+        expect(previewSegmentGap).toBeLessThan(20);
+
+        const copiedColor = new THREE.Color();
+        previewMesh.getColorAt(prismCount * 2, copiedColor);
+        expect(copiedColor.r).toBeCloseTo(0, 5);
+        expect(copiedColor.g).toBeCloseTo(0, 5);
+        expect(copiedColor.b).toBeCloseTo(1, 5);
+
+        previewMesh.getColorAt(prismCount * 3, copiedColor);
+        expect(copiedColor.r).toBeCloseTo(1, 5);
+        expect(copiedColor.g).toBeCloseTo(1, 5);
+        expect(copiedColor.b).toBeCloseTo(0, 5);
+
+        preview.dispose?.();
+        sourceMesh.geometry.dispose();
+        sourceMesh.material.dispose();
+    });
+
+    it('builds a single expanded MLP preview from activation values when no live vector mesh is available', () => {
+        const values = new Array(3072).fill(0).map((_, index) => Math.sin(index / 32));
+        const selection = {
+            label: 'MLP Activation (post GELU)',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'MLP Activation (post GELU)',
+                    stage: 'mlp.activation',
+                    values
+                },
+                values
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(48);
+        const previewSegmentGap = getInstanceX(previewMesh, 12) - getInstanceX(previewMesh, 11);
+        expect(previewSegmentGap).toBeLessThan(20);
+
+        preview.dispose?.();
+    });
+
+    it('treats grouped 48-prism MLP values as an expanded vector instead of collapsing to one prism', () => {
+        const groupedValues = new Array(48).fill(0).map((_, index) => (index % 12) / 12);
+        const selection = {
+            label: 'MLP Up Projection',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'MLP Up Projection',
+                    stage: 'mlp.up',
+                    values: groupedValues
+                },
+                values: groupedValues
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(48);
+        const previewSegmentGap = getInstanceX(previewMesh, 12) - getInstanceX(previewMesh, 11);
+        expect(previewSegmentGap).toBeLessThan(20);
+
+        preview.dispose?.();
+    });
+
+    it('renders data-backed ln2 residual selections as one vector instead of the three-lane placeholder', () => {
+        const values = new Array(768).fill(0).map((_, index) => Math.cos(index / 24));
+        const selection = {
+            label: 'Post LayerNorm 2 Residual Vector',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'Post LayerNorm 2 Residual Vector',
+                    stage: 'ln2.output',
+                    sourceStage: 'ln2.shift',
+                    values
+                },
+                values
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+        expect(countPreviewMeshes(preview?.object)).toBe(1);
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(12);
+
+        preview.dispose?.();
+    });
+
+    it('renders data-backed MLP-down selections as one vector instead of the three-lane placeholder', () => {
+        const values = new Array(768).fill(0).map((_, index) => Math.sin(index / 20));
+        const selection = {
+            label: 'MLP Down Projection',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'MLP Down Projection',
+                    stage: 'mlp.down',
+                    values
+                },
+                values
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+        expect(countPreviewMeshes(preview?.object)).toBe(1);
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(12);
+
+        preview.dispose?.();
+    });
+});

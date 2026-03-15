@@ -2,7 +2,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createGeluDetailView } from './selectionPanelGeluPreview.js';
+import {
+    createGeluDetailView,
+    isGeluDetailSelection
+} from './selectionPanelGeluPreview.js';
 
 function createRect(width, height) {
     return {
@@ -92,5 +95,20 @@ describe('createGeluDetailView', () => {
         const fittedFontSize = Number.parseFloat(approxFormulaEl.style.fontSize);
         expect(fittedFontSize).toBeGreaterThanOrEqual(8.25);
         expect(fittedFontSize).toBeLessThan(16);
+    });
+
+    it('treats the post-GELU activation vector as eligible for the GELU detail action', () => {
+        expect(isGeluDetailSelection({
+            label: 'MLP Activation (post GELU)',
+            stage: 'mlp.activation'
+        })).toBe(true);
+        expect(isGeluDetailSelection({
+            label: 'MLP Up Weight Matrix',
+            stage: 'mlp.up.weight'
+        })).toBe(true);
+        expect(isGeluDetailSelection({
+            label: 'Residual Stream Vector',
+            stage: 'residual.post_mlp'
+        })).toBe(false);
     });
 });

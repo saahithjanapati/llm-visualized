@@ -14,6 +14,7 @@ import {
 import { buildSelectionLayerNormEquation } from './selectionPanelLayerNormEquationTextUtils.js';
 import {
     formatLayerNormLabel,
+    isLayerNormOutputStage,
     isPostLayerNormResidualSelection
 } from '../utils/layerNormLabels.js';
 import { D_MODEL, D_HEAD, VOCAB_SIZE, CONTEXT_LEN } from './selectionPanelConstants.js';
@@ -1230,7 +1231,7 @@ function resolveLayerNormEquationHighlight(lower, stageLower = '') {
     ) {
         return 'shift';
     }
-    if (stageLower === 'ln1.shift' || stageLower === 'ln2.shift' || stageLower === 'final_ln.shift') {
+    if (isLayerNormOutputStage(stageLower)) {
         return 'output';
     }
     return 'norm';
@@ -1347,13 +1348,13 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (stageLower === 'ln1.norm') {
         return buildLayerNormEntries('ln1', 'norm');
     }
-    if (stageLower === 'ln1.scale' || stageLower === 'ln1.shift' || stageLower === 'ln1.param.scale' || stageLower === 'ln1.param.shift') {
+    if (stageLower === 'ln1.scale' || stageLower === 'ln1.output' || stageLower === 'ln1.shift' || stageLower === 'ln1.param.scale' || stageLower === 'ln1.param.shift') {
         return buildLayerNormEntries('ln1', resolveLayerNormEquationHighlight(lower, stageLower));
     }
     if (stageLower === 'ln2.norm') {
         return buildLayerNormEntries('ln2', 'norm');
     }
-    if (stageLower === 'ln2.scale' || stageLower === 'ln2.shift' || stageLower === 'ln2.param.scale' || stageLower === 'ln2.param.shift') {
+    if (stageLower === 'ln2.scale' || stageLower === 'ln2.output' || stageLower === 'ln2.shift' || stageLower === 'ln2.param.scale' || stageLower === 'ln2.param.shift') {
         return buildLayerNormEntries('ln2', resolveLayerNormEquationHighlight(lower, stageLower));
     }
     if (stageLower === 'final_ln.norm') {
@@ -1361,6 +1362,7 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     }
     if (
         stageLower === 'final_ln.scale'
+        || stageLower === 'final_ln.output'
         || stageLower === 'final_ln.shift'
         || stageLower === 'final_ln.param.scale'
         || stageLower === 'final_ln.param.shift'
@@ -1544,10 +1546,10 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         if (stageLower === 'ln1.scale' || stageLower === 'ln2.scale') {
             return buildLayerNormScaledVectorDescription(selectionInfo);
         }
-        if (stageLower === 'ln1.shift') {
+        if (stageLower === 'ln1.output' || stageLower === 'ln1.shift') {
             return buildLn1OutputDescription(selectionInfo);
         }
-        if (stageLower === 'ln2.shift') {
+        if (stageLower === 'ln2.output' || stageLower === 'ln2.shift') {
             return buildLn2OutputDescription(selectionInfo);
         }
         if (stageLower === 'qkv.q') {
@@ -1586,7 +1588,7 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         if (stageLower === 'final_ln.scale') {
             return FINAL_LN_SCALE_DESCRIPTION;
         }
-        if (stageLower === 'final_ln.shift') {
+        if (stageLower === 'final_ln.output' || stageLower === 'final_ln.shift') {
             return FINAL_LN_SHIFT_DESCRIPTION;
         }
     }

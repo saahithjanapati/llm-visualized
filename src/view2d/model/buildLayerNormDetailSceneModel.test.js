@@ -90,8 +90,8 @@ describe('buildLayerNormDetailSceneModel', () => {
         const normalizationEquationNode = nodes.find((node) => node?.role === 'layer-norm-normalization-equation') || null;
         const hadamardNode = nodes.find((node) => node?.role === 'layer-norm-hadamard') || null;
         const scaleEqualsNode = nodes.find((node) => node?.role === 'layer-norm-scale-equals') || null;
-        const shiftPlusNode = nodes.find((node) => node?.role === 'layer-norm-shift-plus') || null;
-        const shiftEqualsNode = nodes.find((node) => node?.role === 'layer-norm-shift-equals') || null;
+        const outputPlusNode = nodes.find((node) => node?.role === 'layer-norm-output-plus') || null;
+        const outputEqualsNode = nodes.find((node) => node?.role === 'layer-norm-output-equals') || null;
         const incomingSpacerNode = nodes.find((node) => node?.role === 'incoming-arrow-spacer') || null;
         const outgoingSpacerNode = nodes.find((node) => node?.role === 'outgoing-arrow-spacer') || null;
         const inputConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-input') || null;
@@ -128,8 +128,8 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizationEquationNode?.layout?.offsetY).toBeLessThan(-10);
         expect(hadamardNode?.text).toBe('⊙');
         expect(scaleEqualsNode?.text).toBe('=');
-        expect(shiftPlusNode?.text).toBe('+');
-        expect(shiftEqualsNode?.text).toBe('=');
+        expect(outputPlusNode?.text).toBe('+');
+        expect(outputEqualsNode?.text).toBe('=');
         expect(inputNode?.rowItems).toHaveLength(2);
         expect(normalizedNode?.rowItems).toHaveLength(2);
         expect(scaleNode?.rowItems).toHaveLength(1);
@@ -169,7 +169,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(outputNode?.rowItems?.[1]?.semantic).toMatchObject({
             componentKind: 'residual',
             layerIndex: 3,
-            stage: 'ln1.shift',
+            stage: 'ln1.output',
             role: 'layer-norm-output-row',
             rowIndex: 1,
             tokenIndex: 1
@@ -292,7 +292,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(outputNode?.rowItems?.[0]?.semantic).toMatchObject({
             componentKind: 'layer-norm',
             layerIndex: 11,
-            stage: 'final_ln.shift',
+            stage: 'final_ln.output',
             role: 'layer-norm-output-row',
             rowIndex: 0,
             tokenIndex: 0

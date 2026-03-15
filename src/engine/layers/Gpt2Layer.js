@@ -104,6 +104,7 @@ import {
     resolveTokenIndexForLane,
     resolveTokenLabelForLayer
 } from './gpt2LayerDataAccess.js';
+import { normalizeLayerNormOutputStage } from '../../utils/layerNormLabels.js';
 
 
 // Slightly reduced spacing between stacked layers for a tighter layout.
@@ -1575,7 +1576,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         addResult,
                                         finalLn1ShiftData,
                                         lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
-                                        this._getLaneMeta(lane, 'ln1.shift')
+                                        this._getLayerNormOutputLaneMeta(lane, 'ln1.output')
                                     );
                                 }
                                 const additionTrail = multResult.userData && multResult.userData.trail;
@@ -1617,7 +1618,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 const finalResultVec = this._materializeLayerNormResultVector(
                                     addResult,
                                     lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
-                                    this._getLaneMeta(lane, 'ln1.shift')
+                                    this._getLayerNormOutputLaneMeta(lane, 'ln1.output')
                                 );
                                 lane.resultVec = finalResultVec;
                                 finalResultVec.userData = finalResultVec.userData || {};
@@ -1653,7 +1654,7 @@ export default class Gpt2Layer extends BaseLayer {
                         rv = this._materializeLayerNormResultVector(
                             rv,
                             lane.tokenLabel ? `LN1 Shifted - ${lane.tokenLabel}` : 'LN1 Shifted',
-                            this._getLaneMeta(lane, 'ln1.shift')
+                            this._getLayerNormOutputLaneMeta(lane, 'ln1.output')
                         );
                         lane.resultVec = rv;
                     }
@@ -2122,7 +2123,7 @@ export default class Gpt2Layer extends BaseLayer {
                                         addResult,
                                         finalLn2ShiftData,
                                         lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
-                                        this._getLaneMeta(lane, 'ln2.shift')
+                                        this._getLayerNormOutputLaneMeta(lane, 'ln2.output')
                                     );
                                 }
                                 const ln2Trail = resVec.userData && resVec.userData.trail;
@@ -2166,7 +2167,7 @@ export default class Gpt2Layer extends BaseLayer {
                                 const finalLn2ResultVec = this._materializeLayerNormResultVector(
                                     addResult,
                                     lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
-                                    this._getLaneMeta(lane, 'ln2.shift')
+                                    this._getLayerNormOutputLaneMeta(lane, 'ln2.output')
                                 );
                                 lane.resultVecLN2 = finalLn2ResultVec;
                                 finalLn2ResultVec.userData = finalLn2ResultVec.userData || {};
@@ -2316,7 +2317,7 @@ export default class Gpt2Layer extends BaseLayer {
             vec = this._materializeLayerNormResultVector(
                 vec,
                 lane.tokenLabel ? `LN2 Shifted - ${lane.tokenLabel}` : 'LN2 Shifted',
-                this._getLaneMeta(lane, 'ln2.shift')
+                this._getLayerNormOutputLaneMeta(lane, 'ln2.output')
             );
             lane.resultVecLN2 = vec;
         }
@@ -4317,6 +4318,15 @@ export default class Gpt2Layer extends BaseLayer {
             tokenLabel: lane && lane.tokenLabel ? lane.tokenLabel : undefined,
             ...extra
         };
+    }
+
+    _getLayerNormOutputLaneMeta(lane, stage = '', extra = {}) {
+        const normalizedStage = normalizeLayerNormOutputStage(stage) || String(stage || '').toLowerCase();
+        const sourceStage = normalizeLayerNormOutputStage(normalizedStage, { preferLegacy: true });
+        return this._getLaneMeta(lane, normalizedStage || stage, {
+            ...(sourceStage ? { sourceStage } : {}),
+            ...extra
+        });
     }
 
     _getBaseVectorLength() {

@@ -81,7 +81,8 @@ describe('resolveHoverTokenContext attention metrics', () => {
             label: 'Post LayerNorm 2 Residual Vector',
             info: {
                 activationData: {
-                    stage: 'ln2.shift',
+                    stage: 'ln2.output',
+                    sourceStage: 'ln2.shift',
                     tokenIndex: 1,
                     layerIndex: 3
                 }

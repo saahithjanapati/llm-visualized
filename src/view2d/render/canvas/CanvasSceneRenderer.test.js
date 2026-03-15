@@ -1105,7 +1105,7 @@ describe('CanvasSceneRenderer', () => {
                 componentKind: 'mhsa',
                 layerIndex: 0,
                 headIndex: 0,
-                stage: 'ln1.shift',
+                stage: 'ln1.output',
                 role: 'projection-source-xln'
             },
             dimensions: { rows: 3, cols: 64 },

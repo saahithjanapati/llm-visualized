@@ -95,7 +95,7 @@ function buildResidualCopyRowItems(rows = [], {
             componentKind: 'residual',
             layerIndex,
             headIndex,
-            stage: 'ln1.shift',
+            stage: 'ln1.output',
             role: 'x-ln-row',
             rowIndex,
             ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
