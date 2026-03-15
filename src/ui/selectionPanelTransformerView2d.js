@@ -44,6 +44,8 @@ import {
 import { View2dViewportController, resolveViewportFitTransform } from '../view2d/runtime/View2dViewportController.js';
 import { createHoverLabelOverlay } from './hoverLabelOverlay.js';
 import { createTransformerView2dResidualCaptionOverlay } from './transformerView2dResidualCaptionOverlay.js';
+import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
+import { ATTENTION_VALUE_PLACEHOLDER } from './selectionPanelConstants.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import {
     buildTransformerView2dOverviewState,
@@ -86,6 +88,8 @@ export {
 const VIEW2D_DETAIL_ACTION_FIT = 'fit-scene';
 const VIEW2D_DETAIL_ACTION_EXIT_DEEP = 'exit-deep-detail';
 const VIEW2D_DETAIL_ACTION_EXIT_TO_3D = 'exit-to-3d';
+const VIEW2D_DETAIL_ACTION_CLOSE_SELECTION = 'close-selection';
+const VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS = 220;
 const VIEW2D_INTERACTION_SETTLE_MS = 140;
 const VIEW2D_PREVIEW_DPR_CAP_IDLE = 1.5;
 const VIEW2D_PREVIEW_DPR_CAP_INTERACTING = 1;
@@ -311,7 +315,9 @@ export function setDescriptionTransformerView2dAction(descriptionEl, {
 }
 
 export function createTransformerView2dDetailView(panelEl, {
-    onExitTo3d = null
+    onExitTo3d = null,
+    onOpenSelection = null,
+    onCloseSelection = null
 } = {}) {
     if (!panelEl || typeof document === 'undefined') return null;
 
@@ -319,10 +325,6 @@ export function createTransformerView2dDetailView(panelEl, {
     root.className = 'detail-transformer-view2d';
     root.setAttribute('aria-hidden', 'true');
     root.innerHTML = `
-        <div class="detail-transformer-view2d-copy">
-            <p>Prototype canvas for the new scalable 2D transformer view.</p>
-            <p>It uses the semantic scene model and canvas renderer instead of the current DOM-heavy matrix layout.</p>
-        </div>
         <div class="detail-transformer-view2d-stage">
             <div class="detail-transformer-view2d-hud">
                 <div class="detail-transformer-view2d-toolbar">
@@ -367,24 +369,68 @@ export function createTransformerView2dDetailView(panelEl, {
                     </div>
                 </div>
             </div>
-            <div
-                class="detail-transformer-view2d-canvas-card"
-                tabindex="0"
-                role="group"
-                aria-label="Scalable 2D transformer canvas. Drag or use one finger to pan, pinch or scroll to zoom, and use arrow keys or W A S D to move around."
-            >
-                <div class="detail-transformer-view2d-detail-frame" aria-hidden="true"></div>
-                <canvas class="detail-transformer-view2d-canvas" aria-label="Scalable 2D transformer canvas"></canvas>
+            <div class="detail-transformer-view2d-workspace">
                 <div
-                    class="detail-transformer-view2d-token-strip"
-                    data-visible="false"
+                    class="detail-transformer-view2d-canvas-card"
+                    tabindex="0"
+                    role="group"
+                    aria-label="Scalable 2D transformer canvas. Drag or use one finger to pan, pinch or scroll to zoom, and use arrow keys or W A S D to move around."
+                >
+                    <div class="detail-transformer-view2d-detail-frame" aria-hidden="true"></div>
+                    <canvas class="detail-transformer-view2d-canvas" aria-label="Scalable 2D transformer canvas"></canvas>
+                    <div
+                        class="detail-transformer-view2d-token-strip"
+                        data-visible="false"
+                        aria-hidden="true"
+                    >
+                        <div
+                            class="detail-transformer-view2d-token-strip__tokens prompt-token-strip__tokens"
+                            data-transformer-view2d-role="token-strip-tokens"
+                        ></div>
+                    </div>
+                </div>
+                <aside
+                    class="detail-transformer-view2d-selection-sidebar"
                     aria-hidden="true"
                 >
+                    <div class="detail-transformer-view2d-selection-sidebar-header">
+                        <div class="detail-transformer-view2d-selection-sidebar-copy">
+                            <div
+                                class="detail-transformer-view2d-selection-sidebar-title detail-title"
+                                data-transformer-view2d-role="selection-sidebar-title"
+                                hidden
+                            ></div>
+                            <div
+                                class="detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle"
+                                data-transformer-view2d-role="selection-sidebar-subtitle"
+                                hidden
+                            ></div>
+                            <div
+                                class="detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle"
+                                data-transformer-view2d-role="selection-sidebar-subtitle-secondary"
+                                hidden
+                            ></div>
+                            <div
+                                class="detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle"
+                                data-transformer-view2d-role="selection-sidebar-subtitle-tertiary"
+                                hidden
+                            ></div>
+                        </div>
+                        <button
+                            type="button"
+                            class="detail-transformer-view2d-selection-sidebar-close"
+                            data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_CLOSE_SELECTION}"
+                            aria-label="Hide selection details"
+                            title="Close details"
+                        >
+                            ×
+                        </button>
+                    </div>
                     <div
-                        class="detail-transformer-view2d-token-strip__tokens prompt-token-strip__tokens"
-                        data-transformer-view2d-role="token-strip-tokens"
+                        class="detail-transformer-view2d-selection-sidebar-body"
+                        data-transformer-view2d-role="selection-sidebar-body"
                     ></div>
-                </div>
+                </aside>
             </div>
         </div>
     `;
@@ -397,10 +443,17 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     const canvas = root.querySelector('.detail-transformer-view2d-canvas');
+    const workspace = root.querySelector('.detail-transformer-view2d-workspace');
     const canvasCard = root.querySelector('.detail-transformer-view2d-canvas-card');
     const detailFrame = root.querySelector('.detail-transformer-view2d-detail-frame');
     const tokenStrip = root.querySelector('.detail-transformer-view2d-token-strip');
     const tokenStripTokens = root.querySelector('[data-transformer-view2d-role="token-strip-tokens"]');
+    const selectionSidebar = root.querySelector('.detail-transformer-view2d-selection-sidebar');
+    const selectionSidebarBody = root.querySelector('[data-transformer-view2d-role="selection-sidebar-body"]');
+    const selectionSidebarTitle = root.querySelector('[data-transformer-view2d-role="selection-sidebar-title"]');
+    const selectionSidebarSubtitle = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle"]');
+    const selectionSidebarSubtitleSecondary = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle-secondary"]');
+    const selectionSidebarSubtitleTertiary = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle-tertiary"]');
     const tokenHoverSync = createTransformerView2dTokenHoverSync({
         container: tokenStripTokens
     });
@@ -408,6 +461,7 @@ export function createTransformerView2dDetailView(panelEl, {
     const fitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"]`);
     const backToGraphBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_DEEP}"]`);
     const exitTo3dBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_TO_3D}"]`);
+    const closeSelectionBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_CLOSE_SELECTION}"]`);
     const stageLayerReadout = root.querySelector('[data-transformer-view2d-readout="layer"]');
     const stageTitleReadout = root.querySelector('[data-transformer-view2d-readout="stage"]');
     const hoverLabelOverlay = createHoverLabelOverlay({
@@ -512,8 +566,152 @@ export function createTransformerView2dDetailView(panelEl, {
         stagedFocusTransition: null,
         stagedFocusRafId: null,
         stagedHeadDetailTransition: null,
-        stagedHeadDetailRafId: null
+        stagedHeadDetailRafId: null,
+        overviewSelectionArmSignature: ''
     };
+    let selectionSidebarCloseTimerId = null;
+
+    function clearSelectionSidebarCloseTimer() {
+        if (selectionSidebarCloseTimerId === null) return;
+        clearTimeout(selectionSidebarCloseTimerId);
+        selectionSidebarCloseTimerId = null;
+    }
+
+    function resetOverviewSelectionArm() {
+        state.overviewSelectionArmSignature = '';
+    }
+
+    function requestSelectionOpen(selection = null) {
+        if (!selection?.label || typeof onOpenSelection !== 'function') return false;
+        return onOpenSelection(selection) !== false;
+    }
+
+    function resolveTokenStripChipSelection(chip = null) {
+        if (!chip || chip.dataset.tokenNav !== 'true') return null;
+        const tokenText = formatTokenLabelForPreview(chip.dataset.tokenText || chip.textContent || '');
+        if (!tokenText || tokenText === ATTENTION_VALUE_PLACEHOLDER) return null;
+        const tokenIndex = normalizeView2dTokenChipIndex(Number(chip.dataset.tokenIndex));
+        const tokenId = normalizeView2dTokenChipIndex(Number(chip.dataset.tokenId));
+        const info = {
+            tokenLabel: tokenText
+        };
+        if (Number.isFinite(tokenIndex)) info.tokenIndex = tokenIndex;
+        if (Number.isFinite(tokenId)) info.tokenId = tokenId;
+        return {
+            label: `Token: ${tokenText}`,
+            kind: 'label',
+            info
+        };
+    }
+
+    function requestTokenStripChipSelection(chip = null, event = null) {
+        const selection = resolveTokenStripChipSelection(chip);
+        if (!selection) return false;
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        return requestSelectionOpen(selection);
+    }
+
+    function setSelectionSidebarLine(element, {
+        html = '',
+        className = ''
+    } = {}) {
+        if (!element) return;
+        if (className) {
+            element.className = className;
+        }
+        const safeHtml = typeof html === 'string' ? html : '';
+        element.innerHTML = safeHtml;
+        const hasContent = safeHtml.trim().length > 0;
+        element.hidden = !hasContent;
+    }
+
+    function clearSelectionSidebarHeader() {
+        setSelectionSidebarLine(selectionSidebarTitle, {
+            html: '',
+            className: 'detail-transformer-view2d-selection-sidebar-title detail-title'
+        });
+        setSelectionSidebarLine(selectionSidebarSubtitle, {
+            html: '',
+            className: 'detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle'
+        });
+        setSelectionSidebarLine(selectionSidebarSubtitleSecondary, {
+            html: '',
+            className: 'detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle'
+        });
+        setSelectionSidebarLine(selectionSidebarSubtitleTertiary, {
+            html: '',
+            className: 'detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle'
+        });
+    }
+
+    function setSelectionSidebarVisible(visible = false, {
+        immediate = false
+    } = {}) {
+        if (!selectionSidebar || !workspace) return;
+        const nextVisible = !!visible;
+        clearSelectionSidebarCloseTimer();
+        workspace.dataset.selectionSidebarVisible = nextVisible ? 'true' : 'false';
+        selectionSidebar.setAttribute('aria-hidden', nextVisible ? 'false' : 'true');
+
+        if (nextVisible) {
+            selectionSidebar.classList.remove('is-closing');
+            selectionSidebar.classList.add('is-visible');
+            return;
+        }
+
+        if (immediate || !state.isSmallScreen) {
+            selectionSidebar.classList.remove('is-visible', 'is-closing');
+            clearSelectionSidebarHeader();
+            return;
+        }
+
+        selectionSidebar.classList.remove('is-visible');
+        selectionSidebar.classList.add('is-closing');
+        selectionSidebarCloseTimerId = setTimeout(() => {
+            selectionSidebar.classList.remove('is-closing');
+            clearSelectionSidebarHeader();
+            selectionSidebarCloseTimerId = null;
+        }, VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS);
+    }
+
+    function setSelectionSidebarHeaderContent({
+        titleHtml = '',
+        titleClassName = 'detail-transformer-view2d-selection-sidebar-title detail-title',
+        subtitleHtml = '',
+        subtitleClassName = 'detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle',
+        subtitleSecondaryHtml = '',
+        subtitleSecondaryClassName = 'detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle',
+        subtitleTertiaryHtml = '',
+        subtitleTertiaryClassName = 'detail-transformer-view2d-selection-sidebar-subtitle detail-subtitle'
+    } = {}) {
+        setSelectionSidebarLine(selectionSidebarTitle, {
+            html: titleHtml,
+            className: titleClassName
+        });
+        setSelectionSidebarLine(selectionSidebarSubtitle, {
+            html: subtitleHtml,
+            className: subtitleClassName
+        });
+        setSelectionSidebarLine(selectionSidebarSubtitleSecondary, {
+            html: subtitleSecondaryHtml,
+            className: subtitleSecondaryClassName
+        });
+        setSelectionSidebarLine(selectionSidebarSubtitleTertiary, {
+            html: subtitleTertiaryHtml,
+            className: subtitleTertiaryClassName
+        });
+    }
+
+    function scrollSelectionSidebarToTop() {
+        if (!selectionSidebarBody) return;
+        if (typeof selectionSidebarBody.scrollTo === 'function') {
+            selectionSidebarBody.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            return;
+        }
+        selectionSidebarBody.scrollTop = 0;
+        selectionSidebarBody.scrollLeft = 0;
+    }
 
     function resetAutoFrameState({ pendingInitialFocus = false } = {}) {
         state.pendingInitialFocus = !!pendingInitialFocus;
@@ -1353,6 +1551,7 @@ export function createTransformerView2dDetailView(panelEl, {
         state.detailSceneHoverSignature = '';
         state.overviewSceneFocus = null;
         state.overviewSceneHoverSignature = '';
+        resetOverviewSelectionArm();
         resetHoverOverviewBlend();
         resetCanvasHoverTargetKey();
         if (hadPinnedFocus) {
@@ -1394,6 +1593,7 @@ export function createTransformerView2dDetailView(panelEl, {
         state.detailSceneHoverSignature = nextSignature;
         state.overviewSceneFocus = null;
         state.overviewSceneHoverSignature = '';
+        resetOverviewSelectionArm();
         resetHoverOverviewBlend();
         resetCanvasHoverTargetKey();
         if (state.detailScenePinnedTokenSticky) {
@@ -1412,6 +1612,7 @@ export function createTransformerView2dDetailView(panelEl, {
         scheduleRender: shouldScheduleRender = true,
         force = false
     } = {}) {
+        resetOverviewSelectionArm();
         if (state.detailScenePinnedFocus && force !== true) {
             const hadResidualHover = !!state.hoveredResidualRow;
             const hadOverviewFocus = !!state.overviewSceneFocus;
@@ -1526,6 +1727,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 detailHoverState?.label || '',
                 hoverInfo
             );
+            resetOverviewSelectionArm();
             tokenHoverSync.setCanvasEntryFromHoverPayload(detailHoverState, { emit: true });
             const didChange = detailHoverState.signature !== state.detailSceneHoverSignature;
             state.hoveredResidualRow = null;
@@ -1620,6 +1822,7 @@ export function createTransformerView2dDetailView(panelEl, {
             return worldHit?.entry || null;
         }
 
+        resetOverviewSelectionArm();
         const semanticHoverPayload = buildSemanticNodeHoverPayload(worldHit);
         if (!semanticHoverPayload?.label) {
             clearCanvasHover();
@@ -1938,6 +2141,7 @@ export function createTransformerView2dDetailView(panelEl, {
         state.detailSceneHoverSignature = '';
         state.overviewSceneFocus = null;
         state.overviewSceneHoverSignature = '';
+        resetOverviewSelectionArm();
         resetHoverOverviewBlend();
         resetCanvasHoverTargetKey();
         tokenHoverSync.clearCanvasEntry({ emit: true });
@@ -2343,6 +2547,7 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     function onSceneNodeClick(entry = null) {
+        resetOverviewSelectionArm();
         clearStagedHeadDetailTransition();
         if (isMhsaHeadOverviewEntry(entry)) {
             return openHeadDetail({
@@ -2811,6 +3016,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, clickedHit);
                 const detailClickLockAction = resolveTransformerView2dDetailClickLockAction({
                     detailSceneSelectionLocked: state.detailSceneLockActive,
+                    detailScenePinnedSignature: state.detailScenePinnedSignature,
                     detailHoverState
                 });
                 if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.LOCK_TARGET) {
@@ -2824,11 +3030,19 @@ export function createTransformerView2dDetailView(panelEl, {
                     return;
                 }
                 if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE) {
+                    if (requestSelectionOpen(detailHoverState)) {
+                        return;
+                    }
                     return;
                 }
                 if (clearPinnedDetailSceneFocus({ scheduleRender: true })) {
                     return;
                 }
+            }
+            const residualSelection = buildResidualRowHoverPayload(clickedHit?.rowHit, state.activationSource);
+            resetOverviewSelectionArm();
+            if (residualSelection && requestSelectionOpen(residualSelection)) {
+                return;
             }
             onSceneNodeClick(clickedEntry);
         }
@@ -2869,6 +3083,31 @@ export function createTransformerView2dDetailView(panelEl, {
             onExitTo3d();
         }
     });
+    closeSelectionBtn?.addEventListener('click', () => {
+        const didHandleClose = (typeof onCloseSelection === 'function')
+            ? onCloseSelection()
+            : false;
+        if (didHandleClose === false) {
+            setSelectionSidebarVisible(false);
+        }
+        focusCanvasSurface();
+    });
+    tokenStripTokens?.addEventListener('click', (event) => {
+        const chip = event?.target && typeof event.target.closest === 'function'
+            ? event.target.closest('.detail-token-nav-chip[data-token-nav="true"]')
+            : null;
+        if (!chip || !tokenStripTokens.contains(chip)) return;
+        requestTokenStripChipSelection(chip, event);
+    });
+    tokenStripTokens?.addEventListener('keydown', (event) => {
+        const key = event?.key;
+        if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+        const chip = event?.target && typeof event.target.closest === 'function'
+            ? event.target.closest('.detail-token-nav-chip[data-token-nav="true"]')
+            : null;
+        if (!chip || !tokenStripTokens.contains(chip)) return;
+        requestTokenStripChipSelection(chip, event);
+    });
     window.addEventListener('keydown', onWindowKeyDown);
     window.addEventListener('keyup', onWindowKeyUp);
     window.addEventListener('blur', clearKeyboardMotion);
@@ -2892,6 +3131,7 @@ export function createTransformerView2dDetailView(panelEl, {
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
             renderTokenStrip();
             if (!state.visible) {
+                setSelectionSidebarVisible(false, { immediate: true });
                 tokenHoverSync.clear({ emit: true });
                 clearStagedFocusTransition();
                 clearStagedHeadDetailTransition();
@@ -2910,6 +3150,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 clearInteractionTimer();
                 state.isInteracting = false;
                 disableAutoFrameState();
+                resetOverviewSelectionArm();
                 updateCanvasCursor(null);
                 return;
             }
@@ -2929,10 +3170,11 @@ export function createTransformerView2dDetailView(panelEl, {
         } = {}) {
             clearStagedFocusTransition();
             clearStagedHeadDetailTransition();
+            state.isSmallScreen = !!isSmallScreen;
+            setSelectionSidebarVisible(false, { immediate: true });
             state.activationSource = activationSource;
             state.tokenIndices = Array.isArray(tokenIndices) ? [...tokenIndices] : tokenIndices;
             state.tokenLabels = Array.isArray(tokenLabels) ? [...tokenLabels] : tokenLabels;
-            state.isSmallScreen = !!isSmallScreen;
             const normalizedDetailSemanticTargets = normalizeView2dSemanticTargets(detailSemanticTargets);
             const normalizedTransitionMode = String(
                 transitionMode
@@ -2992,6 +3234,7 @@ export function createTransformerView2dDetailView(panelEl, {
             hideDetailFrame();
             residualCaptionOverlay.hide();
             state.tokenStripSignature = '';
+            resetOverviewSelectionArm();
             resetHeadDetailState(hasActiveDetailTarget());
             syncActiveSelectionState();
             renderTokenStrip();
@@ -3010,6 +3253,25 @@ export function createTransformerView2dDetailView(panelEl, {
             }
             focusCanvasSurface();
             return didRender;
+        },
+        getSelectionSidebarBody() {
+            return selectionSidebarBody || null;
+        },
+        isSelectionSidebarVisible() {
+            return !!selectionSidebar
+                && (
+                    selectionSidebar.classList.contains('is-visible')
+                    || selectionSidebar.classList.contains('is-closing')
+                );
+        },
+        setSelectionSidebarVisible(visible = false, options = null) {
+            setSelectionSidebarVisible(visible, options || {});
+        },
+        setSelectionSidebarHeaderContent(content = null) {
+            setSelectionSidebarHeaderContent(content || {});
+        },
+        scrollSelectionSidebarToTop() {
+            scrollSelectionSidebarToTop();
         },
         resizeAndRender() {
             if (!state.visible || !state.scene || !state.layout) return false;

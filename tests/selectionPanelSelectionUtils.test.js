@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
     getActivationDataFromSelection,
+    isAttentionScoreSelection,
     isKvCacheVectorSelection,
     isLogitBarSelection,
     isSelfAttentionSelection,
     normalizeSelectionLabel,
+    resolveAttentionModeFromSelection,
     resolveSelectionLogitEntry,
     simplifyLayerNormParamDisplayLabel
 } from '../src/ui/selectionPanelSelectionUtils.js';
@@ -63,6 +65,26 @@ describe('selectionPanelSelectionUtils', () => {
         expect(isSelfAttentionSelection('anything', selection)).toBe(true);
         expect(isSelfAttentionSelection('post-layernorm residual', selection)).toBe(true);
         expect(isSelfAttentionSelection('post-layernorm residual', { info: { activationData: { stage: 'ln1.shift' } } })).toBe(false);
+    });
+
+    it('treats causal mask selections as pre-softmax attention scores', () => {
+        const selection = {
+            label: 'Causal Mask',
+            kind: 'attentionSphere',
+            info: {
+                activationData: {
+                    stage: 'attention.mask',
+                    layerIndex: 0,
+                    headIndex: 1,
+                    tokenIndex: 2,
+                    keyTokenIndex: 1
+                }
+            }
+        };
+
+        expect(isAttentionScoreSelection(selection.label, selection)).toBe(true);
+        expect(resolveAttentionModeFromSelection(selection)).toBe('pre');
+        expect(isSelfAttentionSelection(selection.label, selection)).toBe(true);
     });
 
     it('classifies logit bar selections from instance kind', () => {

@@ -376,10 +376,12 @@ function buildAttentionVectorActionMarkup(selectionInfo = null, {
     tokenRef = null
 } = {}) {
     const headIndex = resolveSelectionHeadIndex(selectionInfo);
-    if (!Number.isFinite(headIndex) || !tokenRef) return linkText;
+    const layerIndex = resolveSelectionLayerIndex(selectionInfo);
+    if (!Number.isFinite(headIndex) || !Number.isFinite(layerIndex) || !tokenRef) return linkText;
     const safeVectorKind = normalizeQkvKind(vectorKind);
     return buildInlineDetailActionMarkup(linkText, ATTENTION_VECTOR_DETAIL_ACTION, {
         vectorKind: safeVectorKind,
+        layerIndex,
         headIndex,
         tokenIndex: Number.isFinite(tokenRef.tokenIndex) ? tokenRef.tokenIndex : null,
         tokenId: Number.isFinite(tokenRef.tokenId) ? tokenRef.tokenId : null,

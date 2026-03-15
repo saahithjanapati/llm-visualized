@@ -62,14 +62,14 @@ const INCOMING_ARROW_SPACER_WIDTH = 60;
 const INCOMING_ARROW_SPACER_WIDTH_SMALL = 52;
 const NORMALIZATION_ARROW_SPACER_WIDTH = 108;
 const NORMALIZATION_ARROW_SPACER_WIDTH_SMALL = 90;
-const COPY_ARROW_SPACER_WIDTH = 44;
-const COPY_ARROW_SPACER_WIDTH_SMALL = 36;
 const OUTGOING_ARROW_SPACER_WIDTH = 56;
 const OUTGOING_ARROW_SPACER_WIDTH_SMALL = 48;
 const EQUATION_STAGE_GAP = 12;
 const EQUATION_STAGE_GAP_SMALL = 10;
 const PIPELINE_STAGE_GAP = 16;
 const PIPELINE_STAGE_GAP_SMALL = 12;
+const PIPELINE_STACK_GAP = 28;
+const PIPELINE_STACK_GAP_SMALL = 24;
 const NORMALIZATION_BRIDGE_GAP = 18;
 const NORMALIZATION_BRIDGE_GAP_SMALL = 15;
 const NORMALIZATION_EQUATION_FONT_SCALE = 1.34;
@@ -799,24 +799,6 @@ export function buildLayerNormDetailSceneModel({
         width: isSmallScreen ? NORMALIZATION_ARROW_SPACER_WIDTH_SMALL : NORMALIZATION_ARROW_SPACER_WIDTH,
         height: 1
     });
-    const normalizedCopySpacerNode = createHiddenSpacer({
-        semantic: buildSemantic(baseSemantic, {
-            stage: stageConfig.normStage,
-            role: 'layer-norm-copy-arrow-spacer'
-        }),
-        role: 'layer-norm-copy-arrow-spacer',
-        width: isSmallScreen ? COPY_ARROW_SPACER_WIDTH_SMALL : COPY_ARROW_SPACER_WIDTH,
-        height: 1
-    });
-    const scaledCopySpacerNode = createHiddenSpacer({
-        semantic: buildSemantic(baseSemantic, {
-            stage: stageConfig.scaleStage,
-            role: 'layer-norm-scaled-copy-arrow-spacer'
-        }),
-        role: 'layer-norm-scaled-copy-arrow-spacer',
-        width: isSmallScreen ? COPY_ARROW_SPACER_WIDTH_SMALL : COPY_ARROW_SPACER_WIDTH,
-        height: 1
-    });
     const outgoingArrowSpacerNode = createHiddenSpacer({
         semantic: buildSemantic(baseSemantic, {
             stage: stageConfig.shiftStage,
@@ -864,29 +846,6 @@ export function buildLayerNormDetailSceneModel({
         }
     });
 
-    const normalizedCopyBridgeNode = createGroupNode({
-        role: 'layer-norm-normalized-copy-bridge',
-        semantic: buildSemantic(baseSemantic, {
-            stage: stageConfig.normStage,
-            role: 'layer-norm-normalized-copy-bridge'
-        }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
-        align: 'center',
-        gapKey: 'inline',
-        children: [normalizedCopySpacerNode]
-    });
-    const scaledCopyBridgeNode = createGroupNode({
-        role: 'layer-norm-scaled-copy-bridge',
-        semantic: buildSemantic(baseSemantic, {
-            stage: stageConfig.scaleStage,
-            role: 'layer-norm-scaled-copy-bridge'
-        }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
-        align: 'center',
-        gapKey: 'inline',
-        children: [scaledCopySpacerNode]
-    });
-
     const scalingStageNode = createGroupNode({
         role: 'layer-norm-scaling-stage',
         semantic: buildSemantic(baseSemantic, {
@@ -897,7 +856,6 @@ export function buildLayerNormDetailSceneModel({
         align: 'center',
         gapKey: 'projection',
         children: [
-            normalizedCopyBridgeNode,
             normalizedCopyNode,
             createLayerNormOperatorNode({
                 role: 'layer-norm-hadamard',
@@ -926,6 +884,15 @@ export function buildLayerNormDetailSceneModel({
             }),
             scaledNode
         ],
+        layout: {
+            anchorAlign: {
+                axis: 'x',
+                selfNodeId: normalizedCopyNode.id,
+                selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                targetNodeId: normalizedNode.id,
+                targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+            }
+        },
         metadata: {
             gapOverride: isSmallScreen ? EQUATION_STAGE_GAP_SMALL : EQUATION_STAGE_GAP
         }
@@ -940,7 +907,6 @@ export function buildLayerNormDetailSceneModel({
         align: 'center',
         gapKey: 'projection',
         children: [
-            scaledCopyBridgeNode,
             scaledCopyNode,
             createLayerNormOperatorNode({
                 role: 'layer-norm-shift-plus',
@@ -970,6 +936,15 @@ export function buildLayerNormDetailSceneModel({
             outputNode,
             outgoingArrowSpacerNode
         ],
+        layout: {
+            anchorAlign: {
+                axis: 'x',
+                selfNodeId: scaledCopyNode.id,
+                selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                targetNodeId: scaledNode.id,
+                targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+            }
+        },
         metadata: {
             gapOverride: isSmallScreen ? EQUATION_STAGE_GAP_SMALL : EQUATION_STAGE_GAP
         }
@@ -1020,11 +995,11 @@ export function buildLayerNormDetailSceneModel({
             stage: 'connector-layer-norm-copy-normalized',
             role: 'connector-layer-norm-copy-normalized'
         }),
-        source: createAnchorRef(normalizedNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
-        target: createAnchorRef(normalizedCopyNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
-        route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+        source: createAnchorRef(normalizedNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
+        target: createAnchorRef(normalizedCopyNode.id, VIEW2D_ANCHOR_SIDES.TOP),
+        route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
         gap: CONNECTOR_LAYER_GAP,
-        sourceGap: COPY_CONNECTOR_SOURCE_GAP,
+        sourceGap: Math.max(6, COPY_CONNECTOR_SOURCE_GAP - 2),
         targetGap: COPY_CONNECTOR_TARGET_GAP,
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
@@ -1040,11 +1015,11 @@ export function buildLayerNormDetailSceneModel({
             stage: 'connector-layer-norm-copy-scaled',
             role: 'connector-layer-norm-copy-scaled'
         }),
-        source: createAnchorRef(scaledNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
-        target: createAnchorRef(scaledCopyNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
-        route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+        source: createAnchorRef(scaledNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
+        target: createAnchorRef(scaledCopyNode.id, VIEW2D_ANCHOR_SIDES.TOP),
+        route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
         gap: CONNECTOR_LAYER_GAP,
-        sourceGap: COPY_CONNECTOR_SOURCE_GAP,
+        sourceGap: Math.max(6, COPY_CONNECTOR_SOURCE_GAP - 2),
         targetGap: COPY_CONNECTOR_TARGET_GAP,
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
@@ -1084,19 +1059,34 @@ export function buildLayerNormDetailSceneModel({
                 semantic: buildSemantic(baseSemantic, {
                     role: 'layer-norm-detail-stage'
                 }),
-                direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+                direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
                 align: 'center',
-                gapKey: 'default',
+                gapKey: 'stage',
                 children: [
-                    incomingArrowSpacerNode,
-                    inputNode,
-                    normalizationBridgeNode,
-                    normalizedNode,
+                    createGroupNode({
+                        role: 'layer-norm-input-stage',
+                        semantic: buildSemantic(baseSemantic, {
+                            stage: stageConfig.inputStage,
+                            role: 'layer-norm-input-stage'
+                        }),
+                        direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
+                        align: 'center',
+                        gapKey: 'default',
+                        children: [
+                            incomingArrowSpacerNode,
+                            inputNode,
+                            normalizationBridgeNode,
+                            normalizedNode
+                        ],
+                        metadata: {
+                            gapOverride: isSmallScreen ? PIPELINE_STAGE_GAP_SMALL : PIPELINE_STAGE_GAP
+                        }
+                    }),
                     scalingStageNode,
                     shiftStageNode
                 ],
                 metadata: {
-                    gapOverride: isSmallScreen ? PIPELINE_STAGE_GAP_SMALL : PIPELINE_STAGE_GAP
+                    gapOverride: isSmallScreen ? PIPELINE_STACK_GAP_SMALL : PIPELINE_STACK_GAP
                 }
             }),
             createGroupNode({

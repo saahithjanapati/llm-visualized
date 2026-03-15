@@ -4656,13 +4656,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: flex;
 }
 .detail-transformer-view2d-copy {
-    padding: 2px 16px 0;
-    padding-top: 2px;
-    padding-bottom: 0;
-    font-size: var(--detail-font-body);
-    line-height: 1.45;
-    color: #cfd3dc;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    display: none;
 }
 .detail-transformer-view2d-copy p {
     margin: 0;
@@ -4677,6 +4671,16 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     gap: 10px;
     flex: 1 1 auto;
     min-height: 0;
+}
+.detail-transformer-view2d-workspace {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 2px 16px 0;
+    overflow: hidden;
 }
 .detail-transformer-view2d-hud {
     display: flex;
@@ -4729,15 +4733,137 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 }
 .detail-transformer-view2d-canvas-card {
     position: relative;
-    margin: 2px 16px 0;
+    margin: 0;
     padding: 10px;
+    flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
     box-sizing: border-box;
     border-radius: 12px;
     border: 1px solid rgba(255,255,255,0.12);
-    background: linear-gradient(rgba(255,255,255,0.04), rgba(255,255,255,0.04)) padding-box;
+    background: #000;
     transition: border-color 0.16s ease, border-width 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+.detail-transformer-view2d-selection-sidebar {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: min(var(--hud-stack-desktop-width, 440px), calc(100% - 24px));
+    max-width: calc(100% - 24px);
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(10, 12, 18, 0.92);
+    box-shadow: 0 22px 48px rgba(0, 0, 0, 0.28);
+    overflow: hidden;
+    z-index: 5;
+}
+.detail-transformer-view2d-selection-sidebar.is-visible {
+    display: flex;
+    pointer-events: auto;
+}
+@keyframes detail-transformer-view2d-mobile-sidebar-in {
+    from {
+        transform: translateY(100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+@keyframes detail-transformer-view2d-mobile-sidebar-out {
+    from {
+        transform: translateY(0);
+    }
+    to {
+        transform: translateY(100%);
+    }
+}
+.detail-transformer-view2d-selection-sidebar-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px 8px;
+}
+.detail-transformer-view2d-selection-sidebar-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+    padding-inline: 2px;
+}
+.detail-transformer-view2d-selection-sidebar-title,
+.detail-transformer-view2d-selection-sidebar-subtitle {
+    margin: 0;
+}
+.detail-transformer-view2d-selection-sidebar-title[hidden],
+.detail-transformer-view2d-selection-sidebar-subtitle[hidden] {
+    display: none !important;
+}
+.detail-transformer-view2d-selection-sidebar-close {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(2,2,2,0.86);
+    color: #d3dae4;
+    font-size: 23px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+    transition: transform 0.16s ease, background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.detail-transformer-view2d-selection-sidebar-close:hover {
+    background: rgba(12,12,12,0.95);
+    color: #fff;
+    border-color: rgba(255,255,255,0.24);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.07);
+}
+.detail-transformer-view2d-selection-sidebar-close:active {
+    transform: translateY(1px) scale(0.98);
+}
+.detail-transformer-view2d-selection-sidebar-close:focus-visible {
+    outline: 2px solid rgba(236, 243, 252, 0.78);
+    outline-offset: 2px;
+}
+.detail-transformer-view2d-selection-sidebar-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 0 0 max(18px, env(safe-area-inset-bottom));
+}
+.detail-transformer-view2d-selection-sidebar-body > .detail-preview,
+.detail-transformer-view2d-selection-sidebar-body > .vector-legend,
+.detail-transformer-view2d-selection-sidebar-body > .detail-equations,
+.detail-transformer-view2d-selection-sidebar-body > .detail-prompt-context,
+.detail-transformer-view2d-selection-sidebar-body > .detail-meta,
+.detail-transformer-view2d-selection-sidebar-body > .detail-description,
+.detail-transformer-view2d-selection-sidebar-body > .detail-data,
+.detail-transformer-view2d-selection-sidebar-body > .detail-attention,
+.detail-transformer-view2d-selection-sidebar-body > .detail-copy-context {
+    width: auto;
+    max-width: none;
+    align-self: stretch;
+}
+.detail-transformer-view2d-selection-sidebar-body > .detail-preview {
+    aspect-ratio: auto;
+    height: clamp(220px, 26vh, 280px);
+    min-height: 220px;
+    max-height: 280px;
 }
 .detail-transformer-view2d-canvas-card:focus {
     outline: none;
@@ -4885,9 +5011,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: block;
     border-radius: 8px;
     border: none;
-    background:
-        radial-gradient(circle at top left, rgba(38, 68, 112, 0.28), transparent 34%),
-        linear-gradient(180deg, rgba(8, 12, 18, 0.98), rgba(3, 4, 7, 0.98));
+    background: #000;
     touch-action: none;
     cursor: grab;
 }
@@ -5063,6 +5187,13 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     gap: 0;
     min-height: 100%;
 }
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-workspace {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-hud {
     position: absolute;
     inset:
@@ -5121,7 +5252,44 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     min-height: 100dvh;
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 0;
-    background: linear-gradient(rgba(10,10,12,0.94), rgba(10,10,12,0.94)) padding-box;
+    background: #000;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar {
+    position: absolute;
+    top: max(96px, calc(env(safe-area-inset-top) + 72px));
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
+    width: min(
+        var(--hud-stack-desktop-width, clamp(320px, 27vw, 560px)),
+        calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 32px)
+    );
+    max-width: min(
+        var(--hud-stack-desktop-max-width, calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px)),
+        calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 32px)
+    );
+    min-height: 0;
+    max-height: none;
+    border-color: rgba(255,255,255,0.1);
+    background: rgba(7, 10, 16, 0.96);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    z-index: 5;
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body {
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-preview,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .vector-legend,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-equations,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-prompt-context,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-meta,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-description,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-data,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-attention,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-copy-context {
+    width: auto;
+    max-width: none;
+    align-self: stretch;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-token-strip {
     --prompt-token-strip-max-width: min(
@@ -5134,11 +5302,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     );
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card.is-head-detail-active {
-    inset:
-        max(14px, calc(env(safe-area-inset-top) + 8px))
-        max(14px, calc(env(safe-area-inset-right) + 8px))
-        max(14px, calc(env(safe-area-inset-bottom) + 8px))
-        max(14px, calc(env(safe-area-inset-left) + 8px));
+    inset: auto;
     border-width: 5px;
     border-color: transparent;
     border-radius: 28px;
@@ -5148,7 +5312,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     box-shadow: none;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card.is-head-detail-scene-active {
-    inset: 0;
+    inset: auto;
     border-width: 0;
     border-radius: 0;
     background: transparent;
@@ -5189,6 +5353,48 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         gap: var(--prompt-token-chip-gap);
         max-height: 94px;
         overflow-y: auto;
+    }
+}
+
+@media (max-width: 760px) {
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar {
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: auto;
+        max-width: none;
+        max-height: none;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        background: var(--detail-mobile-panel-bg, rgba(10, 10, 12, 0.988));
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        z-index: 7;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar.is-visible {
+        animation: detail-transformer-view2d-mobile-sidebar-in 220ms cubic-bezier(0.2, 0.86, 0.2, 1) both;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar.is-closing {
+        display: flex;
+        pointer-events: none;
+        animation: detail-transformer-view2d-mobile-sidebar-out 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-header {
+        position: relative;
+        z-index: 1;
+        align-items: center;
+        padding-top: max(10px, calc(env(safe-area-inset-top) + 4px));
+        padding-right: 12px;
+        padding-bottom: 10px;
+        padding-left: 12px;
+        background: rgba(10, 10, 12, 0.992);
+        box-shadow: 0 10px 24px rgba(0,0,0,0.28);
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body {
+        padding-top: 0;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
     }
 }
 

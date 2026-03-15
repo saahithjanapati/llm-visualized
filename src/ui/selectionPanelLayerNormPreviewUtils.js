@@ -1,4 +1,5 @@
 import { MHA_FINAL_Q_COLOR } from '../animations/LayerAnimationConstants.js';
+import { getLayerNormParamMeta } from '../data/layerNormParams.js';
 import { buildHueRangeOptions } from '../utils/colors.js';
 import { resolveLayerNormKind } from '../utils/layerNormLabels.js';
 import {
@@ -121,13 +122,14 @@ export function resolveLayerNormPreviewContext(selectionInfo = null, engine = nu
 
 export function resolveLayerNormParameterSummary(selectionInfo = null, engine = null) {
     const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
-    const perParameterCount = Number.isFinite(previewContext?.baseVectorLength) && previewContext.baseVectorLength > 0
-        ? Math.floor(previewContext.baseVectorLength)
+    const layerNormParamMeta = getLayerNormParamMeta();
+    const hiddenSize = Number.isFinite(layerNormParamMeta?.hidden_size) && layerNormParamMeta.hidden_size > 0
+        ? Math.floor(layerNormParamMeta.hidden_size)
         : D_MODEL;
 
     return {
         ...previewContext,
-        perParameterCount,
-        totalParameterCount: perParameterCount * 2
+        perParameterCount: hiddenSize,
+        totalParameterCount: hiddenSize * 2
     };
 }

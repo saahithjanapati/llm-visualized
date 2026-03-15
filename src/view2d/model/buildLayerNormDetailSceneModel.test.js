@@ -94,7 +94,6 @@ describe('buildLayerNormDetailSceneModel', () => {
         const shiftEqualsNode = nodes.find((node) => node?.role === 'layer-norm-shift-equals') || null;
         const incomingSpacerNode = nodes.find((node) => node?.role === 'incoming-arrow-spacer') || null;
         const outgoingSpacerNode = nodes.find((node) => node?.role === 'outgoing-arrow-spacer') || null;
-        const normalizationBridgeNode = nodes.find((node) => node?.role === 'layer-norm-normalization-bridge') || null;
         const inputConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-input') || null;
         const normalizationConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-normalization') || null;
         const normalizedCopyConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-copy-normalized') || null;
@@ -106,7 +105,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(fixedTextSizing?.captionLabelScreenFontPx).toBeNull();
         expect(fixedTextSizing?.textScreenFontPx).toBeNull();
         expect(fixedTextSizing?.operatorBehavior).toBe('scene-relative');
-        expect(matrixNodes).toHaveLength(13);
+        expect(matrixNodes).toHaveLength(11);
         expect(connectorNodes).toHaveLength(5);
         expect(operatorNodes).toHaveLength(4);
         expect(inputNode?.label?.tex).toBe('x');
@@ -127,7 +126,6 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizationEquationNode?.tex).toBe('\\hat{x} = \\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}');
         expect(normalizationEquationNode?.metadata?.fontScale).toBeGreaterThan(1.3);
         expect(normalizationEquationNode?.layout?.offsetY).toBeLessThan(-10);
-        expect(normalizationBridgeNode?.metadata?.gapOverride).toBeGreaterThan(14);
         expect(hadamardNode?.text).toBe('⊙');
         expect(scaleEqualsNode?.text).toBe('=');
         expect(shiftPlusNode?.text).toBe('+');
@@ -197,19 +195,19 @@ describe('buildLayerNormDetailSceneModel', () => {
         });
         expect(normalizedCopyConnectorNode?.source).toMatchObject({
             nodeId: normalizedNode?.id,
-            anchor: 'right'
+            anchor: 'bottom'
         });
         expect(normalizedCopyConnectorNode?.target).toMatchObject({
             nodeId: normalizedCopyNode?.id,
-            anchor: 'left'
+            anchor: 'top'
         });
         expect(scaledCopyConnectorNode?.source).toMatchObject({
             nodeId: scaledNode?.id,
-            anchor: 'right'
+            anchor: 'bottom'
         });
         expect(scaledCopyConnectorNode?.target).toMatchObject({
             nodeId: scaledCopyNode?.id,
-            anchor: 'left'
+            anchor: 'top'
         });
         expect(outputConnectorNode?.source).toMatchObject({
             nodeId: outputNode?.id,
@@ -236,8 +234,14 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizedEntry?.contentBounds?.x).toBeGreaterThan(
             (inputEntry?.contentBounds?.x ?? 0) + (inputEntry?.contentBounds?.width ?? 0)
         );
-        expect(normalizedCopyEntry?.contentBounds?.x).toBeGreaterThan(
-            (normalizedEntry?.contentBounds?.x ?? 0) + (normalizedEntry?.contentBounds?.width ?? 0)
+        expect(
+            Math.abs(
+                (normalizedCopyEntry?.anchors?.[VIEW2D_ANCHOR_SIDES.CENTER]?.x ?? 0)
+                - (normalizedEntry?.anchors?.[VIEW2D_ANCHOR_SIDES.CENTER]?.x ?? 0)
+            )
+        ).toBeLessThan(0.5);
+        expect(normalizedCopyEntry?.contentBounds?.y).toBeGreaterThan(
+            (normalizedEntry?.contentBounds?.y ?? 0) + (normalizedEntry?.contentBounds?.height ?? 0)
         );
         expect(scaleEntry?.contentBounds?.x).toBeGreaterThan(
             (normalizedCopyEntry?.contentBounds?.x ?? 0) + (normalizedCopyEntry?.contentBounds?.width ?? 0)
@@ -245,8 +249,14 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(scaledEntry?.contentBounds?.x).toBeGreaterThan(
             (scaleEntry?.contentBounds?.x ?? 0) + (scaleEntry?.contentBounds?.width ?? 0)
         );
-        expect(scaledCopyEntry?.contentBounds?.x).toBeGreaterThan(
-            (scaledEntry?.contentBounds?.x ?? 0) + (scaledEntry?.contentBounds?.width ?? 0)
+        expect(
+            Math.abs(
+                (scaledCopyEntry?.anchors?.[VIEW2D_ANCHOR_SIDES.CENTER]?.x ?? 0)
+                - (scaledEntry?.anchors?.[VIEW2D_ANCHOR_SIDES.CENTER]?.x ?? 0)
+            )
+        ).toBeLessThan(0.5);
+        expect(scaledCopyEntry?.contentBounds?.y).toBeGreaterThan(
+            (scaledEntry?.contentBounds?.y ?? 0) + (scaledEntry?.contentBounds?.height ?? 0)
         );
         expect(shiftEntry?.contentBounds?.x).toBeGreaterThan(
             (scaledCopyEntry?.contentBounds?.x ?? 0) + (scaledCopyEntry?.contentBounds?.width ?? 0)
@@ -258,6 +268,7 @@ describe('buildLayerNormDetailSceneModel', () => {
             inputEntry?.contentBounds?.y ?? Number.POSITIVE_INFINITY
         );
         expect(normalizationConnectorEntry?.pathPoints?.length).toBeGreaterThan(1);
+        expect((layout?.sceneBounds?.height ?? 0) / Math.max(1, layout?.sceneBounds?.width ?? 1)).toBeGreaterThan(0.12);
         expect(
             Math.abs(
                 (inputEntry?.anchors?.[VIEW2D_ANCHOR_SIDES.CENTER]?.y ?? 0)

@@ -733,6 +733,82 @@ describe('selectionPanelTransformerView2d', () => {
         expect(tokenChips[1]?.dataset.tokenNav).toBe('true');
     });
 
+    it('opens overview residual rows on the first click', () => {
+        const panel = document.createElement('section');
+        panel.innerHTML = `
+            <div class="detail-header"></div>
+            <div class="detail-body"></div>
+        `;
+        document.body.appendChild(panel);
+
+        const onOpenSelection = vi.fn();
+        const view = createTransformerView2dDetailView(panel, { onOpenSelection });
+        const canvas = panel.querySelector('.detail-transformer-view2d-canvas');
+        const ctx = createMockContext();
+        const activationSource = createActivationSource(4);
+        const tokenIndices = [0, 1, 2, 3];
+        const tokenLabels = ['tok_0', 'tok_1', 'tok_2', 'tok_3'];
+
+        canvas.getContext = vi.fn(() => ctx);
+        canvas.getBoundingClientRect = () => ({
+            left: 0,
+            top: 0,
+            right: 640,
+            bottom: 360,
+            width: 640,
+            height: 360
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget: null,
+            focusLabel: 'Transformer overview'
+        });
+        drainRafQueue(rafQueue);
+
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const layout = buildSceneLayout(scene);
+        const residualEntry = layout.registry.getNodeEntries().find((entry) => (
+            entry.role === 'module-card'
+            && entry.semantic?.componentKind === 'residual'
+            && entry.semantic?.stage === 'incoming'
+        ));
+        expect(residualEntry).toBeTruthy();
+
+        const viewport = view.getViewportState();
+        const residualPoint = resolveInteractiveRowClientPoint(scene, layout, viewport, residualEntry, 1);
+
+        dispatchPointerEvent(canvas, 'pointerdown', {
+            ...residualPoint,
+            pointerId: 1,
+            pointerType: 'mouse'
+        });
+        dispatchPointerEvent(canvas, 'pointerup', {
+            ...residualPoint,
+            pointerId: 1,
+            pointerType: 'mouse'
+        });
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(expect.objectContaining({
+            label: 'Residual Stream Vector',
+            info: expect.objectContaining({
+                tokenIndex: 1,
+                tokenLabel: 'tok_1',
+                activationData: expect.objectContaining({
+                    stage: 'layer.incoming'
+                })
+            })
+        }));
+    });
+
     it('does not preselect the trailing space token in the 2D overlay when no token is active', () => {
         const panel = document.createElement('section');
         panel.innerHTML = `

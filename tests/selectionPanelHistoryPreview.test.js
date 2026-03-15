@@ -58,7 +58,7 @@ vi.mock('three/examples/jsm/loaders/FontLoader.js', () => ({
 }));
 
 import * as THREE from 'three';
-import { initSelectionPanel } from '../src/ui/selectionPanel.js';
+import { SelectionPanel, initSelectionPanel } from '../src/ui/selectionPanel.js';
 
 class MockResizeObserver {
     constructor(callback) {
@@ -268,6 +268,90 @@ function makeSelection() {
         kind: 'mesh',
         object: mesh,
         hit: { object: mesh }
+    };
+}
+
+function createActivationSourceStub() {
+    return {
+        getTokenId(tokenIndex) {
+            return Number.isFinite(tokenIndex) ? tokenIndex + 1000 : null;
+        },
+        getTokenString(tokenIndex) {
+            return Number.isFinite(tokenIndex) ? `tok_${tokenIndex}` : '';
+        },
+        getTokenRawString(tokenIndex) {
+            return Number.isFinite(tokenIndex) ? `tok_${tokenIndex}` : '';
+        }
+    };
+}
+
+function createRuntimeVectorRef({
+    label = 'Key Vector',
+    stage = 'qkv.k',
+    layerIndex = 3,
+    headIndex = 5,
+    tokenIndex = 2,
+    tokenLabel = 'machines',
+    prismCount = 4
+} = {}) {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const mesh = new THREE.InstancedMesh(geometry, material, prismCount);
+    mesh.userData = {
+        instanceKind: 'batchedVector',
+        label,
+        activationData: {
+            label,
+            stage,
+            layerIndex,
+            headIndex,
+            tokenIndex,
+            tokenLabel
+        }
+    };
+    const group = new THREE.Group();
+    group.userData = {
+        label,
+        activationData: {
+            label,
+            stage,
+            layerIndex,
+            headIndex,
+            tokenIndex,
+            tokenLabel
+        }
+    };
+    group.add(mesh);
+    return {
+        ref: {
+            isBatchedVectorRef: true,
+            _index: 0,
+            _batch: {
+                mesh,
+                prismCount
+            },
+            mesh,
+            group,
+            instanceCount: prismCount,
+            userData: {
+                headIndex,
+                parentLane: {
+                    tokenIndex,
+                    tokenLabel,
+                    layer: { index: layerIndex }
+                },
+                activationData: {
+                    label,
+                    stage,
+                    layerIndex,
+                    headIndex,
+                    tokenIndex,
+                    tokenLabel
+                }
+            }
+        },
+        geometry,
+        material
     };
 }
 
@@ -582,5 +666,154 @@ describe('selectionPanel history preview reuse', () => {
         panel.handleSelection(makeSelection());
 
         expect(engine.setHoverLabelsSuppressed).toHaveBeenLastCalledWith(false);
+    });
+
+    it('resolves 2D key-vector selections through the live runtime ref before scene fallback', () => {
+        buildPanelDom();
+        const { ref: keyVectorRef, geometry, material } = createRuntimeVectorRef({
+            label: 'Key Vector',
+            stage: 'qkv.k',
+            layerIndex: 3,
+            headIndex: 5,
+            tokenIndex: 2,
+            tokenLabel: 'machines'
+        });
+        const lane = {
+            tokenIndex: 2,
+            tokenLabel: 'machines',
+            sideCopies: [],
+            upwardCopies: []
+        };
+        lane.upwardCopies[5] = keyVectorRef;
+
+        const layers = Array.from({ length: 7 }, () => null);
+        layers[3] = {
+            lanes: [lane],
+            mhsaAnimation: {
+                _tempKOutputVectors: [keyVectorRef]
+            }
+        };
+
+        const scene = new THREE.Scene();
+        const wrongVector = new THREE.Group();
+        wrongVector.userData = {
+            label: 'Key Vector',
+            activationData: {
+                label: 'Key Vector',
+                stage: 'qkv.k',
+                layerIndex: 6,
+                headIndex: 5,
+                tokenIndex: 4,
+                tokenLabel: '?'
+            }
+        };
+        scene.add(wrongVector);
+
+        const panel = new SelectionPanel({
+            engine: {
+                scene,
+                _layers: layers
+            }
+        });
+        panel.updateData({
+            activationSource: createActivationSourceStub()
+        });
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection({
+            label: 'Key Vector',
+            kind: 'vector',
+            info: {
+                layerIndex: 3,
+                headIndex: 5,
+                tokenIndex: 2,
+                tokenLabel: 'machines',
+                activationData: {
+                    label: 'Key Vector',
+                    stage: 'qkv.k',
+                    layerIndex: 3,
+                    headIndex: 5,
+                    tokenIndex: 2,
+                    tokenLabel: 'machines'
+                }
+            }
+        });
+
+        expect(resolved?.info?.vectorRef).toBe(keyVectorRef);
+        expect(resolved?.info?.layerIndex).toBe(3);
+        expect(resolved?.info?.headIndex).toBe(5);
+        expect(resolved?.info?.tokenIndex).toBe(2);
+        expect(resolved?.info?.tokenLabel).toBe('machines');
+        expect(resolved?.object).toBe(keyVectorRef.mesh);
+        expect(resolved?.hit?.instanceId).toBe(0);
+
+        geometry.dispose();
+        material.dispose();
+    });
+
+    it('resolves 2D pre-qkv residual selections through the live copied runtime vector', () => {
+        buildPanelDom();
+        const { ref: qSourceVectorRef, geometry, material } = createRuntimeVectorRef({
+            label: 'Post LayerNorm Residual Vector',
+            stage: 'ln1.shift',
+            layerIndex: 4,
+            headIndex: 2,
+            tokenIndex: 1,
+            tokenLabel: 'tok_1'
+        });
+        const lane = {
+            tokenIndex: 1,
+            tokenLabel: 'tok_1',
+            sideCopies: [{
+                vec: qSourceVectorRef,
+                type: 'Q',
+                headIndex: 2
+            }],
+            upwardCopies: []
+        };
+        const layers = Array.from({ length: 5 }, () => null);
+        layers[4] = {
+            lanes: [lane],
+            mhsaAnimation: {
+                _tempKOutputVectors: []
+            }
+        };
+
+        const panel = new SelectionPanel({
+            engine: {
+                scene: new THREE.Scene(),
+                _layers: layers
+            }
+        });
+        panel.updateData({
+            activationSource: createActivationSourceStub()
+        });
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection({
+            label: 'Post LayerNorm Residual Vector',
+            kind: 'vector',
+            info: {
+                layerIndex: 4,
+                headIndex: 2,
+                tokenIndex: 1,
+                tokenLabel: 'tok_1',
+                activationData: {
+                    label: 'Post LayerNorm Residual Vector',
+                    stage: 'ln1.shift',
+                    layerIndex: 4,
+                    headIndex: 2,
+                    tokenIndex: 1,
+                    tokenLabel: 'tok_1'
+                }
+            }
+        });
+
+        expect(resolved?.info?.vectorRef).toBe(qSourceVectorRef);
+        expect(resolved?.info?.layerIndex).toBe(4);
+        expect(resolved?.info?.headIndex).toBe(2);
+        expect(resolved?.info?.tokenIndex).toBe(1);
+        expect(resolved?.object).toBe(qSourceVectorRef.mesh);
+
+        geometry.dispose();
+        material.dispose();
     });
 });

@@ -16,6 +16,7 @@ import {
 } from '../utils/layerNormLabels.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
 import { fitSelectionDimensionLabels } from './selectionPanelDimensionFitUtils.js';
+import { shouldCaptureMhsaKeyboardInput } from './selectionPanelKeyboardUtils.js';
 import {
     clampDesktopSelectionPanelWidth,
     resolveCopyContextButtonLayout,
@@ -123,6 +124,7 @@ import {
     formatMhsaInfoTitle,
     isMhsaInfoSelection
 } from './mhsaInfoUtils.js';
+import { getSideCopyEntry } from '../animations/mhsa/laneIndex.js';
 import {
     buildAttentionHoverInfo,
     resolveAttentionHoverLabel
@@ -177,8 +179,10 @@ import {
 } from '../view2d/runtime/view2dFeatureFlags.js';
 import {
     applyMaterialSnapshot,
+    copyInstancedVectorSliceToPreview,
     copyInstancedVectorColorsToPreview,
     extractMaterialSnapshot,
+    isInstancedVectorSliceInMotion,
     tryCopyVectorAppearanceToPreview
 } from './selectionPanelVectorCloneUtils.js';
 import {
@@ -481,6 +485,31 @@ function isRelabeledQkvVectorCandidate({
     if (hasExplicitQkvVectorLabelText(label)) return true;
     const upperCategory = String(category || '').toUpperCase();
     return upperCategory === 'Q' || upperCategory === 'K' || upperCategory === 'V';
+}
+
+function hasPreQkvResidualLabelText(value = '') {
+    const lower = String(value || '').toLowerCase();
+    return lower.includes('post-layernorm residual')
+        || lower.includes('post layernorm residual');
+}
+
+function isPreQkvResidualCopyCandidate({
+    label = '',
+    category = null
+} = {}) {
+    const upperCategory = String(category || '').toUpperCase();
+    if (upperCategory !== 'Q' && upperCategory !== 'K' && upperCategory !== 'V') {
+        return false;
+    }
+    return hasPreQkvResidualLabelText(label);
+}
+
+function resolveLiveLayerNormParamVectorRef(vectorRef = null) {
+    const detachedCarrier = vectorRef?.userData?.lnDetachedCarrier || null;
+    if (detachedCarrier?.group?.parent) {
+        return detachedCarrier;
+    }
+    return vectorRef;
 }
 
 function resolveLayerNormParamPreviewSpec(label = '', selectionInfo = null) {
@@ -1141,6 +1170,123 @@ function buildDirectClonePreview(selectionInfo) {
     const previewMaterials = cloneMaterialsForPreview(clone);
     return {
         object: clone,
+        dispose: () => {
+            previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
+            previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
+        }
+    };
+}
+
+function resolveExactVectorSliceSource(selectionInfo, label = '') {
+    const vectorRef = selectionInfo?.info?.vectorRef || null;
+    if (vectorRef?.isBatchedVectorRef && vectorRef._batch?.mesh?.isInstancedMesh) {
+        const prismCount = Number.isFinite(vectorRef._batch.prismCount)
+            ? Math.max(1, Math.floor(vectorRef._batch.prismCount))
+            : Math.max(1, Math.floor(resolveVectorPreviewInstanceCount(selectionInfo, label) || PREVIEW_VECTOR_BODY_INSTANCES));
+        const vectorIndex = Number.isFinite(vectorRef._index) ? Math.max(0, Math.floor(vectorRef._index)) : 0;
+        return {
+            sourceMesh: vectorRef._batch.mesh,
+            sourceOffset: vectorIndex * prismCount,
+            instanceCount: prismCount
+        };
+    }
+
+    if (vectorRef?.mesh?.isInstancedMesh) {
+        const instanceCount = Number.isFinite(vectorRef.instanceCount)
+            ? Math.max(1, Math.floor(vectorRef.instanceCount))
+            : Math.max(1, Math.floor(resolveVectorPreviewInstanceCount(selectionInfo, label) || PREVIEW_VECTOR_BODY_INSTANCES));
+        const meshCount = Number.isFinite(vectorRef.mesh.count)
+            ? Math.max(1, Math.floor(vectorRef.mesh.count))
+            : Math.max(1, Math.floor(vectorRef.mesh.instanceMatrix?.count || instanceCount));
+        const hintedVectorIndex = Number(selectionInfo?.info?.vectorIndex);
+        const rawInstanceId = Number(selectionInfo?.hit?.instanceId);
+        const sourceOffset = Number.isFinite(hintedVectorIndex) && hintedVectorIndex >= 0
+            ? Math.max(0, Math.floor(hintedVectorIndex) * instanceCount)
+            : (
+                Number.isFinite(rawInstanceId) && rawInstanceId >= 0 && meshCount > instanceCount
+                    ? Math.max(0, Math.floor(rawInstanceId / instanceCount) * instanceCount)
+                    : 0
+            );
+        return {
+            sourceMesh: vectorRef.mesh,
+            sourceOffset,
+            instanceCount
+        };
+    }
+
+    const vectorMesh = findVectorSourceMesh(selectionInfo);
+    if (!vectorMesh?.isInstancedMesh) return null;
+
+    const instanceCount = Math.max(1, Math.floor(resolveVectorPreviewInstanceCount(selectionInfo, label) || PREVIEW_VECTOR_BODY_INSTANCES));
+    const rawInstanceId = Number(selectionInfo?.hit?.instanceId);
+    const sourceOffset = Number.isFinite(rawInstanceId) && rawInstanceId >= 0
+        ? Math.max(0, Math.floor(rawInstanceId / instanceCount) * instanceCount)
+        : 0;
+    return {
+        sourceMesh: vectorMesh,
+        sourceOffset,
+        instanceCount
+    };
+}
+
+function buildExactVectorMeshSlicePreview(selectionInfo, label = '') {
+    const sliceSource = resolveExactVectorSliceSource(selectionInfo, label);
+    if (!sliceSource?.sourceMesh?.isInstancedMesh || !(sliceSource.instanceCount > 0)) {
+        return null;
+    }
+    if (isInstancedVectorSliceInMotion(
+        sliceSource.sourceMesh,
+        sliceSource.sourceOffset,
+        sliceSource.instanceCount
+    )) {
+        return null;
+    }
+
+    const clone = sliceSource.sourceMesh.clone();
+    clone.matrixAutoUpdate = true;
+    clone.count = Math.max(1, Math.floor(sliceSource.instanceCount));
+    clone.frustumCulled = false;
+    clone.userData = {
+        ...(sliceSource.sourceMesh.userData || {})
+    };
+
+    sliceSource.sourceMesh.updateWorldMatrix(true, true);
+    sliceSource.sourceMesh.matrixWorld.decompose(clone.position, clone.quaternion, clone.scale);
+
+    const group = new THREE.Group();
+    group.add(clone);
+
+    const previewGeometries = cloneGeometriesForPreview(group);
+    const previewMaterials = cloneMaterialsForPreview(group);
+    const copied = copyInstancedVectorSliceToPreview(
+        {
+            mesh: clone,
+            instanceCount: clone.count
+        },
+        sliceSource.sourceMesh,
+        sliceSource.sourceOffset,
+        sliceSource.instanceCount
+    );
+    if (!copied) {
+        previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
+        previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
+        return null;
+    }
+
+    if (clone.geometry) {
+        if (!clone.geometry.boundingBox && typeof clone.geometry.computeBoundingBox === 'function') {
+            clone.geometry.computeBoundingBox();
+        }
+        if (typeof clone.geometry.computeBoundingSphere === 'function') {
+            clone.geometry.computeBoundingSphere();
+        }
+    }
+    if (clone.instanceColor) {
+        clone.instanceColor.needsUpdate = true;
+    }
+
+    return {
+        object: group,
         dispose: () => {
             previewGeometries.forEach((geo) => geo && geo.dispose && geo.dispose());
             previewMaterials.forEach((mat) => mat && mat.dispose && mat.dispose());
@@ -2071,7 +2217,7 @@ function resolveVectorPreviewInstanceCount(selectionInfo, label = '') {
     return PREVIEW_VECTOR_BODY_INSTANCES;
 }
 
-function buildVectorClonePreview(selectionInfo, label = '') {
+export function buildVectorClonePreview(selectionInfo, label = '') {
     const weightedSumSelection = isWeightedSumSelection(label, selectionInfo);
     const kvCacheVectorSelection = isKvCacheVectorSelection(selectionInfo);
     if (weightedSumSelection) {
@@ -2080,6 +2226,9 @@ function buildVectorClonePreview(selectionInfo, label = '') {
             || buildSelectionClonePreview(selectionInfo, label);
         if (directClone) return directClone;
     }
+
+    const exactVectorSlicePreview = buildExactVectorMeshSlicePreview(selectionInfo, label);
+    if (exactVectorSlicePreview) return exactVectorSlicePreview;
 
     const vectorRef = selectionInfo?.info?.vectorRef || null;
     const vectorMesh = findVectorSourceMesh(selectionInfo);
@@ -2528,7 +2677,7 @@ function fitObjectToView(object, camera, options = {}) {
     }
 }
 
-class SelectionPanel {
+export class SelectionPanel {
     constructor(options = {}) {
         this.panel = document.getElementById('detailPanel');
         this.hudStack = document.getElementById('hudStack');
@@ -2569,6 +2718,7 @@ class SelectionPanel {
         this.copyContextBtn = document.getElementById('detailCopyContextBtn');
         this.copyContextBtnLabel = document.getElementById('detailCopyContextBtnLabel');
         this.copyContextBtnAssistant = document.getElementById('detailCopyContextBtnAssistant');
+        this.copyContextRow = this.copyContextBtn?.closest('.detail-copy-context') || null;
         this.closeBtn = document.getElementById('detailClose');
         this.fullscreenToggleBtn = document.getElementById('detailFullscreenToggle');
         this.previewRoot = this.panel?.querySelector('.detail-preview') || null;
@@ -2735,6 +2885,7 @@ class SelectionPanel {
         this._panelTokenHoverEntry = null;
         this._panelTokenHoverEntries = [];
         this._mirroredTokenHoverEntries = [];
+        this._panelKeyboardEngaged = false;
         this._tokenHoverSyncSource = SELECTION_PANEL_TOKEN_HOVER_SOURCE;
         this._copyContextFeedbackTimer = null;
         this._copyContextFadeTimer = null;
@@ -2751,11 +2902,20 @@ class SelectionPanel {
         this._transformerView2dDetailView = createTransformerView2dDetailView(this.panel, {
             onExitTo3d: () => {
                 this.close({ clearHistory: false });
+            },
+            onOpenSelection: (selection) => {
+                return this._openTransformerView2dCanvasSelection(selection);
+            },
+            onCloseSelection: () => {
+                return this._closeTransformerView2dSelectionSidebar();
             }
         });
         this._transformerView2dDetailOpen = false;
         this._transformerView2dSourceSelection = null;
         this._currentTransformerView2dContext = null;
+        this._transformerView2dSelectionSidebarDockRecords = [];
+        this._transformerView2dSelectionSidebarDocked = false;
+        this._transformerView2dSelectionSidebarRestoreTimer = null;
         this._setTransformerView2dActionButtonState(null);
         this._lastSelection = null;
         this._lastSelectionLabel = '';
@@ -2773,6 +2933,7 @@ class SelectionPanel {
         this._onFullscreenToggleClick = this._onFullscreenToggleClick.bind(this);
         this._onClosePointerDown = this._onClosePointerDown.bind(this);
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
+        this._onDocumentFocusIn = this._onDocumentFocusIn.bind(this);
         this._blockPreviewGesture = this._blockPreviewGesture.bind(this);
         this._onResizeHandlePointerDown = this._onResizeHandlePointerDown.bind(this);
         this._onResizeHandlePointerMove = this._onResizeHandlePointerMove.bind(this);
@@ -3030,6 +3191,7 @@ class SelectionPanel {
         document.addEventListener('keydown', this._onKeydown);
         document.addEventListener('keyup', this._onKeyup);
         document.addEventListener('pointerdown', this._onDocumentPointerDown, { capture: true });
+        document.addEventListener('focusin', this._onDocumentFocusIn, { capture: true });
         window.addEventListener(SELECTION_PANEL_DEV_MODE_EVENT, this._onDevModeChanged);
         this._touchClickCleanup = initTouchClickFallback(this.panel, {
             selector: '.toggle-row, .detail-attention-collapse, .detail-token-nav-chip[data-token-nav="true"], .detail-history-btn, .detail-description-action-link, .detail-copy-context-btn, .detail-attention-score-link[data-attention-score-link="true"]'
@@ -4009,13 +4171,31 @@ class SelectionPanel {
         }, 280);
     }
 
+    _setPanelKeyboardEngaged(engaged) {
+        const next = !!engaged;
+        if (this._panelKeyboardEngaged === next) return;
+        this._panelKeyboardEngaged = next;
+        if (!next) {
+            this._clearMhsaTokenMatrixKeyboardMotion();
+        }
+    }
+
+    _panelOwnsKeyboard() {
+        return shouldCaptureMhsaKeyboardInput({
+            isOpen: this.isOpen,
+            isMhsaInfoSelectionActive: this._isMhsaInfoSelectionActive,
+            mhsaTokenMatrixHidden: !!this.mhsaTokenMatrixBody?.hidden,
+            panel: this.panel,
+            keyboardEngaged: this._panelKeyboardEngaged,
+            activeElement: (typeof document !== 'undefined') ? document.activeElement : null
+        });
+    }
+
     _onKeydown(event) {
         const keyboardTarget = event?.target instanceof Element ? event.target : null;
         const controlKey = this._normalizeMhsaKeyboardControlKey(event?.key);
         if (
-            this.isOpen
-            && this._isMhsaInfoSelectionActive
-            && !this.mhsaTokenMatrixBody?.hidden
+            this._panelOwnsKeyboard()
             && !this._isTextEntryTarget(keyboardTarget)
             && !event.ctrlKey
             && !event.metaKey
@@ -4031,6 +4211,15 @@ class SelectionPanel {
 
         if (event.key === 'Escape' && this.isOpen) {
             if (this._transformerView2dDetailOpen) {
+                const didCloseTransformerView2dSelectionSidebar = this._closeTransformerView2dSelectionSidebar({
+                    restoreSections: false,
+                    restartLoop: false
+                });
+                if (didCloseTransformerView2dSelectionSidebar) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
                 const didClearTransformerView2dLock = this._transformerView2dDetailView?.clearSelectionLock?.({
                     scheduleRender: true
                 }) === true;
@@ -5086,6 +5275,239 @@ class SelectionPanel {
         }
     }
 
+    _buildRuntimeVectorSelection({
+        vectorRef = null,
+        label = 'Vector',
+        kind = 'vector',
+        layerIndex = null,
+        headIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        if (!vectorRef) return null;
+        const activationData = vectorRef.userData?.activationData || null;
+        const normalizedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
+        const normalizedHeadIndex = Number.isFinite(headIndex) ? Math.floor(headIndex) : null;
+        const normalizedTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+        const normalizedTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        const normalizedTokenLabel = typeof tokenLabel === 'string' && tokenLabel.trim().length
+            ? formatTokenLabelForPreview(tokenLabel)
+            : '';
+        const resolvedLabel = String(
+            label
+            || activationData?.label
+            || vectorRef.group?.userData?.label
+            || vectorRef.mesh?.userData?.label
+            || 'Vector'
+        ).trim() || 'Vector';
+        const info = {
+            vectorRef
+        };
+        if (activationData && typeof activationData === 'object') {
+            info.activationData = activationData;
+        }
+        if (Number.isFinite(normalizedLayerIndex)) info.layerIndex = normalizedLayerIndex;
+        if (Number.isFinite(normalizedHeadIndex)) info.headIndex = normalizedHeadIndex;
+        if (Number.isFinite(normalizedTokenIndex)) info.tokenIndex = normalizedTokenIndex;
+        if (Number.isFinite(normalizedTokenId)) info.tokenId = normalizedTokenId;
+        if (normalizedTokenLabel) info.tokenLabel = normalizedTokenLabel;
+
+        const hasMesh = vectorRef.mesh?.isInstancedMesh === true;
+        const object = hasMesh
+            ? vectorRef.mesh
+            : (vectorRef.group || vectorRef.mesh || null);
+        const batchPrismCount = vectorRef.isBatchedVectorRef && Number.isFinite(vectorRef?._batch?.prismCount)
+            ? Math.max(1, Math.floor(vectorRef._batch.prismCount))
+            : null;
+        const sharedPrismCount = Number.isFinite(vectorRef.instanceCount)
+            ? Math.max(1, Math.floor(vectorRef.instanceCount))
+            : null;
+        const instanceId = hasMesh
+            ? (
+                vectorRef.isBatchedVectorRef && Number.isFinite(vectorRef._index) && batchPrismCount
+                    ? Math.max(0, Math.floor(vectorRef._index) * batchPrismCount)
+                    : 0
+            )
+            : null;
+        if (Number.isFinite(vectorRef?._index)) info.vectorIndex = Math.max(0, Math.floor(vectorRef._index));
+        if (Number.isFinite(sharedPrismCount)) info.prismIndex = 0;
+
+        return {
+            label: resolvedLabel,
+            kind: hasMesh
+                ? (object?.userData?.instanceKind || kind || 'instanced')
+                : (kind || 'vector'),
+            info,
+            ...(object ? { object } : {}),
+            ...(Number.isFinite(instanceId) && object ? {
+                hit: {
+                    object,
+                    instanceId
+                }
+            } : {})
+        };
+    }
+
+    _findLayerLaneByToken({
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const layers = Array.isArray(this.engine?._layers) ? this.engine._layers : [];
+        const resolvedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
+        const layer = Number.isFinite(resolvedLayerIndex)
+            && resolvedLayerIndex >= 0
+            && resolvedLayerIndex < layers.length
+            ? layers[resolvedLayerIndex]
+            : null;
+        if (!layer || !Array.isArray(layer.lanes) || !layer.lanes.length) {
+            return {
+                layer,
+                lane: null
+            };
+        }
+
+        const normalizedTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+        const normalizedTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+        const normalizedTokenLabel = typeof tokenLabel === 'string' && tokenLabel.trim().length
+            ? formatTokenLabelForPreview(tokenLabel)
+            : '';
+
+        let lane = null;
+        if (Number.isFinite(normalizedTokenIndex)) {
+            lane = layer.lanes.find((candidate) => (
+                candidate
+                && Number.isFinite(candidate.tokenIndex)
+                && Math.floor(candidate.tokenIndex) === normalizedTokenIndex
+            )) || null;
+        }
+        if (!lane && Number.isFinite(normalizedTokenId) && this.activationSource && typeof this.activationSource.getTokenId === 'function') {
+            lane = layer.lanes.find((candidate) => {
+                if (!candidate || !Number.isFinite(candidate.tokenIndex)) return false;
+                const candidateTokenId = this.activationSource.getTokenId(Math.floor(candidate.tokenIndex));
+                return Number.isFinite(candidateTokenId) && Math.floor(candidateTokenId) === normalizedTokenId;
+            }) || null;
+        }
+        if (!lane && normalizedTokenLabel) {
+            lane = layer.lanes.find((candidate) => (
+                candidate
+                && typeof candidate.tokenLabel === 'string'
+                && formatTokenLabelForPreview(candidate.tokenLabel) === normalizedTokenLabel
+            )) || null;
+        }
+
+        return {
+            layer,
+            lane
+        };
+    }
+
+    _findRuntimeAttentionVectorSelection({
+        vectorKind = 'Q',
+        layerIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = '',
+        headIndex = null
+    } = {}) {
+        const safeKind = normalizeQkvActionKind(vectorKind);
+        const resolvedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
+        const resolvedHeadIndex = Number.isFinite(headIndex) ? Math.floor(headIndex) : null;
+        if (!Number.isFinite(resolvedLayerIndex) || !Number.isFinite(resolvedHeadIndex)) return null;
+
+        const { layer, lane } = this._findLayerLaneByToken({
+            layerIndex: resolvedLayerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+        if (!layer || !lane) return null;
+
+        let vectorRef = null;
+        if (safeKind === 'Q' || safeKind === 'V') {
+            const sideCopyEntry = getSideCopyEntry(lane, resolvedHeadIndex, safeKind);
+            vectorRef = sideCopyEntry?.vec || null;
+        } else if (safeKind === 'K') {
+            vectorRef = Array.isArray(lane.upwardCopies)
+                ? lane.upwardCopies[resolvedHeadIndex] || null
+                : null;
+            if (!vectorRef) {
+                const mhsa = layer?.mhsaAnimation || null;
+                const normalizedTokenIndex = Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null;
+                vectorRef = Array.isArray(mhsa?._tempKOutputVectors)
+                    ? mhsa._tempKOutputVectors.find((candidate) => (
+                        candidate
+                        && Number.isFinite(candidate.userData?.headIndex)
+                        && Math.floor(candidate.userData.headIndex) === resolvedHeadIndex
+                        && (
+                            !Number.isFinite(normalizedTokenIndex)
+                            || (
+                                Number.isFinite(candidate.userData?.parentLane?.tokenIndex)
+                                && Math.floor(candidate.userData.parentLane.tokenIndex) === normalizedTokenIndex
+                            )
+                        )
+                    )) || null
+                    : null;
+            }
+        }
+        if (!vectorRef) return null;
+
+        const label = safeKind === 'Q'
+            ? 'Query Vector'
+            : (safeKind === 'V' ? 'Value Vector' : 'Key Vector');
+        return this._buildRuntimeVectorSelection({
+            vectorRef,
+            label,
+            kind: 'vector',
+            layerIndex: resolvedLayerIndex,
+            headIndex: resolvedHeadIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+    }
+
+    _findRuntimeQkvSourceVectorSelection({
+        layerIndex = null,
+        headIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = ''
+    } = {}) {
+        const resolvedLayerIndex = Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null;
+        const resolvedHeadIndex = Number.isFinite(headIndex) ? Math.floor(headIndex) : null;
+        if (!Number.isFinite(resolvedLayerIndex) || !Number.isFinite(resolvedHeadIndex)) return null;
+
+        const { lane } = this._findLayerLaneByToken({
+            layerIndex: resolvedLayerIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+        if (!lane) return null;
+
+        const qSideCopy = getSideCopyEntry(lane, resolvedHeadIndex, 'Q')?.vec || null;
+        const kCopy = Array.isArray(lane.upwardCopies)
+            ? lane.upwardCopies[resolvedHeadIndex] || null
+            : null;
+        const vSideCopy = getSideCopyEntry(lane, resolvedHeadIndex, 'V')?.vec || null;
+        const vectorRef = qSideCopy || kCopy || vSideCopy;
+        if (!vectorRef) return null;
+
+        return this._buildRuntimeVectorSelection({
+            vectorRef,
+            label: resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' }),
+            kind: 'vector',
+            layerIndex: resolvedLayerIndex,
+            headIndex: resolvedHeadIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel
+        });
+    }
+
     _readVectorEntryNumber(entry, key) {
         if (!entry || typeof entry !== 'object') return null;
         const direct = entry[key];
@@ -5115,6 +5537,7 @@ class SelectionPanel {
             const safeVectorIndex = Number.isFinite(vectorIndex) ? Math.max(0, Math.floor(vectorIndex)) : 0;
             candidates.push({
                 entry,
+                vectorIndex: safeVectorIndex,
                 instanceId: safeVectorIndex * prismCount
             });
         };
@@ -5206,6 +5629,8 @@ class SelectionPanel {
                 if (Number.isFinite(entryTokenIndex)) info.tokenIndex = entryTokenIndex;
                 if (Number.isFinite(entryTokenId)) info.tokenId = entryTokenId;
                 if (entryTokenText) info.tokenLabel = entryTokenText;
+                if (Number.isFinite(candidate.vectorIndex)) info.vectorIndex = candidate.vectorIndex;
+                if (Number.isFinite(candidate.instanceId)) info.prismIndex = 0;
 
                 bestSelection = {
                     label,
@@ -5224,8 +5649,531 @@ class SelectionPanel {
         return bestSelection;
     }
 
+    _resolveTransformerView2dSelectionTokenContext(selection = null) {
+        const tokenIndex = Number.isFinite(findUserDataNumber(selection, 'tokenIndex'))
+            ? Math.floor(findUserDataNumber(selection, 'tokenIndex'))
+            : null;
+        const queryTokenIndex = Number.isFinite(findUserDataNumber(selection, 'queryTokenIndex'))
+            ? Math.floor(findUserDataNumber(selection, 'queryTokenIndex'))
+            : tokenIndex;
+        const keyTokenIndex = Number.isFinite(findUserDataNumber(selection, 'keyTokenIndex'))
+            ? Math.floor(findUserDataNumber(selection, 'keyTokenIndex'))
+            : null;
+        const directTokenId = findUserDataNumber(selection, 'tokenId');
+        const tokenId = Number.isFinite(directTokenId)
+            ? Math.floor(directTokenId)
+            : (
+                Number.isFinite(tokenIndex)
+                && this.activationSource
+                && typeof this.activationSource.getTokenId === 'function'
+                    ? Math.floor(this.activationSource.getTokenId(tokenIndex))
+                    : null
+            );
+
+        let tokenLabel = findUserDataString(selection, 'tokenLabel');
+        if (!tokenLabel && Number.isFinite(tokenIndex)) {
+            if (this.activationSource && typeof this.activationSource.getTokenRawString === 'function') {
+                tokenLabel = this.activationSource.getTokenRawString(tokenIndex) || '';
+            }
+            if (!tokenLabel && this.activationSource && typeof this.activationSource.getTokenString === 'function') {
+                tokenLabel = this.activationSource.getTokenString(tokenIndex) || '';
+            }
+        }
+
+        return {
+            tokenIndex,
+            queryTokenIndex,
+            keyTokenIndex,
+            tokenId,
+            tokenLabel: formatTokenLabelForPreview(tokenLabel)
+        };
+    }
+
+    _inferTransformerView2dFallbackSelectionKind({
+        label = '',
+        stageLower = '',
+        sourceSelection = null
+    } = {}) {
+        const lower = String(label || '').trim().toLowerCase();
+        if (sourceSelection?.kind === 'attentionSphere' || isAttentionScoreSelection(label, sourceSelection)) {
+            return 'attentionSphere';
+        }
+        if (
+            lower === 'layernorm'
+            || lower === 'layernorm (top)'
+            || lower === 'multilayer perceptron'
+        ) {
+            return 'label';
+        }
+        if (lower.includes('matrix') || isWeightMatrixLabel(label) || isQkvMatrixLabel(label)) {
+            return 'matrix';
+        }
+        if (
+            lower.includes('vector')
+            || lower.includes('weighted sum')
+            || lower.includes('activation')
+            || lower.includes('residual stream')
+            || stageLower.startsWith('layer.incoming')
+            || stageLower.startsWith('residual.')
+            || stageLower.startsWith('qkv.')
+            || stageLower.startsWith('attention.')
+            || stageLower.startsWith('mlp.')
+            || stageLower.startsWith('ln1.')
+            || stageLower.startsWith('ln2.')
+            || stageLower.startsWith('final_ln.')
+        ) {
+            return 'vector';
+        }
+        return sourceSelection?.kind || 'label';
+    }
+
+    _buildTransformerView2dFallbackSelection(selection = null) {
+        if (!selection?.label) return null;
+        const label = normalizeSelectionLabel(selection.label, selection);
+        const activationData = getActivationDataFromSelection(selection);
+        const stageLower = String(activationData?.stage || '').toLowerCase();
+        const layerIndex = findUserDataNumber(selection, 'layerIndex');
+        const headIndex = findUserDataNumber(selection, 'headIndex');
+        const tokenContext = this._resolveTransformerView2dSelectionTokenContext(selection);
+        const info = selection?.info && typeof selection.info === 'object'
+            ? { ...selection.info }
+            : {};
+
+        if (activationData && typeof activationData === 'object') {
+            info.activationData = { ...activationData };
+        }
+        if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
+        if (Number.isFinite(headIndex)) info.headIndex = Math.floor(headIndex);
+        if (Number.isFinite(tokenContext.tokenIndex)) info.tokenIndex = tokenContext.tokenIndex;
+        if (Number.isFinite(tokenContext.queryTokenIndex)) info.queryTokenIndex = tokenContext.queryTokenIndex;
+        if (Number.isFinite(tokenContext.keyTokenIndex)) info.keyTokenIndex = tokenContext.keyTokenIndex;
+        if (Number.isFinite(tokenContext.tokenId)) info.tokenId = tokenContext.tokenId;
+        if (tokenContext.tokenLabel) info.tokenLabel = tokenContext.tokenLabel;
+
+        return this._attachActivationSourceValuesToSelection({
+            label,
+            kind: this._inferTransformerView2dFallbackSelectionKind({
+                label,
+                stageLower,
+                sourceSelection: selection
+            }),
+            info
+        });
+    }
+
+    _normalizeTransformerView2dSceneLookupLabel(label = '', selectionInfo = null) {
+        const normalizedLabel = normalizeSelectionLabel(label, selectionInfo);
+        const simplifiedLabel = simplifyLayerNormParamDisplayLabel(normalizedLabel, selectionInfo);
+        return String(simplifiedLabel || normalizedLabel || label).trim().toLowerCase();
+    }
+
+    _selectionLabelMatchesSceneCandidate(selection = null, label = '', sceneSelectionInfo = null) {
+        const targetLabel = this._normalizeTransformerView2dSceneLookupLabel(selection?.label || '', selection);
+        const candidateLabel = this._normalizeTransformerView2dSceneLookupLabel(label, sceneSelectionInfo);
+        return !!targetLabel && !!candidateLabel && targetLabel === candidateLabel;
+    }
+
+    _findTransformerView2dFallbackSceneSelection(selection = null) {
+        if (!selection?.label) return null;
+
+        const label = normalizeSelectionLabel(selection.label, selection);
+        const activationData = getActivationDataFromSelection(selection);
+        const stageLower = String(activationData?.stage || '').toLowerCase();
+        const kind = (typeof selection?.kind === 'string' && selection.kind.trim().length)
+            ? selection.kind
+            : this._inferTransformerView2dFallbackSelectionKind({
+                label,
+                stageLower,
+                sourceSelection: selection
+            });
+        const layerIndex = findUserDataNumber(selection, 'layerIndex');
+        const headIndex = findUserDataNumber(selection, 'headIndex');
+        const tokenContext = this._resolveTransformerView2dSelectionTokenContext(selection);
+
+        const labelMatcher = (sceneLabel = '', node = null) => this._selectionLabelMatchesSceneCandidate(
+            selection,
+            sceneLabel,
+            node ? { object: node } : null
+        );
+
+        if (isLikelyVectorSelection(label, selection)) {
+            const instancedSelection = this._findSceneVectorEntrySelection({
+                stageMatcher: (_stage, entry, node) => {
+                    const entrySelectionInfo = entry?.activationData
+                        ? { info: { activationData: entry.activationData } }
+                        : null;
+                    return [
+                        entry?.label,
+                        entry?.activationData?.label,
+                        entry?.vectorRef?.group?.userData?.label,
+                        entry?.vectorRef?.mesh?.userData?.label,
+                        node?.userData?.label,
+                        node?.userData?.activationData?.label
+                    ].some((candidateLabel) => this._selectionLabelMatchesSceneCandidate(
+                        selection,
+                        candidateLabel,
+                        entrySelectionInfo || (node ? { object: node } : null)
+                    ));
+                },
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: label
+            });
+            if (instancedSelection) return instancedSelection;
+        }
+
+        return this._findGenericSceneObjectSelection({
+            label: '',
+            layerIndex,
+            headIndex,
+            tokenIndex: tokenContext.tokenIndex,
+            tokenId: tokenContext.tokenId,
+            tokenLabel: tokenContext.tokenLabel,
+            kind,
+            fallbackLabel: label,
+            labelMatcher
+        });
+    }
+
+    _resolveActivationSourceVectorValuesForSelection(selection = null) {
+        const activation = getActivationDataFromSelection(selection);
+        const stageLower = String(activation?.stage || '').toLowerCase();
+        const sourceStageLower = String(activation?.sourceStage || '').toLowerCase();
+        const tokenIndex = findUserDataNumber(selection, 'tokenIndex');
+        const layerIndex = findUserDataNumber(selection, 'layerIndex');
+        const headIndex = findUserDataNumber(selection, 'headIndex');
+        const source = this.activationSource;
+        if (!source) return null;
+
+        const baseVectorLength = typeof source.getBaseVectorLength === 'function'
+            ? Math.max(1, Math.floor(source.getBaseVectorLength() || D_MODEL))
+            : D_MODEL;
+        const stageCandidates = [...new Set([sourceStageLower, stageLower].filter(Boolean).flatMap((stage) => {
+            if (stage === 'ln1.input') return [stage, 'layer.incoming'];
+            if (stage === 'ln1.product') return [stage, 'ln1.scale'];
+            if (stage === 'ln1.output') return [stage, 'ln1.shift'];
+            if (stage === 'ln2.input') return [stage, 'residual.post_attention'];
+            if (stage === 'ln2.product') return [stage, 'ln2.scale'];
+            if (stage === 'ln2.output') return [stage, 'ln2.shift'];
+            if (stage === 'final_ln.product') return [stage, 'final_ln.scale'];
+            if (stage === 'final_ln.output') return [stage, 'final_ln.shift'];
+            return [stage];
+        }))];
+        const tryRead = (reader) => {
+            const values = typeof reader === 'function' ? reader() : null;
+            return (Array.isArray(values) || ArrayBuffer.isView(values)) && values.length > 0
+                ? Array.from(values, (value) => (Number.isFinite(value) ? value : 0))
+                : null;
+        };
+
+        for (const stage of stageCandidates) {
+            if (stage === 'qkv.q' || stage === 'qkv.k' || stage === 'qkv.v') {
+                const kind = stage.slice('qkv.'.length, 'qkv.'.length + 1);
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(headIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getLayerQKVVector === 'function'
+                    ? tryRead(() => source.getLayerQKVVector(layerIndex, kind, headIndex, tokenIndex, null))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'attention.weighted_sum') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(headIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getAttentionWeightedSum === 'function'
+                    ? tryRead(() => source.getAttentionWeightedSum(layerIndex, headIndex, tokenIndex, null))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'attention.output_projection') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getAttentionOutputProjection === 'function'
+                    ? tryRead(() => source.getAttentionOutputProjection(layerIndex, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'layer.incoming') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getLayerIncoming === 'function'
+                    ? tryRead(() => source.getLayerIncoming(layerIndex, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'residual.post_attention') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getPostAttentionResidual === 'function'
+                    ? tryRead(() => source.getPostAttentionResidual(layerIndex, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'residual.post_mlp') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getPostMlpResidual === 'function'
+                    ? tryRead(() => source.getPostMlpResidual(layerIndex, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'mlp.up') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getMlpUp === 'function'
+                    ? tryRead(() => source.getMlpUp(layerIndex, tokenIndex, baseVectorLength * 4))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'mlp.activation') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getMlpActivation === 'function'
+                    ? tryRead(() => source.getMlpActivation(layerIndex, tokenIndex, baseVectorLength * 4))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'mlp.down') {
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getMlpDown === 'function'
+                    ? tryRead(() => source.getMlpDown(layerIndex, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'ln1.norm' || stage === 'ln1.scale' || stage === 'ln1.shift') {
+                const lnStage = stage.slice('ln1.'.length);
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getLayerLn1 === 'function'
+                    ? tryRead(() => source.getLayerLn1(layerIndex, lnStage, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'ln2.norm' || stage === 'ln2.scale' || stage === 'ln2.shift') {
+                const lnStage = stage.slice('ln2.'.length);
+                const values = Number.isFinite(layerIndex)
+                    && Number.isFinite(tokenIndex)
+                    && typeof source.getLayerLn2 === 'function'
+                    ? tryRead(() => source.getLayerLn2(layerIndex, lnStage, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+                continue;
+            }
+
+            if (stage === 'final_ln.input' || stage === 'final_ln.norm' || stage === 'final_ln.scale' || stage === 'final_ln.shift') {
+                const finalStage = stage.slice('final_ln.'.length);
+                const values = Number.isFinite(tokenIndex)
+                    && typeof source.getFinalLayerNorm === 'function'
+                    ? tryRead(() => source.getFinalLayerNorm(finalStage, tokenIndex, baseVectorLength))
+                    : null;
+                if (values) return values;
+            }
+        }
+
+        return null;
+    }
+
+    _attachActivationSourceValuesToSelection(selection = null) {
+        if (!selection?.label) return selection;
+        const info = selection.info && typeof selection.info === 'object' ? selection.info : {};
+        const activationData = info.activationData && typeof info.activationData === 'object'
+            ? info.activationData
+            : null;
+        const existingValues = activationData?.values
+            || info.vectorData
+            || info.values;
+        if ((Array.isArray(existingValues) || ArrayBuffer.isView(existingValues)) && existingValues.length > 0) {
+            return selection;
+        }
+
+        const values = this._resolveActivationSourceVectorValuesForSelection(selection);
+        if (!values) return selection;
+
+        return {
+            ...selection,
+            info: {
+                ...info,
+                values,
+                activationData: {
+                    ...(activationData || {}),
+                    values
+                }
+            }
+        };
+    }
+
+    _findGenericSceneObjectSelection({
+        label = '',
+        activationStages = null,
+        layerIndex = null,
+        headIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = '',
+        kind = 'label',
+        fallbackLabel = '',
+        labelMatcher = null
+    } = {}) {
+        const scene = this.engine?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        const normalizedLabel = String(label || '').trim().toLowerCase();
+        const normalizedStages = Array.isArray(activationStages)
+            ? activationStages
+                .map((stage) => String(stage || '').trim().toLowerCase())
+                .filter(Boolean)
+            : [];
+        const normalizedTokenText = formatTokenLabelForPreview(tokenLabel);
+        let bestSelection = null;
+        let bestScore = -Infinity;
+
+        scene.traverse((node) => {
+            if (!node || node.isScene || !node.userData) return;
+
+            const nodeStageLower = String(node.userData.activationData?.stage || '').toLowerCase();
+            if (normalizedStages.length && !normalizedStages.includes(nodeStageLower)) return;
+
+            const nodeLabel = String(
+                readSceneSelectionString(node, 'label')
+                || node.userData.label
+                || ''
+            ).trim();
+            const nodeLabelLower = nodeLabel.toLowerCase();
+            if (normalizedLabel.length && nodeLabelLower !== normalizedLabel) return;
+            if (typeof labelMatcher === 'function' && !labelMatcher(nodeLabel, node)) return;
+
+            const nodeLayerIndex = readSceneSelectionNumber(node, 'layerIndex');
+            const nodeHeadIndex = readSceneSelectionNumber(node, 'headIndex');
+            const nodeTokenIndex = readSceneSelectionNumber(node, 'tokenIndex');
+            const nodeTokenId = readSceneSelectionNumber(node, 'tokenId');
+            const nodeTokenText = formatTokenLabelForPreview(readSceneSelectionString(node, 'tokenLabel'));
+
+            if (Number.isFinite(layerIndex) && Number.isFinite(nodeLayerIndex) && nodeLayerIndex !== Math.floor(layerIndex)) return;
+            if (Number.isFinite(headIndex) && Number.isFinite(nodeHeadIndex) && nodeHeadIndex !== Math.floor(headIndex)) return;
+            if (Number.isFinite(tokenIndex) && Number.isFinite(nodeTokenIndex) && nodeTokenIndex !== Math.floor(tokenIndex)) return;
+            if (Number.isFinite(tokenId) && Number.isFinite(nodeTokenId) && nodeTokenId !== Math.floor(tokenId)) return;
+            if (
+                normalizedTokenText
+                && normalizedTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText
+                && nodeTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText !== normalizedTokenText
+            ) {
+                return;
+            }
+
+            let score = 100;
+            if (node.visible !== false) score += 12;
+            if (node.type === 'Group') score += 6;
+            if (normalizedLabel.length && nodeLabelLower === normalizedLabel) score += 24;
+            if (normalizedStages.length && normalizedStages.includes(nodeStageLower)) score += 10;
+            if (Number.isFinite(nodeLayerIndex) && Number.isFinite(layerIndex) && nodeLayerIndex === Math.floor(layerIndex)) score += 18;
+            if (Number.isFinite(nodeHeadIndex) && Number.isFinite(headIndex) && nodeHeadIndex === Math.floor(headIndex)) score += 18;
+            if (Number.isFinite(nodeTokenIndex) && Number.isFinite(tokenIndex) && nodeTokenIndex === Math.floor(tokenIndex)) score += 16;
+            if (Number.isFinite(nodeTokenId) && Number.isFinite(tokenId) && nodeTokenId === Math.floor(tokenId)) score += 10;
+            if (normalizedTokenText && nodeTokenText && nodeTokenText === normalizedTokenText) score += 8;
+
+            if (score <= bestScore) return;
+
+            const info = {};
+            if (node.userData.activationData && typeof node.userData.activationData === 'object') {
+                info.activationData = node.userData.activationData;
+            }
+            if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
+            if (Number.isFinite(nodeHeadIndex)) info.headIndex = nodeHeadIndex;
+            if (Number.isFinite(nodeTokenIndex)) info.tokenIndex = nodeTokenIndex;
+            if (Number.isFinite(nodeTokenId)) info.tokenId = nodeTokenId;
+            if (nodeTokenText) info.tokenLabel = nodeTokenText;
+
+            bestSelection = {
+                label: nodeLabel || fallbackLabel || label || 'Selection',
+                kind,
+                info,
+                object: node
+            };
+            bestScore = score;
+        });
+
+        return bestSelection;
+    }
+
+    _findGenericSceneVectorSelection({
+        activationStages = null,
+        layerIndex = null,
+        headIndex = null,
+        tokenIndex = null,
+        tokenId = null,
+        tokenLabel = '',
+        defaultLabel = 'Vector',
+        labelMatcher = null
+    } = {}) {
+        const normalizedStages = Array.isArray(activationStages)
+            ? activationStages
+                .map((stage) => String(stage || '').trim().toLowerCase())
+                .filter(Boolean)
+            : [];
+        if (!normalizedStages.length) return null;
+
+        const instancedSelection = this._findSceneVectorEntrySelection({
+            stageMatcher: (stageLower) => normalizedStages.includes(stageLower),
+            layerIndex,
+            headIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel,
+            defaultLabel
+        });
+        if (
+            instancedSelection
+            && (
+                typeof labelMatcher !== 'function'
+                || labelMatcher(instancedSelection.label, instancedSelection?.object || null)
+            )
+        ) {
+            return instancedSelection;
+        }
+
+        return this._findGenericSceneObjectSelection({
+            activationStages: normalizedStages,
+            layerIndex,
+            headIndex,
+            tokenIndex,
+            tokenId,
+            tokenLabel,
+            kind: 'vector',
+            fallbackLabel: defaultLabel,
+            labelMatcher
+        });
+    }
+
     _findAttentionVectorSceneSelection({
         vectorKind = 'Q',
+        layerIndex = null,
         tokenIndex = null,
         tokenId = null,
         tokenLabel = '',
@@ -5247,6 +6195,7 @@ class SelectionPanel {
                 const isCachedVectorMatch = cachedKv && entryCategory === safeKind && (safeKind === 'K' || safeKind === 'V');
                 return isLiveMatch || isCachedVectorMatch;
             },
+            layerIndex,
             headIndex,
             tokenIndex,
             tokenId,
@@ -5286,10 +6235,12 @@ class SelectionPanel {
             if (!isLiveMatch && !isCachedVectorMatch) return;
 
             const nodeHeadIndex = readNumber(node, 'headIndex');
+            const nodeLayerIndex = readNumber(node, 'layerIndex');
             const nodeTokenIndex = readNumber(node, 'tokenIndex');
             const nodeTokenId = readNumber(node, 'tokenId');
             const nodeTokenText = formatTokenLabelForPreview(readString(node, 'tokenLabel'));
 
+            if (Number.isFinite(layerIndex) && Number.isFinite(nodeLayerIndex) && nodeLayerIndex !== Math.floor(layerIndex)) return;
             if (Number.isFinite(headIndex) && Number.isFinite(nodeHeadIndex) && nodeHeadIndex !== Math.floor(headIndex)) return;
             if (Number.isFinite(tokenIndex) && Number.isFinite(nodeTokenIndex) && nodeTokenIndex !== Math.floor(tokenIndex)) return;
             if (Number.isFinite(tokenId) && Number.isFinite(nodeTokenId) && nodeTokenId !== Math.floor(tokenId)) return;
@@ -5306,6 +6257,7 @@ class SelectionPanel {
             let score = isLiveMatch ? 100 : 60;
             if (node.visible !== false) score += 12;
             if (node.type === 'Group') score += 4;
+            if (Number.isFinite(nodeLayerIndex) && Number.isFinite(layerIndex) && nodeLayerIndex === Math.floor(layerIndex)) score += 18;
             if (Number.isFinite(nodeHeadIndex) && Number.isFinite(headIndex) && nodeHeadIndex === Math.floor(headIndex)) score += 16;
             if (Number.isFinite(nodeTokenIndex) && Number.isFinite(tokenIndex) && nodeTokenIndex === Math.floor(tokenIndex)) score += 20;
             if (Number.isFinite(nodeTokenId) && Number.isFinite(tokenId) && nodeTokenId === Math.floor(tokenId)) score += 10;
@@ -5325,6 +6277,7 @@ class SelectionPanel {
             const info = {};
             const activationData = node.userData.activationData;
             if (activationData && typeof activationData === 'object') info.activationData = activationData;
+            if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
             if (Number.isFinite(nodeHeadIndex)) info.headIndex = nodeHeadIndex;
             if (Number.isFinite(nodeTokenIndex)) info.tokenIndex = nodeTokenIndex;
             if (Number.isFinite(nodeTokenId)) info.tokenId = nodeTokenId;
@@ -5344,12 +6297,39 @@ class SelectionPanel {
 
     _findQkvSourceVectorSceneSelection({
         layerIndex = null,
+        headIndex = null,
         tokenIndex = null,
         tokenId = null,
         tokenLabel = ''
     } = {}) {
         const scene = this.engine?.scene || null;
         if (!scene || typeof scene.traverse !== 'function') return null;
+
+        if (Number.isFinite(headIndex)) {
+            const copiedSelection = this._findSceneVectorEntrySelection({
+                stageMatcher: (_stageLower, entry, node) => {
+                    const entryCategory = entry?.category || entry?.vectorRef?.userData?.vectorCategory;
+                    const entryActivationLabel = entry?.activationData?.label || '';
+                    const vectorRefGroupLabel = entry?.vectorRef?.group?.userData?.label || '';
+                    const vectorRefMeshLabel = entry?.vectorRef?.mesh?.userData?.label || '';
+                    const nodeLabel = node?.userData?.label || '';
+                    const nodeActivationLabel = node?.userData?.activationData?.label || '';
+                    return isPreQkvResidualCopyCandidate({ label: entry?.label, category: entryCategory })
+                        || isPreQkvResidualCopyCandidate({ label: entryActivationLabel, category: entryCategory })
+                        || isPreQkvResidualCopyCandidate({ label: vectorRefGroupLabel, category: entryCategory })
+                        || isPreQkvResidualCopyCandidate({ label: vectorRefMeshLabel, category: entryCategory })
+                        || isPreQkvResidualCopyCandidate({ label: nodeLabel, category: node?.userData?.vectorCategory })
+                        || isPreQkvResidualCopyCandidate({ label: nodeActivationLabel, category: node?.userData?.vectorCategory });
+                },
+                layerIndex,
+                headIndex,
+                tokenIndex,
+                tokenId,
+                tokenLabel,
+                defaultLabel: resolvePostLayerNormResidualLabel({ stage: 'ln1.shift' })
+            });
+            if (copiedSelection) return copiedSelection;
+        }
 
         const instancedSelection = this._findSceneVectorEntrySelection({
             stageMatcher: (stageLower, entry, node) => {
@@ -5675,16 +6655,32 @@ class SelectionPanel {
             hit = null,
             layerIndex: resolvedLayerIndex = null
         } = {}) => {
-            if (!vectorRef) return null;
-            const activationData = vectorRef.userData?.activationData || null;
+            const resolvedVectorRef = resolveLiveLayerNormParamVectorRef(vectorRef);
+            if (!resolvedVectorRef) return null;
+            const activationData = resolvedVectorRef.userData?.activationData || null;
+            const usesDetachedCarrier = resolvedVectorRef !== vectorRef;
             const info = {
-                vectorRef
+                vectorRef: resolvedVectorRef
             };
             if (activationData && typeof activationData === 'object') {
                 info.activationData = activationData;
             }
             const tokenIndex = findUserDataNumber({ info }, 'tokenIndex');
             const tokenLabel = findUserDataString({ info }, 'tokenLabel');
+            const resolvedObject = usesDetachedCarrier
+                ? (
+                    resolvedVectorRef.group
+                    || resolvedVectorRef.mesh
+                    || object
+                    || null
+                )
+                : (
+                    object
+                    || resolvedVectorRef.group
+                    || resolvedVectorRef.mesh
+                    || null
+                );
+            const resolvedHit = usesDetachedCarrier ? null : hit;
             if (Number.isFinite(resolvedLayerIndex)) info.layerIndex = Math.floor(resolvedLayerIndex);
             if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
             if (typeof tokenLabel === 'string' && tokenLabel.trim().length) info.tokenLabel = tokenLabel;
@@ -5692,10 +6688,64 @@ class SelectionPanel {
                 label,
                 kind,
                 info,
-                ...(object ? { object } : {}),
-                ...(hit ? { hit } : {})
+                ...(resolvedObject ? { object: resolvedObject } : {}),
+                ...(resolvedHit ? { hit: resolvedHit } : {})
             };
         };
+
+        const layers = Array.isArray(this.engine?._layers) ? this.engine._layers : [];
+        const targetLayer = Number.isFinite(layerIndex) && layerIndex >= 0 && layerIndex < layers.length
+            ? layers[Math.floor(layerIndex)]
+            : null;
+
+        const scene = this.engine?.scene || null;
+        if (!safeKind) return null;
+
+        if (scene && typeof scene.traverse === 'function') {
+            const desiredStage = `${safeKind}.param.${safeParam}`;
+            let bestSelection = null;
+            let bestScore = -Infinity;
+
+            scene.traverse((node) => {
+                if (!node || node.isScene || !node.userData) return;
+                const activationStage = String(node.userData.activationData?.stage || '').toLowerCase();
+                if (activationStage !== desiredStage) return;
+
+                const nodeLayerIndex = Number.isFinite(node.userData.activationData?.layerIndex)
+                    ? Math.floor(node.userData.activationData.layerIndex)
+                    : (Number.isFinite(node.userData.layerIndex) ? Math.floor(node.userData.layerIndex) : null);
+                if (Number.isFinite(layerIndex) && Number.isFinite(nodeLayerIndex) && nodeLayerIndex !== Math.floor(layerIndex)) {
+                    return;
+                }
+
+                let score = 100;
+                if (node.visible !== false) score += 12;
+                if (node.type === 'Group') score += 6;
+                if (Number.isFinite(nodeLayerIndex) && Number.isFinite(layerIndex) && nodeLayerIndex === Math.floor(layerIndex)) {
+                    score += 18;
+                }
+                if (score <= bestScore) return;
+
+                const label = typeof node.userData.label === 'string' && node.userData.label.trim().length
+                    ? node.userData.label
+                    : `${safeKind.toUpperCase()} ${safeParam === 'scale' ? 'Scale' : 'Shift'}`;
+                const info = {};
+                if (node.userData.activationData && typeof node.userData.activationData === 'object') {
+                    info.activationData = node.userData.activationData;
+                }
+                if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
+
+                bestSelection = {
+                    label,
+                    kind: 'vector',
+                    info,
+                    object: node
+                };
+                bestScore = score;
+            });
+
+            if (bestSelection) return bestSelection;
+        }
 
         if (safeKind === 'final') {
             const placeholders = this.pipeline?._topLnParamPlaceholders || null;
@@ -5717,10 +6767,6 @@ class SelectionPanel {
             }
         }
 
-        const layers = Array.isArray(this.engine?._layers) ? this.engine._layers : [];
-        const targetLayer = Number.isFinite(layerIndex) && layerIndex >= 0 && layerIndex < layers.length
-            ? layers[Math.floor(layerIndex)]
-            : null;
         const bankKey = safeKind === 'ln2'
             ? (safeParam === 'scale' ? 'ln2Scale' : 'ln2Shift')
             : (safeKind === 'ln1'
@@ -5769,52 +6815,7 @@ class SelectionPanel {
             }
         }
 
-        const scene = this.engine?.scene || null;
-        if (!scene || typeof scene.traverse !== 'function' || !safeKind) return null;
-
-        const desiredStage = `${safeKind}.param.${safeParam}`;
-        let bestSelection = null;
-        let bestScore = -Infinity;
-
-        scene.traverse((node) => {
-            if (!node || node.isScene || !node.userData) return;
-            const activationStage = String(node.userData.activationData?.stage || '').toLowerCase();
-            if (activationStage !== desiredStage) return;
-
-            const nodeLayerIndex = Number.isFinite(node.userData.activationData?.layerIndex)
-                ? Math.floor(node.userData.activationData.layerIndex)
-                : (Number.isFinite(node.userData.layerIndex) ? Math.floor(node.userData.layerIndex) : null);
-            if (Number.isFinite(layerIndex) && Number.isFinite(nodeLayerIndex) && nodeLayerIndex !== Math.floor(layerIndex)) {
-                return;
-            }
-
-            let score = 100;
-            if (node.visible !== false) score += 12;
-            if (node.type === 'Group') score += 6;
-            if (Number.isFinite(nodeLayerIndex) && Number.isFinite(layerIndex) && nodeLayerIndex === Math.floor(layerIndex)) {
-                score += 18;
-            }
-            if (score <= bestScore) return;
-
-            const label = typeof node.userData.label === 'string' && node.userData.label.trim().length
-                ? node.userData.label
-                : `${safeKind.toUpperCase()} ${safeParam === 'scale' ? 'Scale' : 'Shift'}`;
-            const info = {};
-            if (node.userData.activationData && typeof node.userData.activationData === 'object') {
-                info.activationData = node.userData.activationData;
-            }
-            if (Number.isFinite(nodeLayerIndex)) info.layerIndex = nodeLayerIndex;
-
-            bestSelection = {
-                label,
-                kind: 'vector',
-                info,
-                object: node
-            };
-            bestScore = score;
-        });
-
-        return bestSelection;
+        return null;
     }
 
     _buildFallbackLayerNormParamSelection({
@@ -5850,6 +6851,7 @@ class SelectionPanel {
 
     _buildFallbackAttentionVectorSelection({
         vectorKind = 'Q',
+        layerIndex = null,
         tokenIndex = null,
         tokenId = null,
         tokenLabel = '',
@@ -5860,6 +6862,7 @@ class SelectionPanel {
             ? 'Query Vector'
             : (safeKind === 'V' ? 'Value Vector' : 'Key Vector');
         const info = {};
+        if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
         if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
         if (Number.isFinite(tokenId)) info.tokenId = Math.floor(tokenId);
         if (typeof tokenLabel === 'string' && tokenLabel.trim().length) {
@@ -5870,15 +6873,16 @@ class SelectionPanel {
         info.activationData = {
             label,
             stage,
+            ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
             ...(Number.isFinite(headIndex) ? { headIndex: Math.floor(headIndex) } : {}),
             ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
             ...(typeof tokenLabel === 'string' && tokenLabel.trim().length ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) } : {})
         };
-        return {
+        return this._attachActivationSourceValuesToSelection({
             label,
             kind: 'vector',
             info
-        };
+        });
     }
 
     _buildFallbackQkvSourceVectorSelection({
@@ -5902,11 +6906,11 @@ class SelectionPanel {
             ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
             ...(typeof tokenLabel === 'string' && tokenLabel.trim().length ? { tokenLabel: formatTokenLabelForPreview(tokenLabel) } : {})
         };
-        return {
+        return this._attachActivationSourceValuesToSelection({
             label,
             kind: 'vector',
             info
-        };
+        });
     }
 
     _buildFallbackQkvWeightMatrixSelection({
@@ -5923,6 +6927,272 @@ class SelectionPanel {
             kind: 'matrix',
             info
         };
+    }
+
+    _resolveTransformerView2dCanvasSelection(selection = null) {
+        const fallbackSelection = this._buildTransformerView2dFallbackSelection(selection);
+        if (!fallbackSelection?.label) return null;
+        if (selection?.object || selection?.hit?.object || selection?.info?.vectorRef) {
+            return selection;
+        }
+        const sceneLabelFallbackSelection = () => this._findTransformerView2dFallbackSceneSelection(fallbackSelection);
+
+        const label = fallbackSelection.label;
+        const lower = label.toLowerCase();
+        const activation = getActivationDataFromSelection(fallbackSelection);
+        const stageLower = String(activation?.stage || '').toLowerCase();
+        const sourceStageLower = String(activation?.sourceStage || '').toLowerCase();
+        const liveVectorStages = [...new Set([
+            sourceStageLower,
+            stageLower
+        ].filter(Boolean))];
+        const layerIndex = findUserDataNumber(fallbackSelection, 'layerIndex');
+        const headIndex = findUserDataNumber(fallbackSelection, 'headIndex');
+        const tokenContext = this._resolveTransformerView2dSelectionTokenContext(fallbackSelection);
+
+        if (
+            isAttentionScoreSelection(label, fallbackSelection)
+            && Number.isFinite(layerIndex)
+            && Number.isFinite(headIndex)
+            && Number.isFinite(tokenContext.queryTokenIndex)
+            && Number.isFinite(tokenContext.keyTokenIndex)
+        ) {
+            const link = {
+                mode: resolveAttentionModeFromSelection(fallbackSelection) === 'post' ? 'post' : 'pre',
+                layerIndex: Math.floor(layerIndex),
+                headIndex: Math.floor(headIndex),
+                sourceTokenIndex: tokenContext.queryTokenIndex,
+                targetTokenIndex: tokenContext.keyTokenIndex
+            };
+            return this._findAttentionScoreSceneSelection(link)
+                || this._buildFallbackAttentionScoreSelection(link);
+        }
+
+        if (
+            stageLower === 'attention.mask'
+            || lower.includes('causal mask')
+            || lower.includes('attention mask')
+        ) {
+            const link = (
+                Number.isFinite(layerIndex)
+                && Number.isFinite(headIndex)
+                && Number.isFinite(tokenContext.queryTokenIndex)
+                && Number.isFinite(tokenContext.keyTokenIndex)
+            )
+                ? {
+                    mode: 'pre',
+                    layerIndex: Math.floor(layerIndex),
+                    headIndex: Math.floor(headIndex),
+                    sourceTokenIndex: tokenContext.queryTokenIndex,
+                    targetTokenIndex: tokenContext.keyTokenIndex
+                }
+                : null;
+            return this._buildTransformerView2dCausalMaskSelection(fallbackSelection, link)
+                || fallbackSelection;
+        }
+
+        const layerNormParamSpec = resolveLayerNormParamPreviewSpec(label, fallbackSelection);
+        if (layerNormParamSpec) {
+            return this._findLayerNormParamSceneSelection(layerNormParamSpec)
+                || sceneLabelFallbackSelection()
+                || this._buildFallbackLayerNormParamSelection(layerNormParamSpec);
+        }
+
+        const isLayerNormModuleSelection = (
+            isLayerNormLabel(label, fallbackSelection)
+            && !lower.includes('vector')
+            && !lower.includes('scale')
+            && !lower.includes('shift')
+        );
+        if (isLayerNormModuleSelection) {
+            const layerNormKind = this._inferLayerNormKindFromSelection(fallbackSelection);
+            return this._findLayerNormSceneSelection({
+                layerNormKind,
+                layerIndex
+            }) || sceneLabelFallbackSelection() || this._buildFallbackLayerNormSelection({
+                layerNormKind,
+                layerIndex
+            });
+        }
+
+        if (lower.includes('query weight matrix')) {
+            return this._findQkvWeightMatrixSceneSelection({
+                matrixKind: 'Q',
+                headIndex,
+                layerIndex
+            }) || sceneLabelFallbackSelection() || this._buildFallbackQkvWeightMatrixSelection({
+                matrixKind: 'Q',
+                headIndex,
+                layerIndex
+            });
+        }
+        if (lower.includes('key weight matrix')) {
+            return this._findQkvWeightMatrixSceneSelection({
+                matrixKind: 'K',
+                headIndex,
+                layerIndex
+            }) || sceneLabelFallbackSelection() || this._buildFallbackQkvWeightMatrixSelection({
+                matrixKind: 'K',
+                headIndex,
+                layerIndex
+            });
+        }
+        if (lower.includes('value weight matrix')) {
+            return this._findQkvWeightMatrixSceneSelection({
+                matrixKind: 'V',
+                headIndex,
+                layerIndex
+            }) || sceneLabelFallbackSelection() || this._buildFallbackQkvWeightMatrixSelection({
+                matrixKind: 'V',
+                headIndex,
+                layerIndex
+            });
+        }
+
+        if (stageLower === 'attention.weighted_value' || lower.includes('weighted value vector')) {
+            return this._findGenericSceneVectorSelection({
+                activationStages: ['attention.weighted_value'],
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: 'Weighted Value Vector'
+            }) || sceneLabelFallbackSelection() || fallbackSelection;
+        }
+
+        if (
+            stageLower === 'qkv.q'
+            || stageLower === 'qkv.k'
+            || stageLower === 'qkv.v'
+            || lower.includes('query vector')
+            || lower.includes('key vector')
+            || lower.includes('value vector')
+            || lower.includes('cached key vector')
+            || lower.includes('cached value vector')
+        ) {
+            const vectorKind = (
+                stageLower === 'qkv.k'
+                || lower.includes('cached key vector')
+                || lower.includes('key vector')
+            )
+                ? 'K'
+                : (
+                    stageLower === 'qkv.v'
+                    || lower.includes('cached value vector')
+                    || lower.includes('value vector')
+                )
+                    ? 'V'
+                    : 'Q';
+            return this._findRuntimeAttentionVectorSelection({
+                vectorKind,
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || this._findAttentionVectorSceneSelection({
+                vectorKind,
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || sceneLabelFallbackSelection() || this._buildFallbackAttentionVectorSelection({
+                vectorKind,
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            });
+        }
+
+        if (stageLower === 'ln1.shift' || sourceStageLower === 'ln1.shift') {
+            return this._findRuntimeQkvSourceVectorSelection({
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || this._findQkvSourceVectorSceneSelection({
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            }) || sceneLabelFallbackSelection() || this._buildFallbackQkvSourceVectorSelection({
+                layerIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel
+            });
+        }
+
+        const genericMatrixSelection = (
+            lower === 'output projection matrix'
+            || lower === 'output projection bias vector'
+            || lower === 'mlp up weight matrix'
+            || lower === 'bias vector for mlp up matrix'
+            || lower === 'mlp down weight matrix'
+            || lower === 'bias vector · mlp down'
+        );
+        if (genericMatrixSelection) {
+            return this._findGenericSceneObjectSelection({
+                label,
+                layerIndex,
+                headIndex,
+                kind: lower.includes('matrix') ? 'matrix' : 'vector',
+                fallbackLabel: label
+            }) || sceneLabelFallbackSelection() || fallbackSelection;
+        }
+
+        const genericVectorSelection = (
+            isResidualVectorSelection(label, fallbackSelection)
+            || isWeightedSumSelection(label, fallbackSelection)
+            || liveVectorStages.includes('attention.weighted_sum')
+            || liveVectorStages.includes('attention.output_projection')
+            || liveVectorStages.includes('layer.incoming')
+            || liveVectorStages.includes('residual.post_attention')
+            || liveVectorStages.includes('residual.post_mlp')
+            || liveVectorStages.includes('ln2.shift')
+            || liveVectorStages.includes('ln1.scale')
+            || liveVectorStages.includes('ln2.scale')
+            || liveVectorStages.includes('final_ln.scale')
+            || liveVectorStages.includes('mlp.up')
+            || liveVectorStages.includes('mlp.activation')
+            || liveVectorStages.includes('mlp.down')
+            || liveVectorStages.includes('final_ln.norm')
+            || liveVectorStages.includes('ln1.norm')
+            || liveVectorStages.includes('ln2.norm')
+            || liveVectorStages.includes('final_ln.input')
+            || liveVectorStages.includes('final_ln.product')
+            || liveVectorStages.includes('final_ln.output')
+            || liveVectorStages.includes('attention.concatenate')
+        );
+        if (genericVectorSelection) {
+            return this._findGenericSceneVectorSelection({
+                activationStages: liveVectorStages,
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: label
+            }) || sceneLabelFallbackSelection() || fallbackSelection;
+        }
+
+        return sceneLabelFallbackSelection() || fallbackSelection;
+    }
+
+    _openTransformerView2dCanvasSelection(selection = null) {
+        const resolvedSelection = this._resolveTransformerView2dCanvasSelection(selection);
+        if (!resolvedSelection?.label) return false;
+        this.showSelection(resolvedSelection, {
+            scrollPanelToTop: false,
+            preserveTransformerView2d: true
+        });
+        return true;
     }
 
     _openLayerNormFromAction(actionEl) {
@@ -5953,6 +7223,7 @@ class SelectionPanel {
     _openAttentionVectorFromAction(actionEl) {
         const payload = this._parseDetailActionPayload(actionEl);
         const vectorKind = normalizeQkvActionKind(payload?.vectorKind);
+        const layerIndex = Number(payload?.layerIndex);
         const headIndex = Number(payload?.headIndex);
         const tokenIndex = Number(payload?.tokenIndex);
         const tokenId = Number(payload?.tokenId);
@@ -5960,12 +7231,14 @@ class SelectionPanel {
 
         const selection = this._findAttentionVectorSceneSelection({
             vectorKind,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
             headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
             tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
             tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
             tokenLabel
         }) || this._buildFallbackAttentionVectorSelection({
             vectorKind,
+            layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
             headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null,
             tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
             tokenId: Number.isFinite(tokenId) ? Math.floor(tokenId) : null,
@@ -6207,6 +7480,166 @@ class SelectionPanel {
         });
     }
 
+    _getTransformerView2dSelectionSidebarSections() {
+        return [
+            this.previewRoot,
+            this.vectorLegend,
+            this.equationsSection,
+            this.promptContextRow,
+            this.previewMetaSection,
+            this.description,
+            this.metaSection,
+            this.dataSection,
+            this.attentionRoot,
+            this.copyContextRow
+        ].filter(Boolean);
+    }
+
+    _ensureTransformerView2dSelectionSidebarDockRecords() {
+        if (this._transformerView2dSelectionSidebarDockRecords.length) {
+            return this._transformerView2dSelectionSidebarDockRecords;
+        }
+        const seen = new Set();
+        this._transformerView2dSelectionSidebarDockRecords = this._getTransformerView2dSelectionSidebarSections()
+            .filter((node) => {
+                if (!node || seen.has(node)) return false;
+                seen.add(node);
+                return true;
+            })
+            .map((node) => ({
+                node,
+                parent: node.parentNode || null,
+                nextSibling: node.nextSibling || null
+            }));
+        return this._transformerView2dSelectionSidebarDockRecords;
+    }
+
+    _dockTransformerView2dSelectionSidebarSections() {
+        const sidebarBody = this._transformerView2dDetailView?.getSelectionSidebarBody?.() || null;
+        if (!sidebarBody) return false;
+        const records = this._ensureTransformerView2dSelectionSidebarDockRecords();
+        records.forEach(({ node }) => {
+            if (!node || node.parentNode === sidebarBody) return;
+            sidebarBody.appendChild(node);
+        });
+        this._transformerView2dSelectionSidebarDocked = true;
+        return records.length > 0;
+    }
+
+    _restoreTransformerView2dSelectionSidebarSections() {
+        const records = this._transformerView2dSelectionSidebarDockRecords;
+        if (!records.length) {
+            this._transformerView2dSelectionSidebarDocked = false;
+            return false;
+        }
+        records.forEach(({ node, parent, nextSibling }) => {
+            if (!node || !parent) return;
+            if (nextSibling && nextSibling.parentNode === parent) {
+                parent.insertBefore(node, nextSibling);
+                return;
+            }
+            parent.appendChild(node);
+        });
+        this._transformerView2dSelectionSidebarDocked = false;
+        return true;
+    }
+
+    _syncTransformerView2dSelectionSidebarHeader() {
+        const detailView = this._transformerView2dDetailView;
+        if (!detailView?.setSelectionSidebarHeaderContent) return;
+        const buildClassName = (baseClass, sourceEl, fallbackClass) => {
+            const sourceClass = typeof sourceEl?.className === 'string'
+                ? sourceEl.className.trim()
+                : '';
+            return [baseClass, sourceClass || fallbackClass].filter(Boolean).join(' ');
+        };
+        detailView.setSelectionSidebarHeaderContent({
+            titleHtml: this.title?.innerHTML || '',
+            titleClassName: buildClassName(
+                'detail-transformer-view2d-selection-sidebar-title',
+                this.title,
+                'detail-title'
+            ),
+            subtitleHtml: this.subtitle?.innerHTML || '',
+            subtitleClassName: buildClassName(
+                'detail-transformer-view2d-selection-sidebar-subtitle',
+                this.subtitle,
+                'detail-subtitle'
+            ),
+            subtitleSecondaryHtml: this.subtitleSecondary?.innerHTML || '',
+            subtitleSecondaryClassName: buildClassName(
+                'detail-transformer-view2d-selection-sidebar-subtitle',
+                this.subtitleSecondary,
+                'detail-subtitle'
+            ),
+            subtitleTertiaryHtml: this.subtitleTertiary?.innerHTML || '',
+            subtitleTertiaryClassName: buildClassName(
+                'detail-transformer-view2d-selection-sidebar-subtitle',
+                this.subtitleTertiary,
+                'detail-subtitle'
+            )
+        });
+    }
+
+    _showTransformerView2dSelectionSidebar({ scrollToTop = true } = {}) {
+        if (this._transformerView2dSelectionSidebarRestoreTimer !== null) {
+            clearTimeout(this._transformerView2dSelectionSidebarRestoreTimer);
+            this._transformerView2dSelectionSidebarRestoreTimer = null;
+        }
+        if (!this._dockTransformerView2dSelectionSidebarSections()) return false;
+        this._syncTransformerView2dSelectionSidebarHeader();
+        this._transformerView2dDetailView?.setSelectionSidebarVisible?.(true);
+        if (scrollToTop) {
+            this._transformerView2dDetailView?.scrollSelectionSidebarToTop?.();
+        }
+        this._scheduleSelectionEquationFit();
+        this._scheduleDimensionLabelFit();
+        if (this.isOpen) {
+            this._onResize();
+            this._renderPreviewSnapshot();
+            this._startLoop();
+        } else {
+            this._scheduleResize();
+        }
+        this._scheduleResize();
+        return true;
+    }
+
+    _closeTransformerView2dSelectionSidebar({
+        restoreSections = false,
+        restartLoop = false
+    } = {}) {
+        const sidebarVisible = this._transformerView2dDetailView?.isSelectionSidebarVisible?.() === true;
+        if (!restoreSections && !sidebarVisible) {
+            return false;
+        }
+        this._transformerView2dDetailView?.setSelectionSidebarVisible?.(false);
+        if (restoreSections) {
+            if (this._transformerView2dSelectionSidebarRestoreTimer !== null) {
+                clearTimeout(this._transformerView2dSelectionSidebarRestoreTimer);
+                this._transformerView2dSelectionSidebarRestoreTimer = null;
+            }
+            this._restoreTransformerView2dSelectionSidebarSections();
+        } else if (this._isSmallScreen()) {
+            if (this._transformerView2dSelectionSidebarRestoreTimer !== null) {
+                clearTimeout(this._transformerView2dSelectionSidebarRestoreTimer);
+            }
+            this._transformerView2dSelectionSidebarRestoreTimer = setTimeout(() => {
+                this._transformerView2dSelectionSidebarRestoreTimer = null;
+                if (this._transformerView2dDetailView?.isSelectionSidebarVisible?.()) return;
+                this._restoreTransformerView2dSelectionSidebarSections();
+                this._scheduleResize();
+            }, 240);
+        }
+        if (restartLoop && this.isOpen) {
+            this._startLoop();
+        } else {
+            this._stopLoop();
+        }
+        this._scheduleResize();
+        return true;
+    }
+
     _openTransformerView2dPreview({
         fromHistory = false,
         sourceSelection = null,
@@ -6236,6 +7669,10 @@ class SelectionPanel {
                 : {})
         };
 
+        this._closeTransformerView2dSelectionSidebar({
+            restoreSections: true,
+            restartLoop: false
+        });
         this._isMhsaInfoSelectionActive = false;
         this._syncMhsaViewRoute(false);
         this._setInfoPreview(null);
@@ -6294,6 +7731,10 @@ class SelectionPanel {
 
     _closeTransformerView2dPreview({ restoreSelection = false, restartLoop = true } = {}) {
         if (!this._transformerView2dDetailOpen) return false;
+        this._closeTransformerView2dSelectionSidebar({
+            restoreSections: true,
+            restartLoop: false
+        });
         this._transformerView2dDetailOpen = false;
         this.panel.classList.remove('is-transformer-view2d-open');
         this._transformerView2dDetailView?.setVisible(false);
@@ -6692,6 +8133,44 @@ class SelectionPanel {
             label,
             kind: 'attentionSphere',
             info: { activationData }
+        };
+    }
+
+    _buildTransformerView2dCausalMaskSelection(selection = null, link = null) {
+        if (!link) return null;
+        const liveSelection = this._findAttentionScoreSceneSelection(link)
+            || this._buildFallbackAttentionScoreSelection(link);
+        if (!liveSelection?.label) return null;
+
+        const fallbackSelection = this._buildTransformerView2dFallbackSelection(selection);
+        const fallbackInfo = fallbackSelection?.info && typeof fallbackSelection.info === 'object'
+            ? fallbackSelection.info
+            : {};
+        const fallbackActivation = fallbackInfo.activationData && typeof fallbackInfo.activationData === 'object'
+            ? fallbackInfo.activationData
+            : {};
+        const liveInfo = liveSelection.info && typeof liveSelection.info === 'object'
+            ? { ...liveSelection.info }
+            : {};
+        const liveActivation = liveInfo.activationData && typeof liveInfo.activationData === 'object'
+            ? liveInfo.activationData
+            : {};
+        const label = fallbackSelection?.label || fallbackActivation.label || 'Causal Mask';
+
+        return {
+            ...liveSelection,
+            label,
+            kind: 'attentionSphere',
+            info: {
+                ...liveInfo,
+                ...fallbackInfo,
+                activationData: {
+                    ...liveActivation,
+                    ...fallbackActivation,
+                    label,
+                    stage: 'attention.mask'
+                }
+            }
         };
     }
 
@@ -11496,6 +12975,7 @@ class SelectionPanel {
         const panelHit = (hit && this.panel && this.panel.contains(hit))
             ? hit
             : (eventTarget && this.panel && this.panel.contains(eventTarget) ? eventTarget : null);
+        this._setPanelKeyboardEngaged(!!panelHit);
         const mhsaTokenMatrixRoot = resolveClosest('#detailMhsaTokenMatrixBody');
         const insideMhsaTokenMatrix = !!(
             this.mhsaTokenMatrixBody
@@ -11541,6 +13021,15 @@ class SelectionPanel {
         event.preventDefault();
         event.stopPropagation();
         this.close({ clearHistory: false });
+    }
+
+    _onDocumentFocusIn(event) {
+        const focusTarget = event?.target instanceof Element ? event.target : null;
+        this._setPanelKeyboardEngaged(!!(
+            focusTarget
+            && this.panel
+            && this.panel.contains(focusTarget)
+        ));
     }
 
     _refreshSourceLightRefs() {
@@ -11809,6 +13298,10 @@ class SelectionPanel {
 
     close({ clearHistory = true } = {}) {
         if (!this.isReady) return;
+        if (this._transformerView2dSelectionSidebarRestoreTimer !== null) {
+            clearTimeout(this._transformerView2dSelectionSidebarRestoreTimer);
+            this._transformerView2dSelectionSidebarRestoreTimer = null;
+        }
         this._isMhsaInfoSelectionActive = false;
         this._mhsaFullscreenActive = false;
         this.isOpen = false;
@@ -11830,6 +13323,7 @@ class SelectionPanel {
         }
         this._setPanelTokenHoverEntry(null, { emit: true });
         this._mirroredTokenHoverEntries = [];
+        this._setPanelKeyboardEngaged(false);
         this._applyTokenChipHoverState();
         this._hideLegendHover();
         this._resetCopyContextFeedback();
@@ -12404,10 +13898,14 @@ class SelectionPanel {
         if (!this.isReady || !selection || !selection.label) return;
         const fromHistory = options?.fromHistory === true;
         const scrollPanelToTop = options?.scrollPanelToTop === true;
+        const preserveTransformerView2d = options?.preserveTransformerView2d === true
+            && this._transformerView2dDetailOpen;
 
         this._closeSoftmaxDetailPreview({ restoreSelection: false, restartLoop: false });
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
-        this._closeTransformerView2dPreview({ restoreSelection: false, restartLoop: false });
+        if (!preserveTransformerView2d) {
+            this._closeTransformerView2dPreview({ restoreSelection: false, restartLoop: false });
+        }
         this._resetCopyContextFeedback();
         const label = normalizeSelectionLabel(selection.label, selection);
         this._lastSelection = selection;
@@ -12418,7 +13916,7 @@ class SelectionPanel {
         const isMhsaInfo = isMhsaInfoSelection(label, selection);
         this._isMhsaInfoSelectionActive = isMhsaInfo;
         this._syncMhsaViewRoute(isMhsaInfo);
-        if (!isMhsaInfo && this._mhsaFullscreenActive) {
+        if (!isMhsaInfo && this._mhsaFullscreenActive && !preserveTransformerView2d) {
             this._mhsaFullscreenActive = false;
             this.panel?.classList.remove('is-mhsa-fullscreen');
             this._syncMhsaFullscreenDocumentState();
@@ -12816,11 +14314,17 @@ class SelectionPanel {
         this._updateAttentionPreview(selection);
         this._applyTokenChipHoverState();
         this.open();
-        if (isMhsaInfo && !this._isSmallScreen()) {
+        if (preserveTransformerView2d) {
+            this._showTransformerView2dSelectionSidebar({ scrollToTop: true });
+        } else if (isMhsaInfo && !this._isSmallScreen()) {
             this._setMhsaFullscreen(true);
         }
         if (scrollPanelToTop) {
-            this._scrollPanelToTop();
+            if (preserveTransformerView2d) {
+                this._transformerView2dDetailView?.scrollSelectionSidebarToTop?.();
+            } else {
+                this._scrollPanelToTop();
+            }
         }
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();

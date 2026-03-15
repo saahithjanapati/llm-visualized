@@ -234,6 +234,28 @@ function inspectInstancedVectorSlice(sourceMesh, sourceOffset = 0, sourceCount =
     };
 }
 
+function resolveSharedVectorRefSourceOffset(selectionInfo, vectorRef, fallbackCount = null) {
+    const mesh = vectorRef?.mesh;
+    if (!mesh?.isInstancedMesh) return 0;
+    const instanceCount = Number.isFinite(vectorRef?.instanceCount)
+        ? Math.max(1, Math.floor(vectorRef.instanceCount))
+        : Number.isFinite(fallbackCount)
+            ? Math.max(1, Math.floor(fallbackCount))
+            : PREVIEW_VECTOR_BODY_INSTANCES;
+    const hintedVectorIndex = Number(selectionInfo?.info?.vectorIndex);
+    if (Number.isFinite(hintedVectorIndex) && hintedVectorIndex >= 0) {
+        return Math.max(0, Math.floor(hintedVectorIndex) * instanceCount);
+    }
+    const rawInstanceId = Number(selectionInfo?.hit?.instanceId);
+    const meshCount = Number.isFinite(mesh.count)
+        ? Math.max(0, Math.floor(mesh.count))
+        : Math.max(0, Math.floor(mesh.instanceMatrix?.count || 0));
+    if (!Number.isFinite(rawInstanceId) || rawInstanceId < 0 || meshCount <= instanceCount) {
+        return 0;
+    }
+    return Math.max(0, Math.floor(rawInstanceId / instanceCount) * instanceCount);
+}
+
 function resolveInstancedSelectionSourceOffset(selectionInfo, vectorMesh, fallbackCount = null) {
     if (!vectorMesh?.isInstancedMesh) return 0;
     const rawInstanceId = Number(selectionInfo?.hit?.instanceId);
@@ -254,7 +276,7 @@ export function isInstancedVectorSliceInMotion(sourceMesh, sourceOffset = 0, sou
     return state.shiftedVisibleHeights || state.mixedVisibility || state.fullyHidden;
 }
 
-export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbackCount = null, options = {}) {
+export function shouldSkipLiveVectorTransformCopy(selectionInfo, vectorRef, vectorMesh, fallbackCount = null, options = {}) {
     const allowDynamicVisibleCopy = options?.forceLiveCopy === true || vectorRef?.userData?.qkvProcessed === true;
     const shouldSkipFromState = (state) => {
         if (!state) return false;
@@ -281,7 +303,8 @@ export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbac
             : Number.isFinite(fallbackCount)
                 ? Math.max(1, Math.floor(fallbackCount))
                 : PREVIEW_VECTOR_BODY_INSTANCES;
-        if (shouldSkipFromState(inspectInstancedVectorSlice(vectorRef.mesh, 0, srcCount))) {
+        const sourceOffset = resolveSharedVectorRefSourceOffset(selectionInfo, vectorRef, srcCount);
+        if (shouldSkipFromState(inspectInstancedVectorSlice(vectorRef.mesh, sourceOffset, srcCount))) {
             return true;
         }
     }
@@ -290,7 +313,8 @@ export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbac
         const inspectCount = Number.isFinite(fallbackCount)
             ? Math.max(1, Math.floor(fallbackCount))
             : null;
-        if (shouldSkipFromState(inspectInstancedVectorSlice(vectorMesh, 0, inspectCount))) {
+        const sourceOffset = resolveInstancedSelectionSourceOffset(selectionInfo, vectorMesh, inspectCount);
+        if (shouldSkipFromState(inspectInstancedVectorSlice(vectorMesh, sourceOffset, inspectCount))) {
             return true;
         }
     }
@@ -300,7 +324,7 @@ export function shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, fallbac
 
 export function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, vectorMesh, options = {}) {
     if (!vec || !vec.mesh) return false;
-    if (shouldSkipLiveVectorTransformCopy(vectorRef, vectorMesh, vec.instanceCount, options)) {
+    if (shouldSkipLiveVectorTransformCopy(selectionInfo, vectorRef, vectorMesh, vec.instanceCount, options)) {
         return false;
     }
     let copied = false;
@@ -318,7 +342,8 @@ export function tryCopyVectorAppearanceToPreview(vec, selectionInfo, vectorRef, 
         const srcCount = Number.isFinite(vectorRef.instanceCount)
             ? Math.max(1, Math.floor(vectorRef.instanceCount))
             : undefined;
-        copied = copyInstancedVectorSliceToPreview(vec, vectorRef.mesh, 0, srcCount);
+        const sourceOffset = resolveSharedVectorRefSourceOffset(selectionInfo, vectorRef, srcCount);
+        copied = copyInstancedVectorSliceToPreview(vec, vectorRef.mesh, sourceOffset, srcCount);
     }
 
     if (!copied && vectorMesh?.isInstancedMesh) {

@@ -30,6 +30,7 @@ import {
     isSmallScreenViewport,
     resolveCameraMaxDistance
 } from './coreCameraZoomLimitUtils.js';
+import { resolveKeyboardZoomTargetDistance } from './coreKeyboardZoomUtils.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { resolveRaycastLabel as resolveRaycastLabelFromIntersections } from './coreRaycastResolver.js';
 import {
@@ -1429,15 +1430,6 @@ export class CoreEngine {
         const currentDistance = offset.length();
         if (!currentDistance || !Number.isFinite(currentDistance)) return;
 
-        // Keep zoom velocity within a narrower world-space band so held keys
-        // feel closer to a linear dolly than a pure percent-of-distance zoom.
-        const zoomScale = Math.exp(-direction * this._keyboardZoomSpeed * deltaSeconds);
-        const scaledDistance = currentDistance * zoomScale;
-        const scaledStep = Math.abs(scaledDistance - currentDistance);
-        const minimumStep = Math.max(0, this._keyboardZoomMinUnitsPerSecond * deltaSeconds);
-        const maximumStep = Math.max(minimumStep, this._keyboardZoomMaxUnitsPerSecond * deltaSeconds);
-        const zoomStep = THREE.MathUtils.clamp(scaledStep, minimumStep, maximumStep);
-        let desiredDistance = currentDistance + (direction > 0 ? -zoomStep : zoomStep);
         const minDistance = Math.max(
             (typeof controls.minDistance === 'number' && Number.isFinite(controls.minDistance))
                 ? controls.minDistance
@@ -1447,7 +1439,16 @@ export class CoreEngine {
         const maxDistance = (typeof controls.maxDistance === 'number' && Number.isFinite(controls.maxDistance))
             ? controls.maxDistance
             : Infinity;
-        desiredDistance = Math.max(minDistance, Math.min(maxDistance, desiredDistance));
+        const desiredDistance = resolveKeyboardZoomTargetDistance({
+            direction,
+            currentDistance,
+            deltaSeconds,
+            zoomSpeed: this._keyboardZoomSpeed,
+            minUnitsPerSecond: this._keyboardZoomMinUnitsPerSecond,
+            maxUnitsPerSecond: this._keyboardZoomMaxUnitsPerSecond,
+            minDistance,
+            maxDistance
+        });
         if (!Number.isFinite(desiredDistance) || desiredDistance === currentDistance) return;
 
         offset.setLength(desiredDistance);

@@ -103,8 +103,8 @@ describe('selectionPanelVectorCloneUtils', () => {
         const vectorRef = { mesh: hidden, instanceCount: 3 };
 
         expect(isInstancedVectorSliceInMotion(hidden, 0, 3)).toBe(true);
-        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3)).toBe(true);
-        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3, { forceLiveCopy: true })).toBe(true);
+        expect(shouldSkipLiveVectorTransformCopy(null, vectorRef, null, 3)).toBe(true);
+        expect(shouldSkipLiveVectorTransformCopy(null, vectorRef, null, 3, { forceLiveCopy: true })).toBe(true);
     });
 
     it('still skips fully hidden qkv-processed vectors', () => {
@@ -122,13 +122,36 @@ describe('selectionPanelVectorCloneUtils', () => {
             userData: { qkvProcessed: true }
         };
 
-        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3)).toBe(true);
+        expect(shouldSkipLiveVectorTransformCopy(null, vectorRef, null, 3)).toBe(true);
     });
 
     it('skips live transform copy when vector slices are in motion', () => {
         const moving = makeSourceMesh({ count: 3, yByIndex: [4, 5, 4] });
         const vectorRef = { mesh: moving, instanceCount: 3 };
-        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3)).toBe(true);
-        expect(shouldSkipLiveVectorTransformCopy(vectorRef, null, 3, { forceLiveCopy: true })).toBe(false);
+        expect(shouldSkipLiveVectorTransformCopy(null, vectorRef, null, 3)).toBe(true);
+        expect(shouldSkipLiveVectorTransformCopy(null, vectorRef, null, 3, { forceLiveCopy: true })).toBe(false);
+    });
+
+    it('inspects the hinted shared-mesh slice instead of always using offset zero', () => {
+        const source = makeSourceMesh({
+            count: 6,
+            yByIndex: [10, 10, 10, HIDE_INSTANCE_Y_OFFSET, HIDE_INSTANCE_Y_OFFSET, HIDE_INSTANCE_Y_OFFSET]
+        });
+        const vectorRef = {
+            mesh: source,
+            instanceCount: 3
+        };
+        const selectionInfo = {
+            info: {
+                vectorIndex: 1
+            },
+            hit: {
+                object: source,
+                instanceId: 4
+            }
+        };
+
+        expect(shouldSkipLiveVectorTransformCopy(selectionInfo, vectorRef, null, 3)).toBe(true);
+        expect(shouldSkipLiveVectorTransformCopy(null, vectorRef, null, 3)).toBe(false);
     });
 });

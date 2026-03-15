@@ -45,15 +45,30 @@ describe('selectionPanelTransformerView2dLockUtils', () => {
         })).toBe(false);
     });
 
-    it('keeps a locked detail selection when clicking another focusable detail target', () => {
+    it('keeps a locked detail selection when clicking the same locked detail target', () => {
         expect(resolveTransformerView2dDetailClickLockAction({
             detailSceneSelectionLocked: true,
+            detailScenePinnedSignature: 'node-a',
             detailHoverState: {
+                signature: 'node-a',
+                focusState: {
+                    activeNodeIds: ['node-a']
+                }
+            }
+        })).toBe(TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE);
+    });
+
+    it('clears a locked detail selection when clicking a different focusable detail target', () => {
+        expect(resolveTransformerView2dDetailClickLockAction({
+            detailSceneSelectionLocked: true,
+            detailScenePinnedSignature: 'node-a',
+            detailHoverState: {
+                signature: 'node-b',
                 focusState: {
                     activeNodeIds: ['node-b']
                 }
             }
-        })).toBe(TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE);
+        })).toBe(TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.CLEAR_LOCK);
     });
 
     it('clears a locked detail selection only when clicking blank canvas', () => {

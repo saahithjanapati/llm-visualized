@@ -23,13 +23,25 @@ export function shouldFreezeTransformerView2dDetailHover({
 
 export function resolveTransformerView2dDetailClickLockAction({
     detailSceneSelectionLocked = false,
+    detailScenePinnedSignature = '',
     detailHoverState = null
 } = {}) {
     const hasLockedDetailSelection = isTransformerView2dDetailSelectionLockActive(detailSceneSelectionLocked);
     const clickedFocusableDetailTarget = !!detailHoverState?.focusState;
+    const clickedSignature = typeof detailHoverState?.signature === 'string'
+        ? detailHoverState.signature
+        : '';
+    const pinnedSignature = typeof detailScenePinnedSignature === 'string'
+        ? detailScenePinnedSignature
+        : '';
+    const clickedLockedDetailTarget = !!(
+        clickedFocusableDetailTarget
+        && pinnedSignature.length
+        && clickedSignature === pinnedSignature
+    );
 
     if (hasLockedDetailSelection) {
-        return clickedFocusableDetailTarget
+        return clickedLockedDetailTarget
             ? TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE
             : TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.CLEAR_LOCK;
     }

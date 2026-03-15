@@ -262,6 +262,7 @@ export function resolveAttentionModeFromSelection(selectionInfo) {
     const stage = getActivationDataFromSelection(selectionInfo)?.stage;
     if (stage === 'attention.post') return 'post';
     if (stage === 'attention.pre') return 'pre';
+    if (stage === 'attention.mask') return 'pre';
     return null;
 }
 
@@ -327,11 +328,12 @@ export function isWeightedSumSelection(label, selectionInfo) {
 export function isAttentionScoreSelection(label, selectionInfo) {
     const lower = (label || '').toLowerCase();
     if (lower.includes('attention score')) return true;
+    if (lower.includes('causal mask') || lower.includes('attention mask')) return true;
     const stage = selectionInfo?.info?.activationData?.stage
         || selectionInfo?.object?.userData?.activationData?.stage
         || selectionInfo?.hit?.object?.userData?.activationData?.stage;
     const stageLower = typeof stage === 'string' ? stage.toLowerCase() : '';
-    if (stageLower === 'attention.pre' || stageLower === 'attention.post') return true;
+    if (stageLower === 'attention.pre' || stageLower === 'attention.post' || stageLower === 'attention.mask') return true;
     const kindLower = String(selectionInfo?.kind || '').toLowerCase();
     if (kindLower === 'attentionsphere') return true;
     const obj = selectionInfo?.object || selectionInfo?.hit?.object;
