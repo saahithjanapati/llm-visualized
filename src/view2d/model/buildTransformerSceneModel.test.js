@@ -686,7 +686,7 @@ describe('buildTransformerSceneModel', () => {
         expect(bottomTitleNode?.text).toBe('Perceptron');
     });
 
-    it('keeps key overview component labels persistent farther out in the zoomed view', () => {
+    it('uses full embedding-matrix labels for the left-side input cards', () => {
         const scene = buildTransformerSceneModel({
             activationSource: createMockActivationSource(),
             tokenIndices: [0, 1],
@@ -695,50 +695,76 @@ describe('buildTransformerSceneModel', () => {
         });
 
         const nodes = flattenSceneNodes(scene);
-        const expectPersistentLabel = (predicate) => {
-            const node = nodes.find(predicate);
-            expect(node).toBeTruthy();
-            expect(node?.metadata?.persistentMinScreenFontPx).toBeGreaterThan(0);
-        };
-
-        expectPersistentLabel((node) => (
-            node?.kind === VIEW2D_NODE_KINDS.TEXT
-            && node?.semantic?.componentKind === 'layer-norm'
-            && node?.semantic?.stage === 'ln1'
-            && node?.role === 'module-title'
-        ));
-        expectPersistentLabel((node) => (
-            node?.kind === VIEW2D_NODE_KINDS.TEXT
-            && node?.semantic?.componentKind === 'mhsa'
-            && node?.role === 'head-label'
-        ));
-        expectPersistentLabel((node) => (
-            node?.kind === VIEW2D_NODE_KINDS.TEXT
-            && node?.semantic?.componentKind === 'output-projection'
-            && node?.role === 'module-title-top'
-        ));
-        expectPersistentLabel((node) => (
-            node?.kind === VIEW2D_NODE_KINDS.TEXT
-            && node?.semantic?.componentKind === 'output-projection'
-            && node?.role === 'module-title-bottom'
-        ));
-        expectPersistentLabel((node) => (
-            node?.kind === VIEW2D_NODE_KINDS.TEXT
-            && node?.semantic?.componentKind === 'mlp'
-            && node?.role === 'module-title-top'
-        ));
-        expectPersistentLabel((node) => (
-            node?.kind === VIEW2D_NODE_KINDS.TEXT
-            && node?.semantic?.componentKind === 'mlp'
-            && node?.role === 'module-title-bottom'
-        ));
-        expectPersistentLabel((node) => (
+        const vocabularyTitleNode = nodes.find((node) => (
             node?.kind === VIEW2D_NODE_KINDS.TEXT
             && node?.semantic?.componentKind === 'embedding'
             && node?.semantic?.stage === 'embedding.token'
             && node?.role === 'module-title'
         ));
-        expectPersistentLabel((node) => (
+        const positionTitleNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.position'
+            && node?.role === 'module-title'
+        ));
+
+        expect(vocabularyTitleNode?.text).toBe('Vocabulary Embedding Matrix');
+        expect(positionTitleNode?.text).toBe('Position Embedding Matrix');
+    });
+
+    it('uses the shared default zoom reveal behavior for overview component labels', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [0, 1],
+            tokenLabels: ['Token A', 'Token B'],
+            layerCount: 1
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const expectDefaultRevealLabel = (predicate) => {
+            const node = nodes.find(predicate);
+            expect(node).toBeTruthy();
+            expect(Number.isFinite(node?.metadata?.persistentMinScreenFontPx)).toBe(false);
+        };
+
+        expectDefaultRevealLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'layer-norm'
+            && node?.semantic?.stage === 'ln1'
+            && node?.role === 'module-title'
+        ));
+        expectDefaultRevealLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'mhsa'
+            && node?.role === 'head-label'
+        ));
+        expectDefaultRevealLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'output-projection'
+            && node?.role === 'module-title-top'
+        ));
+        expectDefaultRevealLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'output-projection'
+            && node?.role === 'module-title-bottom'
+        ));
+        expectDefaultRevealLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'mlp'
+            && node?.role === 'module-title-top'
+        ));
+        expectDefaultRevealLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'mlp'
+            && node?.role === 'module-title-bottom'
+        ));
+        expectDefaultRevealLabel((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.semantic?.componentKind === 'embedding'
+            && node?.semantic?.stage === 'embedding.token'
+            && node?.role === 'module-title'
+        ));
+        expectDefaultRevealLabel((node) => (
             node?.kind === VIEW2D_NODE_KINDS.TEXT
             && node?.semantic?.componentKind === 'embedding'
             && node?.semantic?.stage === 'embedding.position'

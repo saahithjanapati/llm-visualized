@@ -90,8 +90,17 @@ describe('selectionPanelAttentionMatrixUtils', () => {
         expect(shouldClearPinnedAttentionOnDocumentPointerDown({
             isPinned: true,
             panelHit: true,
+            insideAttentionBody: true,
             insideAttentionMatrix: true,
             validMatrixCell: false
+        })).toBe(true);
+    });
+
+    it('clears a pinned attention cell when tapping elsewhere in the attention body', () => {
+        expect(shouldClearPinnedAttentionOnDocumentPointerDown({
+            isPinned: true,
+            panelHit: true,
+            insideAttentionBody: true
         })).toBe(true);
     });
 

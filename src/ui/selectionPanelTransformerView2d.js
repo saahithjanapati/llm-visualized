@@ -85,6 +85,7 @@ export {
 
 const VIEW2D_DETAIL_ACTION_FIT = 'fit-scene';
 const VIEW2D_DETAIL_ACTION_EXIT_DEEP = 'exit-deep-detail';
+const VIEW2D_DETAIL_ACTION_EXIT_TO_3D = 'exit-to-3d';
 const VIEW2D_INTERACTION_SETTLE_MS = 140;
 const VIEW2D_PREVIEW_DPR_CAP_IDLE = 1.5;
 const VIEW2D_PREVIEW_DPR_CAP_INTERACTING = 1;
@@ -309,7 +310,9 @@ export function setDescriptionTransformerView2dAction(descriptionEl, {
     descriptionEl.appendChild(actionRow);
 }
 
-export function createTransformerView2dDetailView(panelEl) {
+export function createTransformerView2dDetailView(panelEl, {
+    onExitTo3d = null
+} = {}) {
     if (!panelEl || typeof document === 'undefined') return null;
 
     const root = document.createElement('section');
@@ -351,7 +354,15 @@ export function createTransformerView2dDetailView(panelEl) {
                             aria-hidden="true"
                             hidden
                         >
-                            Back to graph
+                            Back to Outer View
+                        </button>
+                        <button
+                            type="button"
+                            class="detail-transformer-view2d-action detail-transformer-view2d-action--exit"
+                            data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_TO_3D}"
+                            aria-label="Exit the 2D canvas and return to the 3D view"
+                        >
+                            Go to 3D
                         </button>
                     </div>
                 </div>
@@ -396,6 +407,7 @@ export function createTransformerView2dDetailView(panelEl) {
     const hud = root.querySelector('.detail-transformer-view2d-hud');
     const fitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"]`);
     const backToGraphBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_DEEP}"]`);
+    const exitTo3dBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_TO_3D}"]`);
     const stageLayerReadout = root.querySelector('[data-transformer-view2d-readout="layer"]');
     const stageTitleReadout = root.querySelector('[data-transformer-view2d-readout="stage"]');
     const hoverLabelOverlay = createHoverLabelOverlay({
@@ -578,6 +590,10 @@ export function createTransformerView2dDetailView(panelEl) {
 
     function hasActiveDetailTarget() {
         return hasActiveDetailTargetState(state);
+    }
+
+    function isTransformerView2dGraphOverview() {
+        return !state.semanticTarget && !state.baseSemanticTarget;
     }
 
     function hasSceneBackedDetailTarget() {
@@ -1757,7 +1773,7 @@ export function createTransformerView2dDetailView(panelEl) {
         const isHeadDetailActive = isDetailDeepActive && hasActiveDetailTarget();
         const isHeadDetailSceneActive = isDetailDeepActive && hasSceneBackedDetailTarget();
         const isConcatDetailActive = isDetailDeepActive && !!state.concatDetailTarget;
-        const canReturnToGraphOverview = !!state.semanticTarget;
+        const canReturnToGraphOverview = !isTransformerView2dGraphOverview();
         root.classList.toggle('is-head-detail-active', isHeadDetailActive);
         root.classList.toggle('is-head-detail-scene-active', isHeadDetailSceneActive);
         root.classList.toggle('is-concat-detail-active', isConcatDetailActive);
@@ -2847,6 +2863,11 @@ export function createTransformerView2dDetailView(panelEl) {
         clearStagedHeadDetailTransition();
         returnToGraphOverview({ animate: true });
         focusCanvasSurface();
+    });
+    exitTo3dBtn?.addEventListener('click', () => {
+        if (typeof onExitTo3d === 'function') {
+            onExitTo3d();
+        }
     });
     window.addEventListener('keydown', onWindowKeyDown);
     window.addEventListener('keyup', onWindowKeyUp);

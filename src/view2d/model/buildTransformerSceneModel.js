@@ -59,7 +59,6 @@ const SUMMARY_MLP_COLS = 24;
 const SUMMARY_LOGIT_COLS = 12;
 const CARD_LABEL_HORIZONTAL_INSET = 10;
 const INPUT_EMBEDDING_ADD_TO_RESIDUAL_OFFSET_X = -96;
-const OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX = 10;
 
 const HEAD_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
     valueMin: -2,
@@ -823,8 +822,7 @@ function buildLayerNormModule({
         dimensions: {
             rows: 1,
             cols: D_MODEL
-        },
-        textPersistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
+        }
     });
 }
 
@@ -895,8 +893,7 @@ function buildMhsaModule({
             presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
             visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
             metadata: createPersistentTextMetadata({
-                maxWidth: Math.max(24, HEAD_CARD_WIDTH - (CARD_LABEL_HORIZONTAL_INSET * 2)),
-                persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
+                maxWidth: Math.max(24, HEAD_CARD_WIDTH - (CARD_LABEL_HORIZONTAL_INSET * 2))
             })
         });
         const headNode = createGroupNode({
@@ -993,16 +990,14 @@ function buildOutputProjectionModule({
                             semantic: buildSemantic(semantic, { role: 'module-title-top' }),
                             text: 'Output',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth,
-                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
+                            maxWidth: titleMaxWidth
                         }),
                         createFittedLabelNode({
                             role: 'module-title-bottom',
                             semantic: buildSemantic(semantic, { role: 'module-title-bottom' }),
                             text: 'Projection',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth,
-                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
+                            maxWidth: titleMaxWidth
                         })
                     ],
                     metadata: {
@@ -1079,16 +1074,14 @@ function buildMlpModule({
                             semantic: buildSemantic(semantic, { role: 'module-title-top' }),
                             text: 'Multilayer',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth,
-                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
+                            maxWidth: titleMaxWidth
                         }),
                         createFittedLabelNode({
                             role: 'module-title-bottom',
                             semantic: buildSemantic(semantic, { role: 'module-title-bottom' }),
                             text: 'Perceptron',
                             styleKey: VIEW2D_STYLE_KEYS.LABEL,
-                            maxWidth: titleMaxWidth,
-                            persistentMinScreenFontPx: OVERVIEW_COMPONENT_LABEL_MIN_SCREEN_FONT_PX
+                            maxWidth: titleMaxWidth
                         })
                     ],
                     metadata: {

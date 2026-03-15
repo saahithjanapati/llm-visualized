@@ -13,7 +13,6 @@ import {
 import { VIEW2D_STYLE_KEYS } from '../theme/visualTokens.js';
 
 const CARD_LABEL_HORIZONTAL_INSET = 12;
-const EMBEDDING_STREAM_LABEL_MIN_SCREEN_FONT_PX = 10;
 
 function mergeSemantic(baseSemantic = {}, extra = {}) {
     return {
@@ -70,39 +69,37 @@ function createCardMetadata(width = null, height = null, {
 export function buildPositionEmbeddingModule({
     semantic = {},
     title = 'Position Embedding',
-    cardWidth = 148,
+    cardWidth = 184,
     cardHeight = 108
 } = {}) {
     return buildEmbeddingStreamModule({
         semantic,
         title,
         role: 'position-embedding-card',
-        labelText: 'W position',
-        labelTex: 'W_{position}',
+        labelText: 'Position Embedding Matrix',
+        labelTex: 'Position Embedding Matrix',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_POSITION_STREAM,
         cardWidth,
-        cardHeight,
-        persistentMinScreenFontPx: EMBEDDING_STREAM_LABEL_MIN_SCREEN_FONT_PX
+        cardHeight
     });
 }
 
 export function buildVocabularyEmbeddingModule({
     semantic = {},
     title = 'Vocabulary Embedding',
-    cardWidth = 196,
+    cardWidth = 220,
     cardHeight = 144
 } = {}) {
     return buildEmbeddingStreamModule({
         semantic,
         title,
         role: 'vocabulary-embedding-card',
-        labelText: 'W vocabulary',
-        labelTex: 'W_{vocabulary}',
+        labelText: 'Vocabulary Embedding Matrix',
+        labelTex: 'Vocabulary Embedding Matrix',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
         cardWidth,
         cardHeight,
-        wideSide: 'left',
-        persistentMinScreenFontPx: EMBEDDING_STREAM_LABEL_MIN_SCREEN_FONT_PX
+        wideSide: 'left'
     });
 }
 

@@ -110,7 +110,10 @@ function isBiasVectorHoverSelection(label = '') {
 function isEmbeddingMatrixHoverSelection(label = '') {
     const lower = String(label || '').toLowerCase().trim();
     return lower === 'vocabulary embedding'
+        || lower === 'vocabulary embedding matrix'
+        || lower === 'position embedding'
         || lower === 'positional embedding'
+        || lower === 'position embedding matrix'
         || lower === 'vocab embedding (top)'
         || lower === 'vocabulary embedding (top)';
 }

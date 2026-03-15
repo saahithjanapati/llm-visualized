@@ -337,6 +337,9 @@ export function createTokenChipMesh({
     }
 
     group.userData = group.userData || {};
+    group.userData.tokenChipStyle = style && typeof style === 'object'
+        ? { ...style }
+        : {};
     group.userData.size = {
         width: chipWidth * (scaleFactor > 0 ? scaleFactor : 1),
         height: chipHeight * (scaleFactor > 0 ? scaleFactor : 1)

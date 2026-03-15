@@ -626,7 +626,8 @@ function buildOutputProjectionEquationResult(index = null, {
     label = '',
     info = null,
     rowIndex = null,
-    includeOutputRow = false
+    includeOutputRow = false,
+    extraRowSelections = []
 } = {}, options = null) {
     if (!index) return null;
     const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index);
@@ -634,6 +635,14 @@ function buildOutputProjectionEquationResult(index = null, {
     const outputNodeId = findOutputProjectionProjectedOutputNodeId(index);
     const weightNodeId = (index?.nodeIdsByRole?.get('projection-weight') || [])[0] || '';
     const biasNodeId = (index?.nodeIdsByRole?.get('projection-bias') || [])[0] || '';
+    const equationRowSelections = Number.isFinite(rowIndex)
+        ? [
+            ...(concatOutputNodeId ? [{ nodeId: concatOutputNodeId, rowIndex }] : []),
+            ...(concatCopyNodeId ? [{ nodeId: concatCopyNodeId, rowIndex }] : []),
+            ...(includeOutputRow && outputNodeId ? [{ nodeId: outputNodeId, rowIndex }] : []),
+            ...(Array.isArray(extraRowSelections) ? extraRowSelections : [])
+        ]
+        : [];
 
     return buildPathFocusResult(index, {
         label,
@@ -646,13 +655,7 @@ function buildOutputProjectionEquationResult(index = null, {
             outputNodeId
         ],
         extraConnectorIds: collectOutputProjectionEquationConnectorIds(index),
-        rowSelections: Number.isFinite(rowIndex)
-            ? [
-                ...(concatOutputNodeId ? [{ nodeId: concatOutputNodeId, rowIndex }] : []),
-                ...(concatCopyNodeId ? [{ nodeId: concatCopyNodeId, rowIndex }] : []),
-                ...(includeOutputRow && outputNodeId ? [{ nodeId: outputNodeId, rowIndex }] : [])
-            ]
-            : []
+        rowSelections: equationRowSelections
     }, options);
 }
 
@@ -663,13 +666,14 @@ function buildOutputProjectionHeadOutputRowResult(index = null, node = null, row
     const headIndex = Number.isFinite(node?.semantic?.headIndex)
         ? Math.max(0, Math.floor(node.semantic.headIndex))
         : null;
+    const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index);
+    const concatOutputCopyNodeId = findOutputProjectionConcatCopyNodeId(index);
     const connectorId = findOutputProjectionHeadConnectorId(index, headIndex);
     const concatCopyConnectorId = findOutputProjectionConcatCopyConnectorId(index, headIndex);
     const {
         sourceNodeId,
         copyNodeId
     } = findOutputProjectionHeadMatrixIds(index, headIndex);
-    const concatOutputNodeId = findOutputProjectionConcatOutputNodeId(index);
     return buildPathFocusResult(index, {
         label: 'Attention Weighted Sum',
         info: buildWeightedSumHoverInfo(node, rowHit.rowItem),
@@ -684,6 +688,14 @@ function buildOutputProjectionHeadOutputRowResult(index = null, node = null, row
             }] : []),
             ...(copyNodeId ? [{
                 nodeId: copyNodeId,
+                rowIndex
+            }] : []),
+            ...(concatOutputNodeId ? [{
+                nodeId: concatOutputNodeId,
+                rowIndex
+            }] : []),
+            ...(concatOutputCopyNodeId ? [{
+                nodeId: concatOutputCopyNodeId,
                 rowIndex
             }] : [])
         ],
@@ -804,6 +816,11 @@ function buildOutputProjectionOutputRowResult(index = null, node = null, rowHit 
     if (!index || !node || !rowHit) return null;
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
     if (!Number.isFinite(rowIndex)) return null;
+    const headOutputMatrixNodeIds = collectOutputProjectionHeadMatrixNodeIds(index);
+    const headOutputMatrixRowSelections = headOutputMatrixNodeIds.map((nodeId) => ({
+        nodeId,
+        rowIndex
+    }));
     return buildOutputProjectionEquationResult(index, {
         label: 'Attention Output Vector',
         info: buildAttentionOutputProjectionHoverInfo(node, rowHit.rowItem, {
@@ -813,7 +830,8 @@ function buildOutputProjectionOutputRowResult(index = null, node = null, rowHit 
             }
         }),
         rowIndex,
-        includeOutputRow: true
+        includeOutputRow: true,
+        extraRowSelections: headOutputMatrixRowSelections
     }, options);
 }
 

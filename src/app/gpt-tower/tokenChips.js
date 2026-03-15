@@ -91,6 +91,11 @@ const BOTTOM_EMBED_PROGRESS_EPSILON = 1e-4;
 const BOTTOM_EMBED_SETTLE_EASE_POWER = 2.2;
 const BOTTOM_EMBED_SETTLE_MIN_DURATION_MS = 480;
 
+function resolveTokenChipStyleValue(style = null, key = '', fallback = null) {
+    if (!style || typeof style !== 'object' || !key) return fallback;
+    return Object.prototype.hasOwnProperty.call(style, key) ? style[key] : fallback;
+}
+
 function applyEmbeddingReflectivityTweaks(matrix) {
     if (!matrix) return;
     const applyToMaterial = (mat) => {
@@ -315,39 +320,43 @@ function getAverageBottomPositionExitProgress(lanes = [], posMatrixTopY = NaN) {
 
 function applyTokenChipMaterialTweaks(chipGroup) {
     if (!chipGroup || typeof chipGroup.traverse !== 'function') return;
+    const style = chipGroup.userData?.tokenChipStyle;
+    const materialTweaks = {
+        ...TOKEN_CHIP_ONLY_MATERIAL_TWEAKS,
+        ...(style?.materialTweaks && typeof style.materialTweaks === 'object'
+            ? style.materialTweaks
+            : {})
+    };
+    const primaryTextColor = resolveTokenChipStyleValue(style, 'textColor', 0xffffff);
+    const secondaryTextColor = resolveTokenChipStyleValue(style, 'secondaryTextColor', 0xd7d1c8);
     const applyToMaterial = (mat) => {
         if (!mat) return;
         if (mat.isMeshBasicMaterial) {
             const textRole = mat.userData?.tokenChipTextRole;
             if (textRole === 'secondary') {
-                const secondaryColor = mat.userData?.tokenChipTextColor;
                 if (mat.color?.set) {
-                    mat.color.set(
-                        Number.isFinite(secondaryColor)
-                            ? secondaryColor
-                            : 0xd7d1c8
-                    );
+                    mat.color.set(secondaryTextColor);
                 }
             } else if (textRole === 'primary') {
-                if (mat.color?.set) mat.color.set(0xffffff);
+                if (mat.color?.set) mat.color.set(primaryTextColor);
             }
             mat.needsUpdate = true;
             return;
         }
-        if (mat.color?.set) mat.color.set(TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.color);
-        if (typeof mat.metalness === 'number') mat.metalness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.metalness;
-        if (typeof mat.roughness === 'number') mat.roughness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.roughness;
-        if (typeof mat.clearcoat === 'number') mat.clearcoat = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.clearcoat;
+        if (mat.color?.set) mat.color.set(materialTweaks.color);
+        if (typeof mat.metalness === 'number') mat.metalness = materialTweaks.metalness;
+        if (typeof mat.roughness === 'number') mat.roughness = materialTweaks.roughness;
+        if (typeof mat.clearcoat === 'number') mat.clearcoat = materialTweaks.clearcoat;
         if (typeof mat.clearcoatRoughness === 'number') {
-            mat.clearcoatRoughness = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.clearcoatRoughness;
+            mat.clearcoatRoughness = materialTweaks.clearcoatRoughness;
         }
-        if (typeof mat.iridescence === 'number') mat.iridescence = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.iridescence;
+        if (typeof mat.iridescence === 'number') mat.iridescence = materialTweaks.iridescence;
         if (typeof mat.envMapIntensity === 'number') {
-            mat.envMapIntensity = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.envMapIntensity;
+            mat.envMapIntensity = materialTweaks.envMapIntensity;
         }
-        if (mat.emissive?.set) mat.emissive.set(TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.emissive);
+        if (mat.emissive?.set) mat.emissive.set(materialTweaks.emissive);
         if (typeof mat.emissiveIntensity === 'number') {
-            mat.emissiveIntensity = TOKEN_CHIP_ONLY_MATERIAL_TWEAKS.emissiveIntensity;
+            mat.emissiveIntensity = materialTweaks.emissiveIntensity;
         }
         mat.needsUpdate = true;
     };
@@ -585,7 +594,7 @@ export function addEmbeddingAndTokenChips({
             EMBEDDING_MATRIX_PARAMS_VOCAB.slitBottomWidthFactor,
             EMBEDDING_MATRIX_PARAMS_VOCAB.slitTopWidthFactor
         );
-        vocabBottom.group.userData.label = 'Vocabulary Embedding';
+        vocabBottom.group.userData.label = 'Vocabulary Embedding Matrix';
         applyEmbeddingReflectivityTweaks(vocabBottom);
         setBottomEmbeddingMatrixVisual(vocabBottom, matrixRestColor, BOTTOM_EMBED_START_EMISSIVE);
         addToRoot(vocabBottom.group);
@@ -612,7 +621,7 @@ export function addEmbeddingAndTokenChips({
             EMBEDDING_MATRIX_PARAMS_POSITION.slitBottomWidthFactor,
             EMBEDDING_MATRIX_PARAMS_POSITION.slitTopWidthFactor
         );
-        posBottom.group.userData.label = 'Positional Embedding';
+        posBottom.group.userData.label = 'Position Embedding Matrix';
         applyEmbeddingReflectivityTweaks(posBottom);
         setBottomEmbeddingMatrixVisual(posBottom, matrixRestColor, BOTTOM_EMBED_START_EMISSIVE);
         addToRoot(posBottom.group);

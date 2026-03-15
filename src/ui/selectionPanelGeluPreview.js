@@ -1,7 +1,18 @@
+import {
+    readEquationBaseFontPx,
+    readEquationContentSize
+} from './equationFitUtils.js';
+
 const GELU_DOMAIN_MIN = -4;
 const GELU_DOMAIN_MAX = 4;
 const GELU_RANGE_MIN = -1;
 const GELU_RANGE_MAX = 4;
+const GELU_RELATION_EQUATION_TEX = '\\operatorname{GELU}(x) = x\\,\\Phi(x)';
+const GELU_APPROXIMATION_EQUATION_TEX = '\\operatorname{GELU}(x) \\approx \\frac{x}{2}\\left(1 + \\tanh\\left(\\sqrt{\\frac{2}{\\pi}}\\left(x + 0.044715x^3\\right)\\right)\\right)';
+const GELU_RELATION_FALLBACK_TEXT = 'GELU(x) = x * Phi(x)';
+const GELU_APPROXIMATION_FALLBACK_TEXT = 'GELU(x) ~= 0.5x * (1 + tanh(sqrt(2/pi) * (x + 0.044715x^3)))';
+const GELU_DETAIL_EQUATION_MIN_FONT_PX = 8.25;
+const GELU_DETAIL_EQUATION_FIT_BUFFER_PX = 6;
 const GELU_GRAPH_MARGIN = Object.freeze({
     left: 44,
     right: 18,
@@ -91,6 +102,74 @@ function toDomainX(pixelX, width, margin) {
     return GELU_DOMAIN_MIN + t * (GELU_DOMAIN_MAX - GELU_DOMAIN_MIN);
 }
 
+function renderFormulaMarkup(tex = '') {
+    const safeTex = typeof tex === 'string' ? tex.trim() : '';
+    if (!safeTex) return '';
+    const katex = (typeof window !== 'undefined') ? window.katex : null;
+    if (katex && typeof katex.renderToString === 'function') {
+        try {
+            return katex.renderToString(safeTex, { throwOnError: false, displayMode: true });
+        } catch (_) {
+            // Fall back to plain text below.
+        }
+    }
+    return safeTex;
+}
+
+function renderFormulaBody(formulaEl, tex, fallbackText) {
+    if (!formulaEl) return;
+    const markup = renderFormulaMarkup(tex);
+    if (markup === tex) {
+        formulaEl.textContent = fallbackText || tex;
+        return;
+    }
+    formulaEl.innerHTML = markup;
+}
+
+function fitFormulaBodyToWidth(formulaEl) {
+    if (!formulaEl) return;
+
+    const bodyRect = formulaEl.getBoundingClientRect();
+    const availableWidth = Math.max(0, bodyRect.width);
+    if (!(availableWidth > 0)) return;
+
+    const fitWidth = Math.max(0, availableWidth - GELU_DETAIL_EQUATION_FIT_BUFFER_PX);
+    if (!(fitWidth > 0)) return;
+
+    const baseFontPx = readEquationBaseFontPx(formulaEl, 12);
+    const maxFontPx = Math.max(GELU_DETAIL_EQUATION_MIN_FONT_PX, baseFontPx);
+    const applyFontPx = (fontPx) => {
+        formulaEl.style.fontSize = `${fontPx.toFixed(2)}px`;
+    };
+    const fitsAt = (fontPx) => {
+        applyFontPx(fontPx);
+        const size = readEquationContentSize(formulaEl);
+        return size.width <= fitWidth + 0.5;
+    };
+
+    let low = GELU_DETAIL_EQUATION_MIN_FONT_PX;
+    if (!fitsAt(low)) {
+        applyFontPx(low);
+        return;
+    }
+
+    let high = maxFontPx;
+    if (!fitsAt(high)) {
+        for (let pass = 0; pass < 9; pass += 1) {
+            const mid = (low + high) * 0.5;
+            if (fitsAt(mid)) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+    } else {
+        low = high;
+    }
+
+    applyFontPx(Math.max(GELU_DETAIL_EQUATION_MIN_FONT_PX, Math.min(maxFontPx, low)));
+}
+
 export function createGeluDetailView(panelEl) {
     if (!panelEl || typeof document === 'undefined') return null;
 
@@ -100,15 +179,23 @@ export function createGeluDetailView(panelEl) {
     root.innerHTML = `
         <div class="detail-description detail-gelu-copy">
             <p>GELU (Gaussian Error Linear Unit) is the MLP activation used by GPT-2.</p>
-            <p>It keeps negative inputs but shrinks them smoothly, while mostly preserving large positive inputs.</p>
+            <p>Its exact form is <span class="detail-gelu-inline-equation">GELU(x) = x Phi(x)</span>, where <span class="detail-gelu-inline-equation">Phi(x)</span> is the CDF of a standard Gaussian, so it behaves like a smooth probability gate instead of a hard cutoff.</p>
         </div>
         <div class="detail-equations detail-gelu-equation-shell is-visible" aria-hidden="false">
-            <div class="detail-equations-body detail-gelu-formula" data-gelu-formula></div>
+            <div class="detail-gelu-equation-group">
+                <div class="detail-gelu-equation-label">Exact relationship</div>
+                <div class="detail-equations-body detail-gelu-formula" data-gelu-formula></div>
+            </div>
+            <p class="detail-gelu-equation-note">Here, <span class="detail-gelu-inline-equation">Phi(x)</span> is the CDF of the standard normal distribution <span class="detail-gelu-inline-equation">N(0, 1)</span>.</p>
+            <div class="detail-gelu-equation-group">
+                <div class="detail-gelu-equation-label">Common GPT-2 approximation</div>
+                <div class="detail-equations-body detail-gelu-approx-formula" data-gelu-approx-formula></div>
+            </div>
         </div>
         <div class="detail-data detail-gelu-graph-card">
             <div class="detail-gelu-card-header">
                 <div class="detail-data-title">Interactive curve</div>
-                <div class="detail-gelu-graph-hint">Move horizontally across the graph to inspect GELU(x).</div>
+                <div class="detail-gelu-graph-hint">Move horizontally across the graph to inspect the tanh approximation of GELU(x).</div>
             </div>
             <canvas class="detail-gelu-graph-canvas" aria-label="Interactive GELU graph"></canvas>
         </div>
@@ -125,6 +212,7 @@ export function createGeluDetailView(panelEl) {
         <div class="detail-data detail-gelu-notes-card">
             <div class="detail-data-title">Why it matters</div>
             <ul>
+                <li>The exact form is <span class="detail-gelu-inline-equation">GELU(x) = x Phi(x)</span>, so activation strength is tied to the Gaussian CDF.</li>
                 <li>Near zero, outputs change smoothly instead of switching sharply.</li>
                 <li>Negative values are softly damped rather than hard-clipped.</li>
                 <li>Positive values pass through almost linearly at larger magnitudes.</li>
@@ -141,6 +229,7 @@ export function createGeluDetailView(panelEl) {
 
     const canvas = root.querySelector('.detail-gelu-graph-canvas');
     const formulaEl = root.querySelector('[data-gelu-formula]');
+    const approxFormulaEl = root.querySelector('[data-gelu-approx-formula]');
     const readoutX = root.querySelector('[data-gelu-readout="x"]');
     const readoutY = root.querySelector('[data-gelu-readout="y"]');
     const ctx = canvas?.getContext('2d') || null;
@@ -154,18 +243,17 @@ export function createGeluDetailView(panelEl) {
     const yTicks = buildAxisTicks(GELU_RANGE_MIN, GELU_RANGE_MAX, 1);
 
     function renderFormula() {
-        if (!formulaEl) return;
-        const equation = '\\operatorname{GELU}(x) \\approx \\frac{x}{2}\\left(1 + \\tanh\\left(\\sqrt{\\frac{2}{\\pi}}\\left(x + 0.044715x^3\\right)\\right)\\right)';
-        const katex = (typeof window !== 'undefined') ? window.katex : null;
-        if (katex && typeof katex.renderToString === 'function') {
-            try {
-                formulaEl.innerHTML = katex.renderToString(equation, { throwOnError: false, displayMode: true });
-                return;
-            } catch (_) {
-                // Fall back to plain-text formula below.
-            }
-        }
-        formulaEl.textContent = 'GELU(x) ~= 0.5x * (1 + tanh(sqrt(2/pi) * (x + 0.044715x^3)))';
+        renderFormulaBody(formulaEl, GELU_RELATION_EQUATION_TEX, GELU_RELATION_FALLBACK_TEXT);
+        renderFormulaBody(
+            approxFormulaEl,
+            GELU_APPROXIMATION_EQUATION_TEX,
+            GELU_APPROXIMATION_FALLBACK_TEXT
+        );
+    }
+
+    function fitFormulaBodies() {
+        fitFormulaBodyToWidth(formulaEl);
+        fitFormulaBodyToWidth(approxFormulaEl);
     }
 
     renderFormula();
@@ -352,9 +440,11 @@ export function createGeluDetailView(panelEl) {
                 return;
             }
             renderFormula();
+            fitFormulaBodies();
             drawGraph();
         },
         resizeAndRender() {
+            fitFormulaBodies();
             drawGraph();
         },
         remove() {

@@ -59,12 +59,17 @@ export function shouldClearPinnedAttentionOnDocumentPointerDown({
     isPinned = false,
     hitPanelTokenNavChip = false,
     hitPanelAttentionScoreLink = false,
+    insideAttentionBody = false,
     insideAttentionMatrix = false,
     validMatrixCell = false,
     panelHit = false
 } = {}) {
     if (!isPinned) return false;
     if (hitPanelTokenNavChip || hitPanelAttentionScoreLink) return false;
+    if (insideAttentionBody) {
+        if (insideAttentionMatrix) return !validMatrixCell;
+        return true;
+    }
     if (insideAttentionMatrix) return !validMatrixCell;
     if (panelHit) return false;
     return true;

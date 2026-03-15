@@ -2748,7 +2748,11 @@ class SelectionPanel {
         this._softmaxDetailView = createSoftmaxDetailView(this.panel);
         this._softmaxDetailOpen = false;
         this._softmaxSourceSelection = null;
-        this._transformerView2dDetailView = createTransformerView2dDetailView(this.panel);
+        this._transformerView2dDetailView = createTransformerView2dDetailView(this.panel, {
+            onExitTo3d: () => {
+                this.close({ clearHistory: false });
+            }
+        });
         this._transformerView2dDetailOpen = false;
         this._transformerView2dSourceSelection = null;
         this._currentTransformerView2dContext = null;
@@ -11472,6 +11476,11 @@ class SelectionPanel {
             && this.panel.contains(attentionScoreLink)
         );
         const attentionMatrixRoot = resolveClosest('#detailAttentionMatrix');
+        const attentionBodyRoot = resolveClosest('#detailAttentionBody');
+        const insideAttentionBody = !!(
+            this.attentionBody
+            && attentionBodyRoot === this.attentionBody
+        );
         const insideAttentionMatrix = !!(
             this.attentionMatrix
             && attentionMatrixRoot === this.attentionMatrix
@@ -11503,6 +11512,7 @@ class SelectionPanel {
                 isPinned: this._attentionPinned,
                 hitPanelTokenNavChip,
                 hitPanelAttentionScoreLink,
+                insideAttentionBody,
                 insideAttentionMatrix,
                 validMatrixCell,
                 panelHit: !!panelHit

@@ -27,6 +27,8 @@ const NEXT_TOKEN_MOBILE_MEDIA_QUERY = '(max-aspect-ratio: 1/1), (max-width: 880p
 const NEXT_TOKEN_PANEL_GAP_PX = 18;
 const NEXT_TOKEN_VIEWPORT_GUTTER_PX = 12;
 const PASS_INTRO_ENGINE_PAUSE_REASON = 'generation-pass-intro';
+const NEXT_TOKEN_BTN_LABEL = 'Next Token';
+const RESTART_GENERATION_BTN_LABEL = 'Restart generation';
 
 export function buildPassState({
     activationSource,
@@ -740,13 +742,25 @@ export function initGenerationController({
     const updateNextTokenButton = () => {
         if (!nextTokenBtn) return;
         const atEnd = currentLaneCount >= maxLaneCount;
-        const shouldShow = passComplete && autoAdvancePaused && !atEnd;
+        const shouldShow = passComplete && autoAdvancePaused;
+        const isRestartAction = passComplete && autoAdvancePaused && atEnd;
+        const buttonLabel = isRestartAction ? RESTART_GENERATION_BTN_LABEL : NEXT_TOKEN_BTN_LABEL;
+        const buttonTitle = isRestartAction ? RESTART_GENERATION_BTN_LABEL : 'Advance to next token';
         const next = shouldShow ? 'true' : 'false';
         if (nextTokenBtn.dataset.visible !== next) {
             nextTokenBtn.dataset.visible = next;
             nextTokenBtn.style.display = shouldShow ? '' : 'none';
         }
         nextTokenBtn.disabled = !shouldShow;
+        if (nextTokenBtn.textContent !== buttonLabel) {
+            nextTokenBtn.textContent = buttonLabel;
+        }
+        if (nextTokenBtn.title !== buttonTitle) {
+            nextTokenBtn.title = buttonTitle;
+        }
+        if (nextTokenBtn.getAttribute('aria-label') !== buttonTitle) {
+            nextTokenBtn.setAttribute('aria-label', buttonTitle);
+        }
         syncNextTokenButtonLayout(nextTokenBtn, { promptTokenStrip: promptTokenStripEl });
     };
 
@@ -758,7 +772,13 @@ export function initGenerationController({
         }
 
         const atEnd = currentLaneCount >= maxLaneCount;
-        if (autoAdvancePaused && !atEnd) {
+        if (atEnd) {
+            clearOverlay();
+            updateNextTokenButton();
+            return;
+        }
+
+        if (autoAdvancePaused) {
             clearOverlay();
             updateNextTokenButton();
             return;
@@ -773,39 +793,27 @@ export function initGenerationController({
 
         if (overlay.countdownEl) overlay.countdownEl.textContent = String(remainingSeconds);
 
-        if (atEnd) {
-            if (overlay.titlePrefix) overlay.titlePrefix.textContent = 'End of capture';
-            if (overlay.countdownWrap) overlay.countdownWrap.style.display = 'none';
-        } else if (autoAdvancePaused) {
-            if (overlay.titlePrefix) overlay.titlePrefix.textContent = 'Auto-advance paused';
-            if (overlay.countdownWrap) overlay.countdownWrap.style.display = 'none';
-        } else {
-            if (overlay.titlePrefix) overlay.titlePrefix.textContent = 'Going to next token in';
-            if (overlay.countdownWrap) overlay.countdownWrap.style.display = '';
-        }
+        if (overlay.titlePrefix) overlay.titlePrefix.textContent = 'Going to next token in';
+        if (overlay.countdownWrap) overlay.countdownWrap.style.display = '';
 
-        const nextTokenLabel = (!atEnd && activationSource && typeof activationSource.getTokenString === 'function')
+        const nextTokenLabel = (activationSource && typeof activationSource.getTokenString === 'function')
             ? activationSource.getTokenString(nextTokenIndex)
             : null;
         const formatted = nextTokenLabel ? formatTokenLabel(nextTokenLabel) : '';
-        const tokenLine = atEnd
-            ? `Token ${maxLaneCount} / ${maxLaneCount}`
-            : (formatted
-                ? `Next token ${nextTokenNumber} / ${maxLaneCount}: ${formatted}`
-                : `Next token ${nextTokenNumber} / ${maxLaneCount}`);
+        const tokenLine = formatted
+            ? `Next token ${nextTokenNumber} / ${maxLaneCount}: ${formatted}`
+            : `Next token ${nextTokenNumber} / ${maxLaneCount}`;
         if (overlay.tokenEl) overlay.tokenEl.textContent = tokenLine;
 
-        const progress = atEnd ? 1 : Math.max(0, Math.min(1, 1 - remainingMs / countdownMs));
+        const progress = Math.max(0, Math.min(1, 1 - remainingMs / countdownMs));
         if (overlay.barFill) {
             overlay.barFill.style.width = `${(progress * 100).toFixed(1)}%`;
         }
 
         if (overlay.stayBtn) {
-            overlay.stayBtn.disabled = atEnd;
             overlay.stayBtn.textContent = autoAdvancePaused ? 'Resume auto' : 'Stay';
         }
         if (overlay.advanceBtn) {
-            overlay.advanceBtn.disabled = atEnd;
             overlay.advanceBtn.textContent = 'Advance';
         }
 
@@ -1159,6 +1167,38 @@ export function initGenerationController({
         });
     };
 
+    const restartGeneration = () => {
+        if (forwardPassJumpPending) return false;
+
+        forwardPassJumpPending = true;
+        passComplete = false;
+        autoAdvancePaused = false;
+        countdownActive = false;
+        clearOverlay();
+        updateNextTokenButton();
+
+        Promise.resolve().then(async () => {
+            const engine = pipeline?.engine;
+            engine?.pause?.(PASS_INTRO_ENGINE_PAUSE_REASON);
+            try {
+                rebuildPass({
+                    laneCount: Math.max(1, Math.floor(initialLaneCount || 1)),
+                    resetPipeline: true
+                });
+                syncPromptTokenStrip(latestPassState, latestAttentionState, { showGeneratedLogitChip: false });
+            } catch (err) {
+                console.error('Restart generation failed:', err);
+            } finally {
+                engine?.resume?.(PASS_INTRO_ENGINE_PAUSE_REASON);
+                forwardPassJumpPending = false;
+                updateOverlay();
+                updateNextTokenButton();
+            }
+        });
+
+        return true;
+    };
+
     const requestNextForwardPass = () => {
         if (!hasNextForwardPass()) {
             return false;
@@ -1206,7 +1246,11 @@ export function initGenerationController({
     if (nextTokenBtn) {
         nextTokenBtn.onclick = (event) => {
             event.preventDefault();
-            if (!passComplete || currentLaneCount >= maxLaneCount) return;
+            if (!passComplete) return;
+            if (currentLaneCount >= maxLaneCount) {
+                restartGeneration();
+                return;
+            }
             advanceToNextPass();
         };
     }

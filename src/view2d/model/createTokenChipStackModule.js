@@ -22,10 +22,10 @@ const MIN_CHIP_HEIGHT = 18;
 const CHIP_CORNER_RADIUS = 999;
 const CHIP_LABEL_HORIZONTAL_INSET = 10;
 const NEUTRAL_CHIP_COLORS = Object.freeze({
-    border: 'rgba(178, 188, 201, 0.88)',
-    fill: 'rgba(150, 162, 178, 0.14)',
-    fillHover: 'rgba(170, 182, 198, 0.20)',
-    fillActive: 'rgba(184, 196, 210, 0.28)'
+    border: 'rgba(184, 191, 200, 0.92)',
+    fill: 'rgba(126, 133, 144, 0.22)',
+    fillHover: 'rgba(148, 156, 166, 0.30)',
+    fillActive: 'rgba(168, 176, 186, 0.38)'
 });
 
 function mergeSemantic(baseSemantic = {}, extra = {}) {

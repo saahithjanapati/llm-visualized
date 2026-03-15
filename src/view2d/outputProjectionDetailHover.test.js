@@ -76,6 +76,9 @@ describe('output projection detail hover', () => {
         const concatOutputNode = nodes.find((node) => (
             node?.role === 'concat-output-matrix'
         )) || null;
+        const concatOutputCopyNode = nodes.find((node) => (
+            node?.role === 'concat-output-copy-matrix'
+        )) || null;
 
         const hoverState = resolveMhsaDetailHoverState(index, {
             node: matrixNode,
@@ -104,6 +107,14 @@ describe('output projection detail hover', () => {
         });
         expect(hoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: copyMatrixNode?.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: concatOutputNode?.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: concatOutputCopyNode?.id,
             rowIndex: 1
         });
         expect(hoverState?.focusState?.cellSelections).toContainEqual({
@@ -135,6 +146,14 @@ describe('output projection detail hover', () => {
         });
         expect(mirroredHoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: copyMatrixNode?.id,
+            rowIndex: 1
+        });
+        expect(mirroredHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: concatOutputNode?.id,
+            rowIndex: 1
+        });
+        expect(mirroredHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: concatOutputCopyNode?.id,
             rowIndex: 1
         });
         expect(mirroredHoverState?.focusState?.cellSelections).toContainEqual({
@@ -223,6 +242,10 @@ describe('output projection detail hover', () => {
         const projectionOutputConnectorNode = nodes.find((node) => (
             node?.role === 'projection-output-connector'
         )) || null;
+        const headOutputMatrixNodes = nodes.filter((node) => node?.role === 'head-output-matrix');
+        const concatHeadCopyMatrixNodes = nodes.filter((node) => node?.role === 'concat-head-copy-matrix');
+        const headOutputRowCount = headOutputMatrixNodes.length;
+        const copyHeadOutputRowCount = concatHeadCopyMatrixNodes.length;
 
         const outputHoverState = resolveMhsaDetailHoverState(index, {
             node: projectionOutputNode,
@@ -253,6 +276,20 @@ describe('output projection detail hover', () => {
         expect(outputHoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: projectionOutputNode?.id,
             rowIndex: 1
+        });
+        expect(headOutputRowCount).toBe(copyHeadOutputRowCount);
+        expect(headOutputRowCount).toBeGreaterThan(0);
+        headOutputMatrixNodes.forEach((matrixNode) => {
+            expect(outputHoverState?.focusState?.rowSelections).toContainEqual({
+                nodeId: matrixNode?.id,
+                rowIndex: 1
+            });
+        });
+        concatHeadCopyMatrixNodes.forEach((matrixNode) => {
+            expect(outputHoverState?.focusState?.rowSelections).toContainEqual({
+                nodeId: matrixNode?.id,
+                rowIndex: 1
+            });
         });
         expect(resolveTransformerView2dTokenEntryFromHoverPayload(outputHoverState)).toEqual({
             tokenIndex: 1,
