@@ -557,6 +557,63 @@ function measureConnectorArrowScreenMetrics(operations = [], pathPoints = []) {
 }
 
 describe('CanvasSceneRenderer', () => {
+    it('applies per-node visual opacity to matrix fills', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createMatrixNode({
+                    role: 'faded-card',
+                    semantic: {
+                        componentKind: 'test',
+                        stage: 'opacity',
+                        role: 'faded-card'
+                    },
+                    label: {
+                        tex: 'F',
+                        text: 'F'
+                    },
+                    dimensions: {
+                        rows: 1,
+                        cols: 1
+                    },
+                    presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+                    shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+                    visual: {
+                        styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                        background: 'rgba(120, 220, 255, 0.9)',
+                        stroke: 'rgba(255, 255, 255, 0.9)',
+                        disableCardSurfaceEffects: true,
+                        opacity: 0.4
+                    },
+                    metadata: {
+                        card: {
+                            width: 120,
+                            height: 64,
+                            cornerRadius: 10
+                        }
+                    }
+                })
+            ]
+        });
+        renderer.setScene(scene);
+
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1
+        })).toBe(true);
+
+        const visibleFillOps = ctx.operations.filter((entry) => (
+            entry.type === 'fill'
+            && entry.fillStyle !== '#000'
+            && entry.fillStyle !== 'rgba(0, 0, 0, 0)'
+        ));
+
+        expect(visibleFillOps.some((entry) => Math.abs((entry.globalAlpha || 0) - 0.4) < 0.01)).toBe(true);
+    });
+
     it('scales MHSA detail operator glyphs with the scene while zooming', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);

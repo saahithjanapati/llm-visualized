@@ -110,6 +110,34 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.kind).toBe('vector');
     });
 
+    it('preserves cached-KV vector labels for object-less 2D cache selections', () => {
+        const panel = createPanelContext(new THREE.Scene());
+        const selection = {
+            label: 'Cached Key Vector',
+            info: {
+                cachedKv: true,
+                category: 'K',
+                activationData: {
+                    label: 'Cached Key Vector',
+                    stage: 'qkv.k',
+                    cachedKv: true,
+                    cacheKind: 'k',
+                    layerIndex: 6,
+                    headIndex: 4,
+                    tokenIndex: 3,
+                    tokenLabel: 'target'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Cached Key Vector');
+        expect(resolved?.kind).toBe('vector');
+        expect(resolved?.info?.cachedKv).toBe(true);
+        expect(resolved?.info?.activationData?.cachedKv).toBe(true);
+    });
+
     it('recovers live layer norm parameter nodes by label when strict stage lookup misses', () => {
         const scene = new THREE.Scene();
         const layerNormScaleNode = createSceneNode('LayerNorm 1 Scale', {

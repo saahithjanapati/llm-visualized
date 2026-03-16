@@ -289,6 +289,13 @@ function applyCaptionRoleStyling(itemEl, node = null) {
     );
 }
 
+function resolveNodeVisualOpacity(node = null) {
+    const opacity = Number(node?.visual?.opacity);
+    return Number.isFinite(opacity)
+        ? Math.max(0, Math.min(1, opacity))
+        : 1;
+}
+
 function buildCaptionCandidate({
     node = null,
     lines = [],
@@ -608,7 +615,9 @@ export function createTransformerView2dResidualCaptionOverlay({
                 item.itemEl.style.left = `${Math.round(projectedBounds.x + (projectedBounds.width / 2))}px`;
                 item.itemEl.style.top = `${Math.round(projectedBounds.y + (projectedBounds.height / 2))}px`;
                 item.itemEl.style.setProperty('--detail-transformer-view2d-dom-text-size', `${resolvedDomTextFontPx.toFixed(2)}px`);
-                item.itemEl.style.opacity = String(resolveSceneNodeFocusAlpha(node.id, overlayFocusState));
+                item.itemEl.style.opacity = String(
+                    resolveSceneNodeFocusAlpha(node.id, overlayFocusState) * resolveNodeVisualOpacity(node)
+                );
                 renderKatex(item.labelEl, node.tex, node.text);
             });
 
@@ -759,7 +768,9 @@ export function createTransformerView2dResidualCaptionOverlay({
                 applyCaptionRoleStyling(item.itemEl, node);
                 item.itemEl.style.setProperty('--detail-transformer-view2d-caption-label-size', `${resolvedLabelFontPx.toFixed(2)}px`);
                 item.itemEl.style.setProperty('--detail-transformer-view2d-caption-dimensions-size', `${resolvedDimensionsFontPx.toFixed(2)}px`);
-                item.itemEl.style.opacity = String(resolveSceneNodeFocusAlpha(node.id, overlayFocusState));
+                item.itemEl.style.opacity = String(
+                    resolveSceneNodeFocusAlpha(node.id, overlayFocusState) * resolveNodeVisualOpacity(node)
+                );
 
                 renderKatex(item.labelEl, lines[0]?.tex, lines[0]?.text);
                 const dimensionsLine = lines[1] || null;

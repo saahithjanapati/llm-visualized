@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    isKvCacheVectorSelection,
     normalizeSelectionLabel,
     simplifyLayerNormParamDisplayLabel
 } from './selectionPanelSelectionUtils.js';
@@ -36,5 +37,22 @@ describe('normalizeSelectionLabel', () => {
 
         expect(normalizeSelectionLabel('LayerNorm 1 Scale', selection)).toBe('LayerNorm 1 Product Vector');
         expect(simplifyLayerNormParamDisplayLabel('LayerNorm 1 Scale', selection)).toBe('LayerNorm 1 Product Vector');
+    });
+
+    it('treats explicit cached-KV metadata as a cached vector selection', () => {
+        const selection = {
+            label: 'Cached Key Vector',
+            info: {
+                cachedKv: true,
+                activationData: {
+                    label: 'Cached Key Vector',
+                    stage: 'qkv.k',
+                    cachedKv: true
+                }
+            }
+        };
+
+        expect(isKvCacheVectorSelection(selection)).toBe(true);
+        expect(normalizeSelectionLabel('Key Vector', selection)).toBe('Cached Key Vector');
     });
 });

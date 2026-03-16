@@ -29,6 +29,25 @@ export function isKvCacheVectorSelection(selectionInfo) {
     if (vectorRef?.userData?.kvCachePersistent === true || vectorRef?.userData?.cachedKv === true) {
         return true;
     }
+    const explicitInfoCandidates = [
+        selectionInfo?.info,
+        selectionInfo?.info?.activationData,
+        selectionInfo?.activationData
+    ];
+    for (const candidate of explicitInfoCandidates) {
+        if (!candidate || typeof candidate !== 'object') continue;
+        if (
+            candidate.cachedKv === true
+            || candidate.kvCachePersistent === true
+            || candidate.selectionIsCachedKv === true
+        ) {
+            return true;
+        }
+        const stage = String(candidate.stage || candidate.sourceStage || '').trim().toLowerCase();
+        if (stage.startsWith('kv-cache.')) {
+            return true;
+        }
+    }
     const candidates = [selectionInfo?.object, selectionInfo?.hit?.object];
     for (const obj of candidates) {
         let current = obj;

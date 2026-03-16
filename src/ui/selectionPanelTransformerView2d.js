@@ -5,6 +5,7 @@ import {
     resolveMhsaDetailHoverState
 } from '../view2d/mhsaDetailInteraction.js';
 import { buildTransformerSceneModel } from '../view2d/model/buildTransformerSceneModel.js';
+import { appState } from '../state/appState.js';
 import { CanvasSceneRenderer } from '../view2d/render/canvas/CanvasSceneRenderer.js';
 import {
     normalizeRaycastLabel,
@@ -2108,7 +2109,11 @@ export function createTransformerView2dDetailView(panelEl, {
             concatDetailTarget: state.concatDetailTarget,
             outputProjectionDetailTarget: state.outputProjectionDetailTarget,
             mlpDetailTarget: state.mlpDetailTarget,
-            layerNormDetailTarget: state.layerNormDetailTarget
+            layerNormDetailTarget: state.layerNormDetailTarget,
+            kvCacheState: {
+                kvCacheModeEnabled: !!appState.kvCacheModeEnabled,
+                kvCachePrefillActive: !!appState.kvCachePrefillActive
+            }
         });
         const activeDetailScene = resolveActiveDetailScene(state.scene, {
             headDetailTarget: state.headDetailTarget,

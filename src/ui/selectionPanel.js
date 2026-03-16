@@ -407,21 +407,72 @@ function formatNumber(value) {
     return Math.round(value).toLocaleString('en-US');
 }
 
-function formatDims(inputDim, outputDim) {
-    if (!Number.isFinite(inputDim) || !Number.isFinite(outputDim)) return 'TBD';
-    return `input dimension: ${formatNumber(inputDim)} | output dimension: ${formatNumber(outputDim)}`;
+const DEFAULT_METADATA_DIMENSION_LABELS = Object.freeze({
+    input: 'Input dimension',
+    output: 'Output dimension',
+    inputSummary: 'input dimension',
+    outputSummary: 'output dimension'
+});
+
+const VOCAB_EMBEDDING_DIMENSION_LABELS = Object.freeze({
+    input: 'Vocabulary size',
+    output: 'Embedding dimension',
+    inputSummary: 'vocabulary size',
+    outputSummary: 'embedding dimension'
+});
+
+const POSITION_EMBEDDING_DIMENSION_LABELS = Object.freeze({
+    input: 'Max positions',
+    output: 'Embedding dimension',
+    inputSummary: 'max positions',
+    outputSummary: 'embedding dimension'
+});
+
+const UNEMBEDDING_DIMENSION_LABELS = Object.freeze({
+    input: 'Embedding dimension',
+    output: 'Vocabulary size',
+    inputSummary: 'embedding dimension',
+    outputSummary: 'vocabulary size'
+});
+
+function resolveMetadataDimensionLabels(label = '') {
+    const lower = String(label || '').toLowerCase();
+    if (hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
+        return UNEMBEDDING_DIMENSION_LABELS;
+    }
+    if (hasVocabEmbeddingLabel(lower)) {
+        return VOCAB_EMBEDDING_DIMENSION_LABELS;
+    }
+    if (hasPositionEmbeddingLabel(lower)) {
+        return POSITION_EMBEDDING_DIMENSION_LABELS;
+    }
+    return DEFAULT_METADATA_DIMENSION_LABELS;
 }
 
-function buildMetadata(params = 'TBD', inputDim = null, outputDim = null, length = null, biasDim = null) {
+function formatDims(inputDim, outputDim, dimensionLabels = DEFAULT_METADATA_DIMENSION_LABELS) {
+    if (!Number.isFinite(inputDim) || !Number.isFinite(outputDim)) return 'TBD';
+    return `${dimensionLabels.inputSummary}: ${formatNumber(inputDim)} | ${dimensionLabels.outputSummary}: ${formatNumber(outputDim)}`;
+}
+
+function buildMetadata(
+    params = 'TBD',
+    inputDim = null,
+    outputDim = null,
+    length = null,
+    biasDim = null,
+    dimensionLabels = DEFAULT_METADATA_DIMENSION_LABELS
+) {
     const hasDims = Number.isFinite(inputDim) && Number.isFinite(outputDim);
     const hasLength = Number.isFinite(length);
     const hasBiasDim = Number.isFinite(biasDim);
     const paramCount = hasDims ? formatNumber(inputDim * outputDim) : params;
     return {
         params: paramCount,
-        dims: hasDims ? formatDims(inputDim, outputDim) : 'TBD',
+        dims: hasDims ? formatDims(inputDim, outputDim, dimensionLabels) : 'TBD',
         inputDim: hasDims ? formatNumber(inputDim) : 'TBD',
         outputDim: hasDims ? formatNumber(outputDim) : 'TBD',
+        inputDimLabel: dimensionLabels.input,
+        outputDimLabel: dimensionLabels.output,
         length: hasLength ? formatNumber(length) : 'TBD',
         hasLength,
         biasDim: hasBiasDim ? formatNumber(biasDim) : '',
@@ -1091,6 +1142,10 @@ function hasVocabEmbeddingLabel(lower) {
     return lower.includes('vocab embedding') || lower.includes('vocabulary embedding');
 }
 
+function hasPositionEmbeddingLabel(lower) {
+    return lower.includes('position embedding') || lower.includes('positional embedding');
+}
+
 function hasTopVocabEmbeddingLabel(lower) {
     return lower.includes('vocab embedding (top)')
         || lower.includes('vocabulary embedding (top)')
@@ -1113,7 +1168,7 @@ function resolveFinalPreviewColor(label) {
             ? FINAL_VOCAB_TOP_COLOR
             : MHA_FINAL_Q_COLOR;
     }
-    if (lower.includes('positional embedding')) return POSITION_EMBED_COLOR;
+    if (hasPositionEmbeddingLabel(lower)) return POSITION_EMBED_COLOR;
     if (lower.includes('layernorm') || lower.includes('layer norm')) return LAYER_NORM_FINAL_COLOR;
     return null;
 }
@@ -1656,44 +1711,45 @@ function resolveSelectionPreviewFitOptions(label, selectionInfo, previewRoot, pr
 
 function resolveMetadata(label, kind = null, selectionInfo = null) {
     const lower = (label || '').toLowerCase();
+    const dimensionLabels = resolveMetadataDimensionLabels(label);
     if (lower.startsWith('token:') || lower.startsWith('position:')) {
         const oneHotLength = lower.startsWith('position:') ? CONTEXT_LEN : VOCAB_SIZE;
-        return buildMetadata('TBD', null, null, oneHotLength);
+        return buildMetadata('TBD', null, null, oneHotLength, null, dimensionLabels);
     }
     if (lower.includes('query weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD, dimensionLabels);
     }
     if (lower.includes('key weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD, dimensionLabels);
     }
     if (lower.includes('value weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD);
+        return buildMetadata(formatNumber(D_MODEL * D_HEAD), D_MODEL, D_HEAD, null, D_HEAD, dimensionLabels);
     }
     if (lower.includes('output projection matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL, null, D_MODEL);
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL), D_MODEL, D_MODEL, null, D_MODEL, dimensionLabels);
     }
     if (lower.includes('mlp up weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL, D_MODEL * 4, null, D_MODEL * 4);
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL, D_MODEL * 4, null, D_MODEL * 4, dimensionLabels);
     }
     if (lower.includes('mlp down weight matrix')) {
-        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL * 4, D_MODEL, null, D_MODEL);
+        return buildMetadata(formatNumber(D_MODEL * D_MODEL * 4), D_MODEL * 4, D_MODEL, null, D_MODEL, dimensionLabels);
     }
     if (hasTopVocabEmbeddingLabel(lower) || lower.includes('unembedding')) {
-        return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), D_MODEL, VOCAB_SIZE);
+        return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), D_MODEL, VOCAB_SIZE, null, null, dimensionLabels);
     }
     if (hasVocabEmbeddingLabel(lower)) {
-        return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), VOCAB_SIZE, D_MODEL);
+        return buildMetadata(formatNumber(VOCAB_SIZE * D_MODEL), VOCAB_SIZE, D_MODEL, null, null, dimensionLabels);
     }
-    if (lower.includes('positional embedding')) {
-        return buildMetadata(formatNumber(CONTEXT_LEN * D_MODEL), CONTEXT_LEN, D_MODEL);
+    if (hasPositionEmbeddingLabel(lower)) {
+        return buildMetadata(formatNumber(CONTEXT_LEN * D_MODEL), CONTEXT_LEN, D_MODEL, null, null, dimensionLabels);
     }
     if (isLikelyVectorSelection(label, selectionInfo)) {
-        return buildMetadata('TBD', null, null, resolveVectorLength(label, selectionInfo));
+        return buildMetadata('TBD', null, null, resolveVectorLength(label, selectionInfo), null, dimensionLabels);
     }
     if (lower.includes('attention') || (kind === 'mergedKV')) {
-        return buildMetadata();
+        return buildMetadata('TBD', null, null, null, null, dimensionLabels);
     }
-    return buildMetadata();
+    return buildMetadata('TBD', null, null, null, null, dimensionLabels);
 }
 
 function extractTokenText(label) {
@@ -3451,7 +3507,7 @@ function resolvePreviewObject(label, selectionInfo, engine = null) {
             : MHA_FINAL_Q_COLOR;
         return buildWeightMatrixPreview(EMBEDDING_MATRIX_PARAMS_VOCAB, color);
     }
-    if (lower.includes('positional embedding')) {
+    if (hasPositionEmbeddingLabel(lower)) {
         const clonePreview = buildSelectionClonePreview(previewSelectionInfo, label)
             || buildDirectClonePreview(previewSelectionInfo);
         if (clonePreview) return clonePreview;
@@ -8015,12 +8071,16 @@ export class SelectionPanel {
         tokenIndex = null,
         tokenId = null,
         tokenLabel = '',
-        headIndex = null
+        headIndex = null,
+        cachedKv = false
     } = {}) {
         const safeKind = normalizeQkvActionKind(vectorKind);
+        const isCachedKv = cachedKv === true && (safeKind === 'K' || safeKind === 'V');
         const label = safeKind === 'Q'
             ? 'Query Vector'
-            : (safeKind === 'V' ? 'Value Vector' : 'Key Vector');
+            : (safeKind === 'V'
+                ? (isCachedKv ? 'Cached Value Vector' : 'Value Vector')
+                : (isCachedKv ? 'Cached Key Vector' : 'Key Vector'));
         const info = {};
         if (Number.isFinite(layerIndex)) info.layerIndex = Math.floor(layerIndex);
         if (Number.isFinite(tokenIndex)) info.tokenIndex = Math.floor(tokenIndex);
@@ -8029,10 +8089,15 @@ export class SelectionPanel {
             info.tokenLabel = formatTokenLabelForPreview(tokenLabel);
         }
         if (Number.isFinite(headIndex)) info.headIndex = Math.floor(headIndex);
+        if (isCachedKv) {
+            info.cachedKv = true;
+            info.category = safeKind;
+        }
         const stage = safeKind === 'Q' ? 'qkv.q' : (safeKind === 'V' ? 'qkv.v' : 'qkv.k');
         info.activationData = {
             label,
             stage,
+            ...(isCachedKv ? { cachedKv: true, cacheKind: safeKind.toLowerCase() } : {}),
             ...(Number.isFinite(layerIndex) ? { layerIndex: Math.floor(layerIndex) } : {}),
             ...(Number.isFinite(headIndex) ? { headIndex: Math.floor(headIndex) } : {}),
             ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
@@ -8273,6 +8338,9 @@ export class SelectionPanel {
             || lower.includes('cached key vector')
             || lower.includes('cached value vector')
         ) {
+            const cachedKvSelection = isKvCacheVectorSelection(fallbackSelection)
+                || lower.includes('cached key vector')
+                || lower.includes('cached value vector');
             const vectorKind = (
                 stageLower === 'qkv.k'
                 || lower.includes('cached key vector')
@@ -8306,7 +8374,8 @@ export class SelectionPanel {
                 headIndex,
                 tokenIndex: tokenContext.tokenIndex,
                 tokenId: tokenContext.tokenId,
-                tokenLabel: tokenContext.tokenLabel
+                tokenLabel: tokenContext.tokenLabel,
+                cachedKv: cachedKvSelection
             });
         }
 
@@ -15518,9 +15587,11 @@ export class SelectionPanel {
             || this.outputDim?.closest('.detail-row')
             || null;
         if (this.inputDimLabel) {
-            this.inputDimLabel.textContent = 'Input dimension';
+            this.inputDimLabel.textContent = metadata.inputDimLabel || DEFAULT_METADATA_DIMENSION_LABELS.input;
         }
-        if (this.outputDimLabel) this.outputDimLabel.textContent = 'Output dimension';
+        if (this.outputDimLabel) {
+            this.outputDimLabel.textContent = metadata.outputDimLabel || DEFAULT_METADATA_DIMENSION_LABELS.output;
+        }
         if (this.inputDim) this.inputDim.textContent = hideTensorDimsField
             ? ''
             : metadata.inputDim;

@@ -613,7 +613,10 @@ export function initGenerationController({
         Math.min(maxLaneCount, Math.floor(baseLaneCount || initialLaneCount || 1))
     );
     const canLoop = !!activationSource && maxLaneCount > generationBaseLaneCount;
-    const kvPrefillBaseLaneCount = resolveKvPrefillBaseLaneCount({ initialLaneCount });
+    const kvPrefillBaseLaneCount = resolveKvPrefillBaseLaneCount({
+        initialLaneCount,
+        baseLaneCount: generationBaseLaneCount
+    });
 
     const overlay = createAdvanceOverlay();
     const overlayTouchCleanup = initTouchClickFallback(overlay.root, { selector: 'button' });
@@ -660,8 +663,8 @@ export function initGenerationController({
             return Math.max(1, Math.floor(kvSessionBaseLaneCount));
         }
         // Defensive fallback when toggle event ordering misses transition state.
-        // KV mode should treat only token 1 as prefill, even when the toggle is
-        // enabled after the scene has already advanced.
+        // KV mode should compare against the prompt/base token window, even
+        // when the toggle is enabled after the scene has already advanced.
         const fallback = initialBase;
         kvSessionBaseLaneCount = fallback;
         return fallback;
@@ -1060,9 +1063,9 @@ export function initGenerationController({
         kvModeEnabled = nextEnabled;
         appState.kvCacheModeEnabled = nextEnabled;
         if (isEnablingKv) {
-            // In KV mode, only token 1 is treated as prefill. If KV is enabled
-            // later, restart directly into decode semantics for the current
-            // token count.
+            // In KV mode, the prompt/base token window is the prefill pass. If
+            // KV is enabled later, rebuilding the current larger token window
+            // still resolves correctly as decode against that base.
             kvSessionBaseLaneCount = kvPrefillBaseLaneCount;
         } else if (isDisablingKv) {
             kvSessionBaseLaneCount = null;

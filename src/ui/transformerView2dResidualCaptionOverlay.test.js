@@ -150,13 +150,15 @@ function createPreviewData({
 
 function buildMhsaFixtures({
     tokenLabels = DEFAULT_TOKEN_LABELS,
+    kvCacheState = null,
     canvasWidth = 2200,
     canvasHeight = 1400
 } = {}) {
     const scene = buildMhsaSceneModel({
         previewData: createPreviewData({ tokenLabels }),
         layerIndex: 2,
-        headIndex: 1
+        headIndex: 1,
+        kvCacheState
     });
     const layout = buildSceneLayout(scene);
     const nodes = flattenSceneNodes(scene);
@@ -176,10 +178,15 @@ function buildMhsaFixtures({
         node.role === 'projection-bias'
         && String(node.metadata?.kind || '').toLowerCase() === 'k'
     )) || null;
-    const outputNode = nodes.find((node) => (
+    const kOutputNode = nodes.find((node) => (
         node.role === 'projection-output'
         && String(node.metadata?.kind || '').toLowerCase() === 'k'
     )) || null;
+    const vOutputNode = nodes.find((node) => (
+        node.role === 'projection-output'
+        && String(node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
+    const outputNode = kOutputNode;
     const projectionStackNode = nodes.find((node) => node.role === 'projection-stack') || null;
     const qStageNode = nodes.find((node) => (
         node.role === 'projection-stage'
@@ -203,6 +210,16 @@ function buildMhsaFixtures({
     const headOutputNode = nodes.find((node) => node.role === 'attention-head-output') || null;
     const softmaxLabelNode = nodes.find((node) => node.role === 'attention-softmax-label') || null;
     const scaleNode = nodes.find((node) => node.role === 'attention-scale') || null;
+    const kCacheNode = nodes.find((node) => (
+        node.role === 'projection-cache'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'k'
+    )) || null;
+    const vCacheNode = nodes.find((node) => (
+        node.role === 'projection-cache'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'v'
+    )) || null;
+    const kCacheConnectorNode = nodes.find((node) => node.role === 'connector-k-cache') || null;
+    const vCacheConnectorNode = nodes.find((node) => node.role === 'connector-v-cache') || null;
 
     const parent = document.createElement('div');
     document.body.appendChild(parent);
@@ -229,6 +246,8 @@ function buildMhsaFixtures({
         xLnNode,
         qBiasNode,
         biasNode,
+        kOutputNode,
+        vOutputNode,
         outputNode,
         projectionStackNode,
         qStageNode,
@@ -244,6 +263,10 @@ function buildMhsaFixtures({
         headOutputNode,
         softmaxLabelNode,
         scaleNode,
+        kCacheNode,
+        vCacheNode,
+        kCacheConnectorNode,
+        vCacheConnectorNode,
         canvas,
         overlay,
         cleanup() {
@@ -517,6 +540,115 @@ function queryCaptionItem(nodeId = '') {
 }
 
 describe('transformerView2dResidualCaptionOverlay', () => {
+    it('adds faded K/V cache branches only during KV-cache prefill', () => {
+        const prefillFixtures = buildMhsaFixtures({
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: true
+            }
+        });
+        const decodeFixtures = buildMhsaFixtures({
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false
+            }
+        });
+        const disabledFixtures = buildMhsaFixtures();
+
+        try {
+            expect(prefillFixtures.kCacheNode).toBeTruthy();
+            expect(prefillFixtures.vCacheNode).toBeTruthy();
+            expect(prefillFixtures.kCacheConnectorNode).toBeTruthy();
+            expect(prefillFixtures.vCacheConnectorNode).toBeTruthy();
+            expect(prefillFixtures.kCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
+            expect(prefillFixtures.vCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
+            expect(prefillFixtures.kCacheNode?.label?.tex).toContain('\\mathrm{cache}');
+            expect(prefillFixtures.vCacheNode?.label?.tex).toContain('\\mathrm{cache}');
+            expect(prefillFixtures.kCacheConnectorNode?.target?.anchor).toBe('right');
+            expect(prefillFixtures.vCacheConnectorNode?.target?.anchor).toBe('right');
+
+            expect(decodeFixtures.kCacheNode).toBeNull();
+            expect(decodeFixtures.vCacheNode).toBeNull();
+            expect(disabledFixtures.kCacheNode).toBeNull();
+            expect(disabledFixtures.vCacheNode).toBeNull();
+        } finally {
+            prefillFixtures.cleanup();
+            decodeFixtures.cleanup();
+            disabledFixtures.cleanup();
+        }
+    });
+
+    it('applies cache-node opacity to prefill cache captions', () => {
+        const fixtures = buildMhsaFixtures({
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: true
+            }
+        });
+
+        try {
+            const cacheNode = fixtures.kCacheNode;
+            const cacheEntry = fixtures.layout.registry.getNodeEntry(cacheNode?.id || '');
+            const visibleScale = resolveThresholdScale(cacheEntry).scale * 1.1;
+            const projectBounds = (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * visibleScale,
+                height: bounds.height * visibleScale
+            });
+
+            fixtures.overlay.sync({
+                scene: fixtures.scene,
+                layout: fixtures.layout,
+                canvas: fixtures.canvas,
+                projectBounds,
+                visible: true,
+                enabled: true
+            });
+
+            const cacheItem = queryCaptionItem(cacheNode?.id || '');
+            expect(cacheItem?.hidden).toBe(false);
+            expect(Number.parseFloat(cacheItem?.style.opacity || '0')).toBeCloseTo(0.4, 3);
+        } finally {
+            fixtures.cleanup();
+        }
+    });
+
+    it('locks K/V cache branches horizontally to their source outputs', () => {
+        const fixtures = buildMhsaFixtures({
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: true
+            }
+        });
+
+        try {
+            const kOutputEntry = fixtures.layout.registry.getNodeEntry(fixtures.kOutputNode?.id || '');
+            const vOutputEntry = fixtures.layout.registry.getNodeEntry(fixtures.vOutputNode?.id || '');
+            const kCacheEntry = fixtures.layout.registry.getNodeEntry(fixtures.kCacheNode?.id || '');
+            const vCacheEntry = fixtures.layout.registry.getNodeEntry(fixtures.vCacheNode?.id || '');
+            const resolveCenterX = (entry) => (
+                (Number(entry?.contentBounds?.x) || 0)
+                + ((Number(entry?.contentBounds?.width) || 0) / 2)
+            );
+            const resolveMaxHorizontalOffset = (outputEntry, cacheEntry) => (
+                Math.max(
+                    Number(outputEntry?.contentBounds?.width) || 0,
+                    Number(cacheEntry?.contentBounds?.width) || 0
+                ) + 12
+            );
+
+            expect(Math.abs(resolveCenterX(kOutputEntry) - resolveCenterX(kCacheEntry)))
+                .toBeLessThanOrEqual(resolveMaxHorizontalOffset(kOutputEntry, kCacheEntry));
+            expect(Math.abs(resolveCenterX(vOutputEntry) - resolveCenterX(vCacheEntry)))
+                .toBeLessThanOrEqual(resolveMaxHorizontalOffset(vOutputEntry, vCacheEntry));
+            expect(resolveCenterX(kCacheEntry)).toBeLessThan(resolveCenterX(kOutputEntry));
+            expect(resolveCenterX(vCacheEntry)).toBeLessThan(resolveCenterX(vOutputEntry));
+        } finally {
+            fixtures.cleanup();
+        }
+    });
+
     it('keeps the projection weight, bias, and output blocks locked to their feature dimensions across token windows', () => {
         const baseFixtures = buildMhsaFixtures();
         const tallFixtures = buildMhsaFixtures({

@@ -2142,7 +2142,8 @@ export function buildTransformerSceneModel({
     concatDetailTarget = null,
     outputProjectionDetailTarget = null,
     mlpDetailTarget = null,
-    layerNormDetailTarget = null
+    layerNormDetailTarget = null,
+    kvCacheState = null
 } = {}) {
     const resolvedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : NUM_LAYERS;
     const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
@@ -2189,7 +2190,8 @@ export function buildTransformerSceneModel({
             tokenIndices: tokenRefs.map((tokenRef) => tokenRef.tokenIndex),
             tokenLabels: tokenRefs.map((tokenRef) => tokenRef.tokenLabel),
             isSmallScreen,
-            visualTokens: resolvedTokens
+            visualTokens: resolvedTokens,
+            kvCacheState
         })
         : null;
     const headDetailScene = buildHeadDetailSceneModel({
@@ -2319,6 +2321,9 @@ export function buildTransformerSceneModel({
             tokenCount: tokenRefs.length,
             tokenIndices: tokenRefs.map((tokenRef) => tokenRef.tokenIndex),
             isSmallScreen: !!isSmallScreen,
+            kvCacheState: kvCacheState && typeof kvCacheState === 'object'
+                ? { ...kvCacheState }
+                : null,
             tokens: resolvedTokens,
             focusBuilder: 'buildMhsaSceneModel',
             headDetailTarget: resolvedHeadDetailTarget,

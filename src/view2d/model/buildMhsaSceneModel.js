@@ -162,6 +162,13 @@ const OUTGOING_ARROW_SPACER_WIDTH = 44;
 const OUTGOING_ARROW_SPACER_WIDTH_SMALL = 38;
 const EDGE_CONNECTOR_STROKE_WIDTH_SCALE = 0.88;
 const HEAD_OUTPUT_EDGE_SOURCE_GAP = 8;
+const KV_CACHE_BRANCH_OPACITY = 0.4;
+const KV_CACHE_BRANCH_STROKE = 'rgba(255, 255, 255, 0.34)';
+const KV_CACHE_BRANCH_STROKE_WIDTH_SCALE = 0.74;
+const KV_CACHE_BRANCH_LIFT = 68;
+const KV_CACHE_BRANCH_LIFT_SMALL = 56;
+const KV_CACHE_BRANCH_OFFSET_X = 74;
+const KV_CACHE_BRANCH_OFFSET_X_SMALL = 56;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -681,6 +688,32 @@ function buildProjectionOutputRowItems(rows = [], baseSemantic = {}, branchKey =
     });
 }
 
+function buildProjectionCacheRowItems(rows = [], baseSemantic = {}, branchKey = '') {
+    return rows.map((rowData) => {
+        const semantic = {
+            componentKind: 'mhsa',
+            layerIndex: baseSemantic?.layerIndex,
+            headIndex: baseSemantic?.headIndex,
+            stage: `kv-cache.${branchKey}`,
+            role: 'projection-cache-row',
+            rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
+            ...(branchKey ? { branchKey } : {}),
+            cacheKind: branchKey
+        };
+        return {
+            id: buildSceneNodeId(semantic),
+            index: rowData.rowIndex,
+            label: rowData.tokenLabel || `Token ${rowData.rowIndex + 1}`,
+            semantic,
+            rawValue: Number.isFinite(rowData.rawValue) ? rowData.rawValue : null,
+            rawValues: Array.isArray(rowData.rawValues) ? [...rowData.rawValues] : null,
+            gradientCss: rowData.gradientCss || 'none',
+            title: typeof rowData.title === 'string' ? rowData.title : null
+        };
+    });
+}
+
 function buildProjectionBiasRowItems(projectionData = null, projectionSemantic = {}) {
     const rowSemantic = buildSemantic(projectionSemantic, {
         role: 'projection-bias-row',
@@ -830,6 +863,183 @@ function buildProjectionSourceNode({
     });
 }
 
+function normalizeKvCacheState(kvCacheState = null) {
+    const kvCacheModeEnabled = !!kvCacheState?.kvCacheModeEnabled;
+    const kvCachePrefillActive = !!(kvCacheModeEnabled && kvCacheState?.kvCachePrefillActive);
+    return {
+        kvCacheModeEnabled,
+        kvCachePrefillActive
+    };
+}
+
+function shouldShowProjectionCacheBranch(projectionKind = '', kvCacheState = null) {
+    const safeKind = String(projectionKind || '').trim().toLowerCase();
+    if (safeKind !== 'k' && safeKind !== 'v') return false;
+    return !!(kvCacheState?.kvCacheModeEnabled && kvCacheState?.kvCachePrefillActive);
+}
+
+function resolveProjectionCacheBranchMetrics({
+    compactWidth = 0,
+    rowCount = 1,
+    rowHeight = 1,
+    isSmallScreen = false
+} = {}) {
+    const safeCompactWidth = Math.max(1, Math.floor(Number(compactWidth) || 0));
+    const safeRowCount = Math.max(1, Math.floor(Number(rowCount) || 1));
+    const safeRowHeight = Math.max(1, Math.floor(Number(rowHeight) || 1));
+    const contentHeight = safeRowCount * safeRowHeight;
+    return {
+        offsetX: Math.max(
+            isSmallScreen ? KV_CACHE_BRANCH_OFFSET_X_SMALL : KV_CACHE_BRANCH_OFFSET_X,
+            Math.round(safeCompactWidth * (isSmallScreen ? 0.03 : 0.04))
+        ),
+        lift: Math.max(
+            isSmallScreen ? KV_CACHE_BRANCH_LIFT_SMALL : KV_CACHE_BRANCH_LIFT,
+            Math.round(contentHeight * (isSmallScreen ? 1.08 : 1.18))
+        )
+    };
+}
+
+function buildProjectionCacheBranch({
+    baseSemantic,
+    projectionData,
+    projectionKind = '',
+    styleKey = VIEW2D_STYLE_KEYS.MHSA_K,
+    outputNode = null,
+    outputDimensions = null,
+    isSmallScreen = false
+} = {}) {
+    if (!outputNode?.id) return null;
+    const outputDimensionCaption = formatView2dMatrixDimensions(
+        projectionData?.outputRowCount,
+        projectionData?.outputColumnCount
+    );
+    const branchMetrics = resolveProjectionCacheBranchMetrics({
+        compactWidth: outputDimensions?.compactWidth,
+        rowCount: projectionData?.outputRowCount,
+        rowHeight: outputDimensions?.rowHeight,
+        isSmallScreen
+    });
+    const cacheSemantic = buildSemantic(baseSemantic, {
+        stage: `kv-cache.${projectionKind}`,
+        role: 'projection-cache',
+        branchKey: projectionKind,
+        cacheKind: projectionKind
+    });
+    const cacheLabel = String(projectionData?.outputLabelTex || projectionKind.toUpperCase() || '').trim()
+        || projectionKind.toUpperCase();
+    const cacheNode = createVectorStripMatrixNode({
+        role: 'projection-cache',
+        semantic: cacheSemantic,
+        labelTex: `${cacheLabel}_{\\mathrm{cache}}`,
+        labelText: `${cacheLabel}_cache`,
+        rowItems: buildProjectionCacheRowItems(projectionData?.outputRows, baseSemantic, projectionKind),
+        rowCount: projectionData?.outputRowCount,
+        columnCount: projectionData?.outputColumnCount,
+        compactWidth: outputDimensions?.compactWidth,
+        rowHeight: outputDimensions?.rowHeight,
+        captionPosition: 'bottom',
+        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        captionDimensionsTex: outputDimensionCaption.tex,
+        captionDimensionsText: outputDimensionCaption.text,
+        visualStyleKey: styleKey,
+        metadata: {
+            kind: projectionKind,
+            cacheNode: true
+        }
+    });
+    cacheNode.visual = {
+        ...(cacheNode.visual || {}),
+        opacity: KV_CACHE_BRANCH_OPACITY
+    };
+
+    const cacheWrapperNode = createGroupNode({
+        role: 'projection-cache-branch',
+        semantic: buildSemantic(baseSemantic, {
+            stage: `kv-cache.${projectionKind}`,
+            role: 'projection-cache-branch',
+            branchKey: projectionKind,
+            cacheKind: projectionKind
+        }),
+        direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+        gapKey: 'default',
+        layout: {
+            anchorAlign: {
+                axis: 'x',
+                selfNodeId: cacheNode.id,
+                targetNodeId: outputNode.id,
+                selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                offset: -branchMetrics.offsetX
+            }
+        },
+        children: [
+            createGroupNode({
+                role: 'projection-cache-branch-y-anchor',
+                semantic: buildSemantic(baseSemantic, {
+                    stage: `kv-cache.${projectionKind}`,
+                    role: 'projection-cache-branch-y-anchor',
+                    branchKey: projectionKind,
+                    cacheKind: projectionKind
+                }),
+                direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                gapKey: 'default',
+                layout: {
+                    anchorAlign: {
+                        axis: 'y',
+                        selfNodeId: cacheNode.id,
+                        targetNodeId: outputNode.id,
+                        selfAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+                        targetAnchor: VIEW2D_ANCHOR_SIDES.TOP,
+                        offset: -branchMetrics.lift
+                    }
+                },
+                children: [cacheNode],
+                metadata: {
+                    gapOverride: 0,
+                    kind: projectionKind,
+                    cacheNode: true
+                }
+            })
+        ],
+        metadata: {
+            gapOverride: 0,
+            kind: projectionKind,
+            cacheNode: true
+        }
+    });
+
+    const connectorNode = createConnectorNode({
+        role: `connector-${projectionKind}-cache`,
+        semantic: buildSemantic(baseSemantic, {
+            stage: `connector-${projectionKind}-cache`,
+            role: 'connector-kv-cache',
+            branchKey: projectionKind,
+            cacheKind: projectionKind
+        }),
+        source: createAnchorRef(outputNode.id, VIEW2D_ANCHOR_SIDES.TOP),
+        target: createAnchorRef(cacheNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+        route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
+        gap: 0,
+        sourceGap: 6,
+        targetGap: 6,
+        visual: {
+            styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+            stroke: KV_CACHE_BRANCH_STROKE
+        },
+        metadata: {
+            preserveColor: true,
+            strokeWidthScale: KV_CACHE_BRANCH_STROKE_WIDTH_SCALE
+        }
+    });
+
+    return {
+        cacheNode,
+        cacheOverlayNode: cacheWrapperNode,
+        cacheConnectorNode: connectorNode
+    };
+}
+
 function buildProjectionStageNode({
     baseSemantic,
     previewData,
@@ -837,7 +1047,8 @@ function buildProjectionStageNode({
     stageIndex,
     extraRows = null,
     isSmallScreen = false,
-    layoutMetrics = null
+    layoutMetrics = null,
+    kvCacheState = null
 }) {
     const projectionKind = String(projectionData?.kind || '').toLowerCase();
     const projectionSemantic = buildSemantic(baseSemantic, {
@@ -1002,7 +1213,7 @@ function buildProjectionStageNode({
         }
     });
 
-    return createGroupNode({
+    const stageNode = createGroupNode({
         role: 'projection-stage',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-stage' }),
         direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
@@ -1026,6 +1237,25 @@ function buildProjectionStageNode({
             stageIndex
         }
     });
+
+    const cacheBranch = shouldShowProjectionCacheBranch(projectionKind, kvCacheState)
+        ? buildProjectionCacheBranch({
+            baseSemantic,
+            projectionData,
+            projectionKind,
+            styleKey,
+            outputNode,
+            outputDimensions: projectionOutputDimensions,
+            isSmallScreen
+        })
+        : null;
+
+    return {
+        stageNode,
+        cacheNode: cacheBranch?.cacheNode || null,
+        cacheOverlayNode: cacheBranch?.cacheOverlayNode || null,
+        cacheConnectorNode: cacheBranch?.cacheConnectorNode || null
+    };
 }
 
 function buildAttentionStageNode({
@@ -1912,7 +2142,8 @@ export function buildMhsaSceneModel({
     tokenLabels = null,
     isSmallScreen = false,
     layoutMetrics = null,
-    visualTokens = null
+    visualTokens = null,
+    kvCacheState = null
 } = {}) {
     const resolvedPreviewData = previewData || buildMhsaTokenMatrixPreviewData({
         activationSource,
@@ -1944,6 +2175,7 @@ export function buildMhsaSceneModel({
         isSmallScreen
     });
     const resolvedTokens = visualTokens || resolveView2dVisualTokens();
+    const resolvedKvCacheState = normalizeKvCacheState(kvCacheState);
     const queryStageIndex = Math.max(
         0,
         resolvedPreviewData.projections.findIndex((projectionData) => String(projectionData?.kind || '').toLowerCase() === 'q')
@@ -1953,7 +2185,7 @@ export function buildMhsaSceneModel({
         resolvedPreviewData.projections.findIndex((projectionData) => String(projectionData?.kind || '').toLowerCase() === 'v')
     );
 
-    const projectionNodes = resolvedPreviewData.projections
+    const projectionStageEntries = resolvedPreviewData.projections
         .map((projectionData, stageIndex) => {
             const validProjection = projectionData
                 && projectionData.weightRowCount
@@ -1969,9 +2201,19 @@ export function buildMhsaSceneModel({
                 stageIndex,
                 extraRows: resolvedLayoutMetrics?.extraRows,
                 isSmallScreen,
-                layoutMetrics: resolvedLayoutMetrics
+                layoutMetrics: resolvedLayoutMetrics,
+                kvCacheState: resolvedKvCacheState
             });
         })
+        .filter(Boolean);
+    const projectionNodes = projectionStageEntries
+        .map((entry) => entry.stageNode)
+        .filter(Boolean);
+    const projectionCacheOverlayNodes = projectionStageEntries
+        .map((entry) => entry.cacheOverlayNode)
+        .filter(Boolean);
+    const projectionCacheConnectorNodes = projectionStageEntries
+        .map((entry) => entry.cacheConnectorNode)
         .filter(Boolean);
     const projectionSourceNode = buildProjectionSourceNode({
         baseSemantic,
@@ -2085,6 +2327,23 @@ export function buildMhsaSceneModel({
             }
         })
     ];
+    if (projectionCacheOverlayNodes.length) {
+        rootNodes.push(
+            createGroupNode({
+                role: 'projection-cache-overlay',
+                semantic: buildSemantic(baseSemantic, {
+                    stage: 'kv-cache',
+                    role: 'projection-cache-overlay'
+                }),
+                direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                gapKey: 'default',
+                children: projectionCacheOverlayNodes,
+                metadata: {
+                    gapOverride: 0
+                }
+            })
+        );
+    }
 
     const edgeHeadOutputNode = findNestedNodeByRole(attentionNode, 'attention-head-output');
     const edgeHeadOutputOutgoingSpacerNode = findNestedNodeByRole(attentionNode, 'outgoing-arrow-spacer');
@@ -2094,6 +2353,7 @@ export function buildMhsaSceneModel({
         projectionNodes,
         sourceNode: projectionSourceNode
     });
+    connectorNodes.push(...projectionCacheConnectorNodes);
     connectorNodes.unshift(...buildEdgeConnectorNodes({
         baseSemantic,
         projectionSourceNode,
@@ -2133,6 +2393,7 @@ export function buildMhsaSceneModel({
             columnCount: resolvedPreviewData.columnCount,
             bandCount: resolvedPreviewData.bandCount,
             sampleStep: resolvedPreviewData.sampleStep,
+            kvCacheState: resolvedKvCacheState,
             layoutMetrics: resolvedLayoutMetrics,
             tokens: resolvedTokens
         }

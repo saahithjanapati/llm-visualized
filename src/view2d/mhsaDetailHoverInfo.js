@@ -87,16 +87,22 @@ export function buildProjectionHoverInfo(node = null, label = '', extraActivatio
     return Object.keys(info).length ? info : null;
 }
 
-export function buildProjectionVectorHoverInfo(node = null, rowItem = null, kind = '') {
+export function buildProjectionVectorHoverInfo(node = null, rowItem = null, kind = '', {
+    cachedKv = false
+} = {}) {
     const safeKind = normalizeProjectionKind(kind);
     if (!safeKind) return null;
-    const label = `${resolveProjectionLabel(safeKind)} Vector`;
+    const isCachedKv = cachedKv === true && (safeKind === 'k' || safeKind === 'v');
+    const label = isCachedKv
+        ? `Cached ${resolveProjectionLabel(safeKind)} Vector`
+        : `${resolveProjectionLabel(safeKind)} Vector`;
     const tokenInfo = createTokenInfo(rowItem) || {};
     const values = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
         ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
         : null;
     const info = buildProjectionHoverInfo(node, label, {
         stage: `qkv.${safeKind}`,
+        ...(isCachedKv ? { cachedKv: true, cacheKind: safeKind } : {}),
         ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
@@ -104,11 +110,20 @@ export function buildProjectionVectorHoverInfo(node = null, rowItem = null, kind
             : {})
     }) || {};
 
+    if (isCachedKv) {
+        info.cachedKv = true;
+        info.category = safeKind.toUpperCase();
+    }
+
     return {
         ...tokenInfo,
         ...info,
         activationData: {
             ...(info.activationData || {}),
+            ...(isCachedKv ? {
+                cachedKv: true,
+                cacheKind: safeKind
+            } : {}),
             ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length

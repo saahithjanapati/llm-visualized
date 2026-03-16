@@ -1,8 +1,11 @@
-export function resolveKvPrefillBaseLaneCount({ initialLaneCount = 1 } = {}) {
-    void initialLaneCount;
-    // Prefill only represents the first-token cache build. If the scene starts
-    // on a later token window, KV mode should immediately use decode semantics.
-    return 1;
+export function resolveKvPrefillBaseLaneCount({
+    initialLaneCount = 1,
+    baseLaneCount = initialLaneCount
+} = {}) {
+    // Prefill should cover the prompt/base token window for this generation
+    // session. If the scene opens on a later token window, comparing against
+    // that base still resolves the current pass as decode.
+    return Math.max(1, Math.floor(baseLaneCount || initialLaneCount || 1));
 }
 
 export function resolveKvCachePassMode({

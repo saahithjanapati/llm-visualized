@@ -226,6 +226,13 @@ function flattenColorAgainstBlack(value = '', opacity = 1) {
     return `rgb(${scale(parsed.r)}, ${scale(parsed.g)}, ${scale(parsed.b)})`;
 }
 
+function resolveNodeVisualOpacity(node = null) {
+    const opacity = Number(node?.visual?.opacity);
+    return Number.isFinite(opacity)
+        ? Math.max(0, Math.min(1, opacity))
+        : 1;
+}
+
 const PARSED_LINEAR_GRADIENT_CACHE = new Map();
 const CAPTION_MIN_SCREEN_HEIGHT_PX = 18;
 const TEXT_MIN_SCREEN_HEIGHT_PX = 10;
@@ -1537,12 +1544,14 @@ function drawCaption(ctx, entry, node, config, worldScale = 1, detailScale = wor
     const captionDimensionsFontSize = fixedTextSizing?.captionDimensionsScreenFontPx
         ? (fixedTextSizing.captionDimensionsScreenFontPx / safeWorldScale)
         : captionFontSize;
+    const visualOpacity = resolveNodeVisualOpacity(node);
 
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = captionColor;
-    ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1))
+        * visualOpacity;
     if (captionPosition === 'inside-top') {
         const clipBounds = entry.contentBounds || entry.bounds;
         if (clipBounds) {
@@ -1990,7 +1999,9 @@ function drawMatrixNode(
         || projectedHeight < summaryHeightThreshold
     );
     const embeddedScene = node.metadata?.embeddedScene || null;
-    const nodeFocusAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    const visualOpacity = resolveNodeVisualOpacity(node);
+    const nodeFocusAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1))
+        * visualOpacity;
     const sceneFocusState = interactionState?.sceneFocusState || null;
     const surfaceFocusAlpha = resolveMatrixSurfaceFocusAlpha(node, sceneFocusState, nodeFocusAlpha);
     const inactiveNodeFilter = resolveSceneNodeFilter(node.id, sceneFocusState, nodeFocusAlpha, config, {
@@ -2497,6 +2508,7 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
     }
     const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
     const safeDetailScale = Math.max(0.0001, Number.isFinite(detailScale) ? detailScale : safeWorldScale);
+    const visualOpacity = resolveNodeVisualOpacity(node);
     const isPersistentOperator = node.kind === VIEW2D_NODE_KINDS.OPERATOR
         && (
             node.role === 'residual-add-operator'
@@ -2620,7 +2632,8 @@ function drawTextLikeNode(ctx, node, entry, config, worldScale = 1, detailScale 
     ctx.beginPath();
     ctx.rect(clipBounds.x, clipBounds.y, clipBounds.width, clipBounds.height);
     ctx.clip();
-    ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1));
+    ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1))
+        * visualOpacity;
     if (tex && hasSimpleTexMarkup(tex)) {
         drawSimpleTex(ctx, tex, {
             x: renderBounds.x + (renderBounds.width / 2),

@@ -169,14 +169,16 @@ function createPreviewData(tokenCount = TOKEN_LABELS.length) {
 }
 
 function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
-    isSmallScreen = false
+    isSmallScreen = false,
+    kvCacheState = null
 } = {}) {
     const previewData = createPreviewData(tokenCount);
     const scene = buildMhsaSceneModel({
         previewData,
         layerIndex: 2,
         headIndex: 1,
-        isSmallScreen
+        isSmallScreen,
+        kvCacheState
     });
     const nodes = flattenSceneNodes(scene);
     const projectionSourceNode = nodes.find((node) => node.role === 'projection-source-xln') || null;
@@ -244,12 +246,22 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         node.role === 'projection-output'
         && String(node.metadata?.kind || '').toLowerCase() === 'k'
     )) || null;
+    const keyCacheNode = nodes.find((node) => (
+        node.role === 'projection-cache'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'k'
+    )) || null;
+    const valueCacheNode = nodes.find((node) => (
+        node.role === 'projection-cache'
+        && String(node.semantic?.branchKey || '').toLowerCase() === 'v'
+    )) || null;
     const qktEquationNode = nodes.find((node) => node.role === 'attention-qkt-equation') || null;
     const connectorKNode = nodes.find((node) => node.role === 'connector-k') || null;
     const connectorQNode = nodes.find((node) => node.role === 'connector-q') || null;
     const connectorPreNode = nodes.find((node) => node.role === 'connector-pre') || null;
     const connectorPostNode = nodes.find((node) => node.role === 'connector-post') || null;
     const connectorVNode = nodes.find((node) => node.role === 'connector-v') || null;
+    const connectorKCacheNode = nodes.find((node) => node.role === 'connector-k-cache') || null;
+    const connectorVCacheNode = nodes.find((node) => node.role === 'connector-v-cache') || null;
     const connectorXlnQNode = nodes.find((node) => node.role === 'connector-xln-q') || null;
     const connectorXlnKNode = nodes.find((node) => node.role === 'connector-xln-k') || null;
     const connectorXlnVNode = nodes.find((node) => node.role === 'connector-xln-v') || null;
@@ -297,12 +309,16 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         softmaxOpenNode,
         softmaxCloseNode,
         keyProjectionOutputNode,
+        keyCacheNode,
+        valueCacheNode,
         qktEquationNode,
         connectorQNode,
         connectorKNode,
         connectorPreNode,
         connectorPostNode,
         connectorVNode,
+        connectorKCacheNode,
+        connectorVCacheNode,
         connectorXlnQNode,
         connectorXlnKNode,
         connectorXlnVNode,
@@ -1287,6 +1303,76 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.focusState?.dimNodeIds).toContain(keyProjectionOutputNode.id);
         expect(hoverState?.focusState?.dimNodeIds).toContain(queryNode.id);
         expect(hoverState?.focusState?.dimNodeIds).toContain(transposeNode.id);
+    });
+
+    it('maps K/V cache row hovers to the local cache and projection-output rows', () => {
+        const {
+            index,
+            keyInputNode,
+            valueInputNode,
+            transposeNode,
+            valuePostNode,
+            keyProjectionOutputNode,
+            valueProjectionOutputNode,
+            keyCacheNode,
+            valueCacheNode,
+            connectorKCacheNode,
+            connectorVCacheNode
+        } = buildSceneFixtures(TOKEN_LABELS.length, {
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: true
+            }
+        });
+
+        const keyHoverState = resolveMhsaDetailHoverState(index, {
+            node: keyCacheNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: keyCacheNode?.rowItems?.[1]
+            }
+        });
+        const valueHoverState = resolveMhsaDetailHoverState(index, {
+            node: valueCacheNode,
+            rowHit: {
+                rowIndex: 0,
+                rowItem: valueCacheNode?.rowItems?.[0]
+            }
+        });
+
+        expect(keyHoverState?.label).toBe('Cached Key Vector');
+        expect(keyHoverState?.info?.activationData?.label).toBe('Cached Key Vector');
+        expect(keyHoverState?.info?.cachedKv).toBe(true);
+        expect(keyHoverState?.focusState?.activeNodeIds).toContain(keyProjectionOutputNode?.id);
+        expect(keyHoverState?.focusState?.activeNodeIds).toContain(keyCacheNode?.id);
+        expect(keyHoverState?.focusState?.activeNodeIds).not.toContain(keyInputNode?.id);
+        expect(keyHoverState?.focusState?.activeNodeIds).not.toContain(transposeNode?.id);
+        expect(keyHoverState?.focusState?.activeConnectorIds).toContain(connectorKCacheNode?.id);
+        expect(keyHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: keyProjectionOutputNode?.id,
+            rowIndex: 1
+        });
+        expect(keyHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: keyCacheNode?.id,
+            rowIndex: 1
+        });
+
+        expect(valueHoverState?.label).toBe('Cached Value Vector');
+        expect(valueHoverState?.info?.activationData?.label).toBe('Cached Value Vector');
+        expect(valueHoverState?.info?.cachedKv).toBe(true);
+        expect(valueHoverState?.focusState?.activeNodeIds).toContain(valueProjectionOutputNode?.id);
+        expect(valueHoverState?.focusState?.activeNodeIds).toContain(valueCacheNode?.id);
+        expect(valueHoverState?.focusState?.activeNodeIds).not.toContain(valueInputNode?.id);
+        expect(valueHoverState?.focusState?.activeNodeIds).not.toContain(valuePostNode?.id);
+        expect(valueHoverState?.focusState?.activeConnectorIds).toContain(connectorVCacheNode?.id);
+        expect(valueHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueProjectionOutputNode?.id,
+            rowIndex: 0
+        });
+        expect(valueHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueCacheNode?.id,
+            rowIndex: 0
+        });
     });
 
     it('maps head-output hover rows to the Attention Weighted Sum tooltip payload', () => {

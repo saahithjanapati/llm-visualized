@@ -200,6 +200,17 @@ function findProjectionNodeIdByKind(index = null, role = '', kind = '') {
     return '';
 }
 
+function findNodeIdByRole(index = null, role = '') {
+    const safeRole = String(role || '').trim();
+    if (!index?.nodesById || !safeRole.length) return '';
+    for (const node of index.nodesById.values()) {
+        if (String(node?.role || '').trim() === safeRole) {
+            return node.id;
+        }
+    }
+    return '';
+}
+
 function buildLayerNormRowSelections(index = null, rowIndex = null) {
     if (!Number.isFinite(rowIndex)) return [];
     const safeRowIndex = Math.max(0, Math.floor(rowIndex));
@@ -434,6 +445,63 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
         };
     }
     return result;
+}
+
+function buildProjectionCacheRowResult(index = null, node = null, kind = '', rowHit = null, options = null) {
+    const safeKind = normalizeProjectionKind(kind);
+    if (!index || !node?.id || !safeKind || !rowHit) return null;
+    const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    if (!Number.isFinite(rowIndex)) return null;
+
+    const projectionOutputNodeId = index?.projectionOutputIdsByKind?.[safeKind] || '';
+    const cacheConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache`);
+
+    return buildFocusResult({
+        label: `Cached ${resolveProjectionLabel(safeKind)} Vector`,
+        info: buildProjectionVectorHoverInfo(node, rowHit.rowItem, safeKind, {
+            cachedKv: true
+        }),
+        activeNodeIds: [
+            projectionOutputNodeId,
+            node.id
+        ],
+        activeConnectorIds: [cacheConnectorNodeId],
+        rowSelections: [
+            {
+                nodeId: projectionOutputNodeId,
+                rowIndex
+            },
+            {
+                nodeId: node.id,
+                rowIndex
+            }
+        ],
+        includeFocusState: options?.includeFocusState !== false
+    });
+}
+
+function buildProjectionCacheStageResult(index = null, node = null, kind = '', options = null) {
+    const safeKind = normalizeProjectionKind(kind);
+    if (!index || !node?.id || !safeKind) return null;
+
+    const projectionOutputNodeId = index?.projectionOutputIdsByKind?.[safeKind] || '';
+    const cacheConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache`);
+    const representativeRowItem = Array.isArray(node.rowItems) && node.rowItems.length
+        ? node.rowItems[0]
+        : null;
+
+    return buildFocusResult({
+        label: `Cached ${resolveProjectionLabel(safeKind)} Vector`,
+        info: buildProjectionVectorHoverInfo(node, representativeRowItem, safeKind, {
+            cachedKv: true
+        }),
+        activeNodeIds: [
+            projectionOutputNodeId,
+            node.id
+        ],
+        activeConnectorIds: [cacheConnectorNodeId],
+        includeFocusState: options?.includeFocusState !== false
+    });
 }
 
 function buildTransposeAxisResult(index = null, axisHit = null, options = null) {
@@ -1353,6 +1421,9 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
     }
 
     if (entity.type === 'projection-row') {
+        if (entity.role === 'projection-cache') {
+            return buildProjectionCacheRowResult(index, entity.node, entity.projectionKind, entity.rowHit, options);
+        }
         return buildProjectionRowResult(index, entity.node, entity.projectionKind, entity.rowHit, entity.role, options);
     }
 
@@ -1464,6 +1535,9 @@ export function resolveMhsaDetailHoverState(index = null, hit = null, options = 
     }
 
     if (entity.type === 'projection-stage') {
+        if (entity.node?.role === 'projection-cache') {
+            return buildProjectionCacheStageResult(index, entity.node, entity.projectionKind, options);
+        }
         return buildProjectionStageResult(index, entity.projectionKind, options);
     }
 
