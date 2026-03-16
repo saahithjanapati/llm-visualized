@@ -126,7 +126,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizedNode?.label?.tex).toBe('\\hat{x}');
         expect(normalizedCopyNode?.label?.tex).toBe('\\hat{x}');
         expect(scaleNode?.label?.tex).toBe('\\gamma');
-        expect(scaleNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.1);
+        expect(scaleNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.4);
         expect(scaleNode?.metadata?.card?.cornerRadius).toBe(5);
         expect(scaleNode?.dimensions).toEqual({
             rows: 1,
@@ -135,7 +135,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(scaledNode?.label?.tex).toBe('\\gamma \\odot \\hat{x}');
         expect(scaledCopyNode?.label?.tex).toBe('\\gamma \\odot \\hat{x}');
         expect(shiftNode?.label?.tex).toBe('\\beta');
-        expect(shiftNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.1);
+        expect(shiftNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.4);
         expect(shiftNode?.metadata?.card?.cornerRadius).toBe(5);
         expect(inputNode?.metadata?.card?.cornerRadius).toBe(10);
         expect(outputNode?.label?.tex).toBe('x_{\\ln}');

@@ -164,6 +164,7 @@ describe('buildOutputProjectionDetailSceneModel', () => {
             rows: 1,
             cols: D_MODEL
         });
+        expect(projectionBiasNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.4);
         expect(projectionOutputNode?.label?.tex).toBe('O');
         expect(projectionOutputNode?.visual?.styleKey).toBe(VIEW2D_STYLE_KEYS.RESIDUAL);
         expect(projectionOutputNode?.dimensions).toEqual({

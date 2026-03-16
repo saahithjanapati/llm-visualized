@@ -2,6 +2,7 @@ import { resolveView2dCaptionLines } from '../view2d/captionUtils.js';
 import { resolveView2dCaptionPosition } from '../view2d/captionUtils.js';
 import {
     flattenSceneNodes,
+    VIEW2D_MATRIX_PRESENTATIONS,
     VIEW2D_NODE_KINDS
 } from '../view2d/schema/sceneTypes.js';
 import {
@@ -33,18 +34,26 @@ const MHSA_UNIFORM_CAPTION_DIMENSIONS_MAX_FONT_PX = 14;
 const MHSA_DETAIL_SCENE_RELATIVE_CAPTION_LABEL_BOOST = 1.14;
 const MHSA_DETAIL_SCENE_RELATIVE_CAPTION_DIMENSIONS_BOOST = 1.1;
 const MHSA_DETAIL_SCENE_RELATIVE_DOM_TEXT_BOOST = 1.08;
+const BOTTOM_VECTOR_CAPTION_REFERENCE_ROWS = 5;
+const SINGLE_ROW_VECTOR_CAPTION_LABEL_MIN_SCREEN_FONT_PX = 12;
+const SINGLE_ROW_VECTOR_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX = 10.5;
 const DEFAULT_CAPTION_LABEL_ROLE_SCALE = 1;
 const DEFAULT_CAPTION_DIMENSIONS_ROLE_SCALE = 1;
 const DEFAULT_CAPTION_KATEX_SUBSCRIPT_SCALE_EM = 0.8;
 const DEFAULT_CAPTION_INLINE_SUBSCRIPT_SCALE_EM = 0.84;
 const DEFAULT_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM = 0.28;
-const PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE = 4.1;
-const LAYER_NORM_PARAM_CAPTION_LABEL_ROLE_SCALE = 2.75;
-const PROJECTION_BIAS_CAPTION_DIMENSIONS_ROLE_SCALE = 2.8;
-const PROJECTION_BIAS_CAPTION_KATEX_SUBSCRIPT_SCALE_EM = 0.62;
-const PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_SCALE_EM = 0.6;
-const PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM = 0.36;
+const MHSA_PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE = 4.1;
+const MHSA_PROJECTION_BIAS_CAPTION_DIMENSIONS_ROLE_SCALE = 2.8;
+const MHSA_PROJECTION_BIAS_CAPTION_KATEX_SUBSCRIPT_SCALE_EM = 0.62;
+const MHSA_PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_SCALE_EM = 0.6;
+const MHSA_PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM = 0.36;
+const DETAIL_PARAMETER_LABEL_ROLE_SCALE_MULTIPLIER = 2.5;
+const DETAIL_PARAMETER_DIMENSIONS_ROLE_SCALE = 2.8;
+const DETAIL_PARAMETER_BIAS_KATEX_SUBSCRIPT_SCALE_EM = 0.68;
+const DETAIL_PARAMETER_BIAS_INLINE_SUBSCRIPT_SCALE_EM = 0.64;
+const DETAIL_PARAMETER_BIAS_INLINE_SUBSCRIPT_OFFSET_EM = 0.34;
 const OVERLAY_FOCUS_INACTIVE_OPACITY = 0.18;
+const PRIMARY_MHSA_DETAIL_VISUAL_CONTRACT = 'selection-panel-mhsa-v1';
 
 function escapeHtml(value = '') {
     return String(value)
@@ -245,47 +254,120 @@ function isResidualCaptionNode(node = null) {
         && String(node?.metadata?.caption?.renderMode || '').trim().toLowerCase() === 'dom-katex';
 }
 
+function isPrimaryMhsaDetailScene(scene = null) {
+    return String(scene?.metadata?.visualContract || '').trim().toLowerCase() === PRIMARY_MHSA_DETAIL_VISUAL_CONTRACT;
+}
+
+function isBottomCompactRowCaptionNode(node = null, {
+    captionPosition = 'bottom',
+    scaleWithNode = false
+} = {}) {
+    return node?.kind === VIEW2D_NODE_KINDS.MATRIX
+        && node?.presentation === VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS
+        && String(captionPosition || '').trim().toLowerCase() === 'bottom'
+        && scaleWithNode !== true;
+}
+
+function resolveMatrixRowCount(node = null) {
+    return Number.isFinite(node?.dimensions?.rows)
+        ? Math.max(1, Math.floor(node.dimensions.rows))
+        : 1;
+}
+
+function resolveBottomCompactRowCaptionSizingExtent(node = null, projectedContentHeight = 0) {
+    const safeProjectedContentHeight = Number.isFinite(projectedContentHeight)
+        ? Math.max(0, Number(projectedContentHeight))
+        : 0;
+    const rowCount = resolveMatrixRowCount(node);
+    if (rowCount >= BOTTOM_VECTOR_CAPTION_REFERENCE_ROWS) {
+        return safeProjectedContentHeight;
+    }
+    return safeProjectedContentHeight * (BOTTOM_VECTOR_CAPTION_REFERENCE_ROWS / rowCount);
+}
+
+function isSingleRowCaptionAssistExcludedNode(node = null) {
+    const nodeRole = String(node?.role || '').trim().toLowerCase();
+    const componentKind = String(node?.semantic?.componentKind || '').trim().toLowerCase();
+    return (nodeRole === 'projection-bias' && componentKind === 'output-projection')
+        || nodeRole === 'mlp-up-bias'
+        || nodeRole === 'mlp-down-bias'
+        || nodeRole === 'layer-norm-scale'
+        || nodeRole === 'layer-norm-shift';
+}
+
 function applyCaptionRoleStyling(itemEl, node = null) {
     if (!itemEl) return;
     const nodeRole = String(node?.role || '').trim().toLowerCase();
-    const isProjectionBiasNode = nodeRole === 'projection-bias'
-        || nodeRole === 'mlp-up-bias'
-        || nodeRole === 'mlp-down-bias';
-    const isLayerNormParamNode = nodeRole === 'layer-norm-scale'
-        || nodeRole === 'layer-norm-shift';
+    const componentKind = String(node?.semantic?.componentKind || '').trim().toLowerCase();
+    const isMhsaProjectionBiasNode = nodeRole === 'projection-bias' && componentKind === 'mhsa';
+    const isDetailParameterNode = (
+        nodeRole === 'mlp-up-bias'
+        || nodeRole === 'mlp-down-bias'
+        || nodeRole === 'layer-norm-scale'
+        || nodeRole === 'layer-norm-shift'
+        || (nodeRole === 'projection-bias' && componentKind === 'output-projection')
+    );
+    const isDetailBiasNode = (
+        nodeRole === 'mlp-up-bias'
+        || nodeRole === 'mlp-down-bias'
+        || (nodeRole === 'projection-bias' && componentKind === 'output-projection')
+    );
+    const nodeCaptionLabelScale = Number(node?.metadata?.caption?.labelScale);
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-label-role-scale',
         String(
-            isProjectionBiasNode
-                ? PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE
-                : (isLayerNormParamNode
-                    ? LAYER_NORM_PARAM_CAPTION_LABEL_ROLE_SCALE
-                    : DEFAULT_CAPTION_LABEL_ROLE_SCALE)
+            isMhsaProjectionBiasNode
+                ? MHSA_PROJECTION_BIAS_CAPTION_LABEL_ROLE_SCALE
+                : (
+                    isDetailParameterNode
+                    && Number.isFinite(nodeCaptionLabelScale)
+                    && nodeCaptionLabelScale > 0
+                        ? nodeCaptionLabelScale * DETAIL_PARAMETER_LABEL_ROLE_SCALE_MULTIPLIER
+                        : DEFAULT_CAPTION_LABEL_ROLE_SCALE
+                )
         )
     );
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-dimensions-role-scale',
-        String(isProjectionBiasNode
-            ? PROJECTION_BIAS_CAPTION_DIMENSIONS_ROLE_SCALE
-            : DEFAULT_CAPTION_DIMENSIONS_ROLE_SCALE)
+        String(
+            isMhsaProjectionBiasNode
+                ? MHSA_PROJECTION_BIAS_CAPTION_DIMENSIONS_ROLE_SCALE
+                : (
+                    isDetailParameterNode
+                        ? DETAIL_PARAMETER_DIMENSIONS_ROLE_SCALE
+                        : DEFAULT_CAPTION_DIMENSIONS_ROLE_SCALE
+                )
+        )
     );
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-katex-subscript-scale',
-        `${isProjectionBiasNode
-            ? PROJECTION_BIAS_CAPTION_KATEX_SUBSCRIPT_SCALE_EM
-            : DEFAULT_CAPTION_KATEX_SUBSCRIPT_SCALE_EM}em`
+        `${isMhsaProjectionBiasNode
+            ? MHSA_PROJECTION_BIAS_CAPTION_KATEX_SUBSCRIPT_SCALE_EM
+            : (
+                isDetailBiasNode
+                    ? DETAIL_PARAMETER_BIAS_KATEX_SUBSCRIPT_SCALE_EM
+                    : DEFAULT_CAPTION_KATEX_SUBSCRIPT_SCALE_EM
+            )}em`
     );
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-inline-subscript-scale',
-        `${isProjectionBiasNode
-            ? PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_SCALE_EM
-            : DEFAULT_CAPTION_INLINE_SUBSCRIPT_SCALE_EM}em`
+        `${isMhsaProjectionBiasNode
+            ? MHSA_PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_SCALE_EM
+            : (
+                isDetailBiasNode
+                    ? DETAIL_PARAMETER_BIAS_INLINE_SUBSCRIPT_SCALE_EM
+                    : DEFAULT_CAPTION_INLINE_SUBSCRIPT_SCALE_EM
+            )}em`
     );
     itemEl.style.setProperty(
         '--detail-transformer-view2d-caption-inline-subscript-offset',
-        `${isProjectionBiasNode
-            ? PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM
-            : DEFAULT_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM}em`
+        `${isMhsaProjectionBiasNode
+            ? MHSA_PROJECTION_BIAS_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM
+            : (
+                isDetailBiasNode
+                    ? DETAIL_PARAMETER_BIAS_INLINE_SUBSCRIPT_OFFSET_EM
+                    : DEFAULT_CAPTION_INLINE_SUBSCRIPT_OFFSET_EM
+            )}em`
     );
 }
 
@@ -646,6 +728,7 @@ export function createTransformerView2dResidualCaptionOverlay({
                 if (!item) return;
                 seenIds.add(node.id);
                 item.itemEl.dataset.nodeRole = String(node.role || '');
+                const rowCount = resolveMatrixRowCount(node);
                 const sizeProgress = activeUniformCaptionState
                     ? activeUniformCaptionState.sizeProgress
                     : clamp(
@@ -681,12 +764,33 @@ export function createTransformerView2dResidualCaptionOverlay({
                         ? MHSA_DETAIL_SCENE_RELATIVE_CAPTION_DIMENSIONS_BOOST
                         : 1
                 );
-                const captionSizingExtent = activeUniformCaptionState
-                    ? Math.min(
-                        activeUniformCaptionState.referenceProjectedCaptionExtent,
-                        projectedCaptionExtent
-                    )
+                const shouldUseSingleRowCompactRowCaptionAssist = !isPrimaryMhsaDetailScene(scene);
+                const isBottomCompactRowCaption = isBottomCompactRowCaptionNode(node, {
+                    captionPosition,
+                    scaleWithNode
+                });
+                const useCompactRowCaptionAssist = shouldUseSingleRowCompactRowCaptionAssist
+                    && isBottomCompactRowCaption
+                    && !isSingleRowCaptionAssistExcludedNode(node);
+                const compactRowCaptionSizingExtent = useCompactRowCaptionAssist
+                    ? resolveBottomCompactRowCaptionSizingExtent(node, projectedContentHeight)
                     : projectedContentHeight;
+                const captionSizingExtent = activeUniformCaptionState
+                    ? (
+                        useCompactRowCaptionAssist
+                            ? Math.max(
+                                compactRowCaptionSizingExtent,
+                                Math.min(
+                                    activeUniformCaptionState.referenceProjectedCaptionExtent,
+                                    projectedCaptionExtent
+                                )
+                            )
+                            : Math.min(
+                                activeUniformCaptionState.referenceProjectedCaptionExtent,
+                                projectedCaptionExtent
+                            )
+                    )
+                    : compactRowCaptionSizingExtent;
                 const dimensionsCaptionSizingExtent = captionSizingExtent;
                 const labelFontPx = fixedTextSizing?.captionLabelScreenFontPx
                     ?? resolveCaptionFontPx({
@@ -721,7 +825,11 @@ export function createTransformerView2dResidualCaptionOverlay({
                 const labelMinScreenFontPx = Number.isFinite(node?.metadata?.caption?.labelMinScreenFontPx)
                     && node.metadata.caption.labelMinScreenFontPx > 0
                     ? Number(node.metadata.caption.labelMinScreenFontPx)
-                    : null;
+                    : (
+                        useCompactRowCaptionAssist && rowCount === 1
+                            ? SINGLE_ROW_VECTOR_CAPTION_LABEL_MIN_SCREEN_FONT_PX
+                            : null
+                    );
                 const labelMaxScreenFontPx = Number.isFinite(node?.metadata?.caption?.labelMaxScreenFontPx)
                     && node.metadata.caption.labelMaxScreenFontPx > 0
                     ? Number(node.metadata.caption.labelMaxScreenFontPx)
@@ -729,7 +837,11 @@ export function createTransformerView2dResidualCaptionOverlay({
                 const dimensionsMinScreenFontPx = Number.isFinite(node?.metadata?.caption?.dimensionsMinScreenFontPx)
                     && node.metadata.caption.dimensionsMinScreenFontPx > 0
                     ? Number(node.metadata.caption.dimensionsMinScreenFontPx)
-                    : null;
+                    : (
+                        useCompactRowCaptionAssist && rowCount === 1
+                            ? SINGLE_ROW_VECTOR_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX
+                            : null
+                    );
                 const captionFixedScreenFontPx = Number.isFinite(node?.metadata?.caption?.fixedScreenFontPx)
                     && node.metadata.caption.fixedScreenFontPx > 0
                     ? Number(node.metadata.caption.fixedScreenFontPx)
@@ -756,6 +868,24 @@ export function createTransformerView2dResidualCaptionOverlay({
                     minScreenFontPx: dimensionsMinScreenFontPx
                         ?? (activeUniformCaptionState ? 10.5 : 9.5)
                 });
+                const effectiveLabelMinScreenFontPx = labelMinScreenFontPx
+                    ?? (activeUniformCaptionState ? 11.5 : 10.5);
+                const effectiveDimensionsMinScreenFontPx = dimensionsMinScreenFontPx
+                    ?? (activeUniformCaptionState ? 10.5 : 9.5);
+                const finalLabelFontPx = (
+                    captionZoomBehavior === VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE
+                    && useCompactRowCaptionAssist
+                    && rowCount === 1
+                )
+                    ? Math.max(effectiveLabelMinScreenFontPx, resolvedLabelFontPx)
+                    : resolvedLabelFontPx;
+                const finalDimensionsFontPx = (
+                    captionZoomBehavior === VIEW2D_TEXT_ZOOM_BEHAVIORS.SCENE_RELATIVE
+                    && useCompactRowCaptionAssist
+                    && rowCount === 1
+                )
+                    ? Math.max(effectiveDimensionsMinScreenFontPx, resolvedDimensionsFontPx)
+                    : resolvedDimensionsFontPx;
                 const anchorX = contentBounds.x + (contentBounds.width / 2);
                 const anchorY = captionPosition === 'bottom'
                     ? contentBounds.y + contentBounds.height + RESIDUAL_CAPTION_BOTTOM_GAP_PX
@@ -766,8 +896,8 @@ export function createTransformerView2dResidualCaptionOverlay({
                 item.itemEl.style.top = `${Math.round(anchorY)}px`;
                 item.itemEl.style.removeProperty('width');
                 applyCaptionRoleStyling(item.itemEl, node);
-                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-label-size', `${resolvedLabelFontPx.toFixed(2)}px`);
-                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-dimensions-size', `${resolvedDimensionsFontPx.toFixed(2)}px`);
+                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-label-size', `${finalLabelFontPx.toFixed(2)}px`);
+                item.itemEl.style.setProperty('--detail-transformer-view2d-caption-dimensions-size', `${finalDimensionsFontPx.toFixed(2)}px`);
                 item.itemEl.style.opacity = String(
                     resolveSceneNodeFocusAlpha(node.id, overlayFocusState) * resolveNodeVisualOpacity(node)
                 );

@@ -337,12 +337,19 @@ function resolveVisibleTokenRefByIndex(tokenRefs = [], tokenIndex = null) {
     )) || null;
 }
 
-function resolveVisiblePositionRefs(activationSource = null, tokenIndices = null) {
+function resolveVisiblePositionRefs(activationSource = null, tokenIndices = null, tokenLabels = null) {
     return resolveVisibleTokenIndices(activationSource, tokenIndices).map((tokenIndex, rowIndex) => ({
         rowIndex,
         tokenIndex,
+        tokenId: resolveTokenId(activationSource, tokenIndex),
         positionIndex: tokenIndex + 1,
-        tokenLabel: `${tokenIndex + 1}`
+        tokenLabel: resolveTokenLabel(
+            activationSource,
+            tokenIndex,
+            Array.isArray(tokenLabels) ? tokenLabels[rowIndex] : null,
+            rowIndex
+        ),
+        displayText: `${tokenIndex + 1}`
     }));
 }
 
@@ -383,6 +390,64 @@ function resolveKnownTokenCount(activationSource = null) {
     return (promptTokenCount + completionTokenCount) > 0
         ? promptTokenCount + completionTokenCount
         : null;
+}
+
+function normalizeKvCacheState(kvCacheState = null) {
+    const kvCacheModeEnabled = !!kvCacheState?.kvCacheModeEnabled;
+    const kvCachePrefillActive = !!(kvCacheModeEnabled && kvCacheState?.kvCachePrefillActive);
+    const rawPassIndex = Number(kvCacheState?.kvCachePassIndex);
+    const kvCachePassIndex = Number.isFinite(rawPassIndex)
+        ? Math.max(0, Math.floor(rawPassIndex))
+        : 0;
+    const kvCacheDecodeActive = !!(
+        kvCacheModeEnabled
+        && (
+            kvCacheState?.kvCacheDecodeActive
+            || (!kvCachePrefillActive && kvCachePassIndex > 0)
+        )
+    );
+    return {
+        kvCacheModeEnabled,
+        kvCachePrefillActive,
+        kvCacheDecodeActive,
+        kvCachePassIndex
+    };
+}
+
+function resolveSceneTokenWindow({
+    activationSource = null,
+    tokenIndices = null,
+    tokenLabels = null,
+    kvCacheState = null
+} = {}) {
+    const normalizedKvCacheState = normalizeKvCacheState(kvCacheState);
+    const resolvedTokenIndices = resolveVisibleTokenIndices(activationSource, tokenIndices);
+    if (!normalizedKvCacheState.kvCacheDecodeActive) {
+        return {
+            tokenIndices,
+            tokenLabels,
+            normalizedKvCacheState
+        };
+    }
+
+    const lastTokenIndex = resolvedTokenIndices.length
+        ? resolvedTokenIndices[resolvedTokenIndices.length - 1]
+        : (() => {
+            const knownTokenCount = resolveKnownTokenCount(activationSource);
+            return Number.isFinite(knownTokenCount) && knownTokenCount > 0
+                ? Math.max(0, Math.floor(knownTokenCount) - 1)
+                : 0;
+        })();
+    const resolvedTokenLabels = Array.isArray(tokenLabels) ? tokenLabels : null;
+    const lastTokenLabel = resolvedTokenLabels?.length
+        ? resolvedTokenLabels[resolvedTokenLabels.length - 1]
+        : null;
+
+    return {
+        tokenIndices: [lastTokenIndex],
+        tokenLabels: resolvedTokenLabels?.length ? [lastTokenLabel] : null,
+        normalizedKvCacheState
+    };
 }
 
 function resolveUnembeddingOutputTokenRefs(tokenRefs = [], activationSource = null) {
@@ -1313,7 +1378,7 @@ function buildLayerGroup({
                 componentKind: 'embedding',
                 stage: 'embedding.position'
             },
-            tokenRefs: resolveVisiblePositionRefs(activationSource, tokenIndices),
+            tokenRefs: resolveVisiblePositionRefs(activationSource, tokenIndices, tokenLabels),
             stackRole: 'input-position-chip-stack',
             chipRole: 'input-position-chip',
             chipLabelRole: 'input-position-chip-label',
@@ -2146,7 +2211,17 @@ export function buildTransformerSceneModel({
     kvCacheState = null
 } = {}) {
     const resolvedLayerCount = Number.isFinite(layerCount) ? Math.max(1, Math.floor(layerCount)) : NUM_LAYERS;
-    const tokenRefs = resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels);
+    const {
+        tokenIndices: sceneTokenIndices,
+        tokenLabels: sceneTokenLabels,
+        normalizedKvCacheState
+    } = resolveSceneTokenWindow({
+        activationSource,
+        tokenIndices,
+        tokenLabels,
+        kvCacheState
+    });
+    const tokenRefs = resolveVisibleTokenRefs(activationSource, sceneTokenIndices, sceneTokenLabels);
     const resolvedTokens = visualTokens || resolveView2dVisualTokens();
     const redirectedConcatDetailTarget = normalizeConcatDetailTarget(concatDetailTarget);
     const requestedOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget)
@@ -2191,7 +2266,7 @@ export function buildTransformerSceneModel({
             tokenLabels: tokenRefs.map((tokenRef) => tokenRef.tokenLabel),
             isSmallScreen,
             visualTokens: resolvedTokens,
-            kvCacheState
+            kvCacheState: normalizedKvCacheState
         })
         : null;
     const headDetailScene = buildHeadDetailSceneModel({
@@ -2237,8 +2312,8 @@ export function buildTransformerSceneModel({
         layerIndex,
         activationSource,
         tokenRefs,
-        tokenIndices,
-        tokenLabels,
+        tokenIndices: sceneTokenIndices,
+        tokenLabels: sceneTokenLabels,
         includeInputPositionEmbedding: layerIndex === 0,
         isSmallScreen,
         visualTokens: resolvedTokens
@@ -2321,9 +2396,7 @@ export function buildTransformerSceneModel({
             tokenCount: tokenRefs.length,
             tokenIndices: tokenRefs.map((tokenRef) => tokenRef.tokenIndex),
             isSmallScreen: !!isSmallScreen,
-            kvCacheState: kvCacheState && typeof kvCacheState === 'object'
-                ? { ...kvCacheState }
-                : null,
+            kvCacheState: normalizedKvCacheState,
             tokens: resolvedTokens,
             focusBuilder: 'buildMhsaSceneModel',
             headDetailTarget: resolvedHeadDetailTarget,

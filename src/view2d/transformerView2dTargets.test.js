@@ -311,13 +311,13 @@ describe('transformerView2dTargets', () => {
         });
 
         expect(payload).toEqual({
-            label: 'Input Token',
+            label: 'Token: Gamma',
             info: {
                 tokenIndex: 2,
                 tokenLabel: 'Gamma',
                 positionIndex: 3,
                 activationData: {
-                    label: 'Input Token',
+                    label: 'Token: Gamma',
                     stage: 'embedding.token',
                     tokenIndex: 2,
                     tokenLabel: 'Gamma',
@@ -339,23 +339,23 @@ describe('transformerView2dTargets', () => {
                     positionIndex: 3
                 },
                 metadata: {
-                    tokenLabel: '3',
+                    tokenLabel: 'Gamma',
                     positionIndex: 3
                 }
             }
         });
 
         expect(payload).toEqual({
-            label: 'Input Position',
+            label: 'Position: 3',
             info: {
                 tokenIndex: 2,
-                tokenLabel: '3',
+                tokenLabel: 'Gamma',
                 positionIndex: 3,
                 activationData: {
-                    label: 'Input Position',
+                    label: 'Position: 3',
                     stage: 'embedding.position',
                     tokenIndex: 2,
-                    tokenLabel: '3',
+                    tokenLabel: 'Gamma',
                     positionIndex: 3
                 }
             }

@@ -167,8 +167,9 @@ const KV_CACHE_BRANCH_STROKE = 'rgba(255, 255, 255, 0.34)';
 const KV_CACHE_BRANCH_STROKE_WIDTH_SCALE = 0.74;
 const KV_CACHE_BRANCH_LIFT = 68;
 const KV_CACHE_BRANCH_LIFT_SMALL = 56;
-const KV_CACHE_BRANCH_OFFSET_X = 74;
-const KV_CACHE_BRANCH_OFFSET_X_SMALL = 56;
+const KV_CACHE_BRANCH_OFFSET_X = 96;
+const KV_CACHE_BRANCH_OFFSET_X_SMALL = 74;
+const KV_CACHE_BRANCH_SOURCE_OFFSET_Y = 8;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -970,7 +971,7 @@ function buildProjectionCacheBranch({
                 targetNodeId: outputNode.id,
                 selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
                 targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
-                offset: -branchMetrics.offsetX
+                offset: branchMetrics.offsetX
             }
         },
         children: [
@@ -989,9 +990,9 @@ function buildProjectionCacheBranch({
                         axis: 'y',
                         selfNodeId: cacheNode.id,
                         targetNodeId: outputNode.id,
-                        selfAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
-                        targetAnchor: VIEW2D_ANCHOR_SIDES.TOP,
-                        offset: -branchMetrics.lift
+                        selfAnchor: VIEW2D_ANCHOR_SIDES.TOP,
+                        targetAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+                        offset: branchMetrics.lift
                     }
                 },
                 children: [cacheNode],
@@ -1017,8 +1018,8 @@ function buildProjectionCacheBranch({
             branchKey: projectionKind,
             cacheKind: projectionKind
         }),
-        source: createAnchorRef(outputNode.id, VIEW2D_ANCHOR_SIDES.TOP),
-        target: createAnchorRef(cacheNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+        source: createAnchorRef(outputNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
+        target: createAnchorRef(cacheNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
         route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
         gap: 0,
         sourceGap: 6,
@@ -1029,7 +1030,9 @@ function buildProjectionCacheBranch({
         },
         metadata: {
             preserveColor: true,
-            strokeWidthScale: KV_CACHE_BRANCH_STROKE_WIDTH_SCALE
+            strokeWidthScale: KV_CACHE_BRANCH_STROKE_WIDTH_SCALE,
+            sourceAnchorMode: 'caption-bottom',
+            sourceAnchorOffsetY: KV_CACHE_BRANCH_SOURCE_OFFSET_Y
         }
     });
 

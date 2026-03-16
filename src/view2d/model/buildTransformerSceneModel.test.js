@@ -356,6 +356,9 @@ describe('buildTransformerSceneModel', () => {
         expect(
             positionChipLabelNodes.map((node) => String(node?.text || '').replace(/\u00A0/g, ' '))
         ).toEqual(['1', '2', '3']);
+        expect(positionChipNodes[0]?.metadata?.tokenLabel).toBe('Token A');
+        expect(positionChipNodes[1]?.metadata?.tokenLabel).toBe('Token B');
+        expect(positionChipNodes[2]?.metadata?.tokenLabel).toBe('Token C');
         expect(positionChipStackNode).toBeTruthy();
         expect(positionEmbeddingNode).toBeTruthy();
         expect(connectors.some((connector) => (

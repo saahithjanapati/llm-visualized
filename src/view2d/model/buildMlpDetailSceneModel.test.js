@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { D_MODEL, FINAL_MLP_COLOR } from '../../ui/selectionPanelConstants.js';
+import { buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
 import { PRISM_DIMENSIONS_PER_UNIT } from '../../utils/constants.js';
 import {
     MLP_ACTIVATION_TOOLTIP_LABEL,
@@ -21,6 +22,34 @@ function toKatexColorHex(hex = 0xFFFFFF) {
     return `#${Math.max(0, Math.min(0xFFFFFF, Math.floor(
         Number.isFinite(hex) ? hex : 0xFFFFFF
     ))).toString(16).padStart(6, '0')}`;
+}
+
+function colorToCss(color) {
+    return color?.isColor ? `#${color.getHexString()}` : 'transparent';
+}
+
+function buildExpectedMlpBiasGradientCss(values = [], direction = '90deg') {
+    const safeValues = Array.isArray(values)
+        ? values.map((value) => (Number.isFinite(value) ? value : 0))
+        : [];
+    if (!safeValues.length) return 'none';
+    const maxAbsValue = safeValues.reduce((maxValue, value) => Math.max(maxValue, Math.abs(value)), 0);
+    const clampRange = maxAbsValue > 1e-6 ? maxAbsValue : 1;
+    const rangeOptions = buildHueRangeOptions(FINAL_MLP_COLOR, {
+        hueSpread: 0.1,
+        valueMin: -clampRange,
+        valueMax: clampRange,
+        minLightness: 0.36,
+        maxLightness: 0.72
+    });
+    const stops = safeValues.map((value, index) => {
+        const ratio = safeValues.length > 1 ? index / (safeValues.length - 1) : 0;
+        return `${colorToCss(mapValueToHueRange(value, rangeOptions))} ${(ratio * 100).toFixed(4)}%`;
+    });
+    if (stops.length === 1) {
+        return `linear-gradient(${direction}, ${stops[0].replace(' 0.0000%', ' 0%')}, ${stops[0].replace(' 0.0000%', ' 100%')})`;
+    }
+    return `linear-gradient(${direction}, ${stops.join(', ')})`;
 }
 
 const MLP_EXPANDED_VECTOR_BAND_COUNT = Math.ceil((D_MODEL * 4) / PRISM_DIMENSIONS_PER_UNIT);
@@ -107,6 +136,7 @@ describe('buildMlpDetailSceneModel', () => {
             role: 'projection-source-xln'
         });
         expect(inputNode?.metadata?.caption?.position).toBe('bottom');
+        expect(inputNode?.metadata?.caption?.labelScale).toBe(0.9);
         expect(inputNode?.metadata?.compactRows?.rowGap).toBe(0);
         expect(inputNode?.metadata?.compactRows?.paddingY).toBe(0);
         expect(inputNode?.rowItems).toHaveLength(2);
@@ -130,6 +160,7 @@ describe('buildMlpDetailSceneModel', () => {
             rows: 1,
             cols: D_MODEL * 4
         });
+        expect(biasNode?.metadata?.caption?.labelScale).toBeGreaterThan(0);
         expect(biasNode?.metadata?.caption?.dimensionsText).toBe('(1, 3072)');
         expect(biasNode?.rowItems).toHaveLength(1);
         expect(biasNode?.rowItems?.[0]?.semantic).toMatchObject({
@@ -216,6 +247,7 @@ describe('buildMlpDetailSceneModel', () => {
             rows: 1,
             cols: D_MODEL
         });
+        expect(downBiasNode?.metadata?.caption?.labelScale).toBeGreaterThan(0);
         expect(downBiasNode?.metadata?.caption?.dimensionsText).toBe('(1, 768)');
         expect(downBiasNode?.rowItems?.[0]?.semantic).toMatchObject({
             componentKind: 'mlp',
@@ -464,6 +496,20 @@ describe('buildMlpDetailSceneModel', () => {
         expect(outputNode?.rowItems?.[0]?.rawValues).toEqual(upValues);
         expect(activationNode?.rowItems?.[0]?.rawValues).toEqual(activationValues);
         expect(downOutputNode?.rowItems?.[0]?.rawValues).toEqual(downValues);
+    });
+
+    it('colors MLP bias vectors from sampled bias values in the 2D detail scene', () => {
+        const scene = buildScene();
+        const nodes = flattenSceneNodes(scene);
+        const upBiasNode = nodes.find((node) => node?.role === 'mlp-up-bias') || null;
+        const downBiasNode = nodes.find((node) => node?.role === 'mlp-down-bias') || null;
+        const upBiasValues = upBiasNode?.rowItems?.[0]?.rawValues || [];
+        const downBiasValues = downBiasNode?.rowItems?.[0]?.rawValues || [];
+
+        expect(upBiasValues.length).toBeGreaterThan(0);
+        expect(downBiasValues.length).toBeGreaterThan(0);
+        expect(upBiasNode?.rowItems?.[0]?.gradientCss).toBe(buildExpectedMlpBiasGradientCss(upBiasValues));
+        expect(downBiasNode?.rowItems?.[0]?.gradientCss).toBe(buildExpectedMlpBiasGradientCss(downBiasValues));
     });
 
     it('reuses the detail-scene row hover behavior for ln2 x_ln rows', () => {

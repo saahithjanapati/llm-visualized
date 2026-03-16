@@ -618,6 +618,16 @@ export function createTransformerView2dDetailView(panelEl, {
         return requestSelectionOpen(selection);
     }
 
+    function isCanvasChipSelection(selection = null) {
+        const lower = String(selection?.label || '').trim().toLowerCase();
+        return lower.startsWith('token:') || lower.startsWith('position:');
+    }
+
+    function resolveCanvasSemanticSelection(hit = null) {
+        const selection = buildSemanticNodeHoverPayload(hit);
+        return isCanvasChipSelection(selection) ? selection : null;
+    }
+
     function setSelectionSidebarLine(element, {
         html = '',
         className = ''
@@ -2112,7 +2122,11 @@ export function createTransformerView2dDetailView(panelEl, {
             layerNormDetailTarget: state.layerNormDetailTarget,
             kvCacheState: {
                 kvCacheModeEnabled: !!appState.kvCacheModeEnabled,
-                kvCachePrefillActive: !!appState.kvCachePrefillActive
+                kvCachePrefillActive: !!appState.kvCachePrefillActive,
+                kvCacheDecodeActive: !!(appState.kvCacheModeEnabled && !appState.kvCachePrefillActive),
+                kvCachePassIndex: Number.isFinite(appState.kvCachePassIndex)
+                    ? Math.max(0, Math.floor(appState.kvCachePassIndex))
+                    : 0
             }
         });
         const activeDetailScene = resolveActiveDetailScene(state.scene, {
@@ -2542,12 +2556,14 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function updateCanvasCursor(entry = null) {
         if (!canvas) return;
+        const semanticSelection = entry ? resolveCanvasSemanticSelection({ entry }) : null;
         canvas.style.cursor = (
             isMhsaHeadOverviewEntry(entry)
             || isConcatOverviewEntry(entry)
             || isOutputProjectionOverviewEntry(entry)
             || isMlpOverviewEntry(entry)
             || isLayerNormOverviewEntry(entry)
+            || !!semanticSelection
         ) ? 'pointer' : '';
     }
 
@@ -3047,6 +3063,10 @@ export function createTransformerView2dDetailView(panelEl, {
             const residualSelection = buildResidualRowHoverPayload(clickedHit?.rowHit, state.activationSource);
             resetOverviewSelectionArm();
             if (residualSelection && requestSelectionOpen(residualSelection)) {
+                return;
+            }
+            const semanticSelection = resolveCanvasSemanticSelection(clickedHit);
+            if (semanticSelection && requestSelectionOpen(semanticSelection)) {
                 return;
             }
             onSceneNodeClick(clickedEntry);

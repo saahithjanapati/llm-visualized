@@ -138,6 +138,60 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.activationData?.cachedKv).toBe(true);
     });
 
+    it('preserves token-chip canvas selections so the token sidebar can open in 2D mode', () => {
+        const panel = createPanelContext(new THREE.Scene());
+        const selection = {
+            label: 'Token: Gamma',
+            info: {
+                tokenIndex: 2,
+                tokenLabel: 'Gamma',
+                activationData: {
+                    label: 'Token: Gamma',
+                    stage: 'embedding.token',
+                    tokenIndex: 2,
+                    tokenLabel: 'Gamma',
+                    positionIndex: 3
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Token: Gamma');
+        expect(resolved?.kind).toBe('label');
+        expect(resolved?.info?.tokenIndex).toBe(2);
+        expect(resolved?.info?.tokenLabel).toBe('Gamma');
+        expect(resolved?.info?.activationData?.stage).toBe('embedding.token');
+    });
+
+    it('preserves position-chip canvas selections with associated token context', () => {
+        const panel = createPanelContext(new THREE.Scene());
+        const selection = {
+            label: 'Position: 3',
+            info: {
+                tokenIndex: 2,
+                tokenLabel: 'Gamma',
+                positionIndex: 3,
+                activationData: {
+                    label: 'Position: 3',
+                    stage: 'embedding.position',
+                    tokenIndex: 2,
+                    tokenLabel: 'Gamma',
+                    positionIndex: 3
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Position: 3');
+        expect(resolved?.kind).toBe('label');
+        expect(resolved?.info?.tokenIndex).toBe(2);
+        expect(resolved?.info?.tokenLabel).toBe('Gamma');
+        expect(resolved?.info?.positionIndex).toBe(3);
+        expect(resolved?.info?.activationData?.stage).toBe('embedding.position');
+    });
+
     it('recovers live layer norm parameter nodes by label when strict stage lookup misses', () => {
         const scene = new THREE.Scene();
         const layerNormScaleNode = createSceneNode('LayerNorm 1 Scale', {

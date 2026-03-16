@@ -564,8 +564,10 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(prefillFixtures.vCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
             expect(prefillFixtures.kCacheNode?.label?.tex).toContain('\\mathrm{cache}');
             expect(prefillFixtures.vCacheNode?.label?.tex).toContain('\\mathrm{cache}');
-            expect(prefillFixtures.kCacheConnectorNode?.target?.anchor).toBe('right');
-            expect(prefillFixtures.vCacheConnectorNode?.target?.anchor).toBe('right');
+            expect(prefillFixtures.kCacheConnectorNode?.target?.anchor).toBe('left');
+            expect(prefillFixtures.vCacheConnectorNode?.target?.anchor).toBe('left');
+            expect(prefillFixtures.kCacheConnectorNode?.metadata?.sourceAnchorMode).toBe('caption-bottom');
+            expect(prefillFixtures.vCacheConnectorNode?.metadata?.sourceAnchorMode).toBe('caption-bottom');
 
             expect(decodeFixtures.kCacheNode).toBeNull();
             expect(decodeFixtures.vCacheNode).toBeNull();
@@ -635,15 +637,15 @@ describe('transformerView2dResidualCaptionOverlay', () => {
                 Math.max(
                     Number(outputEntry?.contentBounds?.width) || 0,
                     Number(cacheEntry?.contentBounds?.width) || 0
-                ) + 12
+                ) + 36
             );
 
             expect(Math.abs(resolveCenterX(kOutputEntry) - resolveCenterX(kCacheEntry)))
                 .toBeLessThanOrEqual(resolveMaxHorizontalOffset(kOutputEntry, kCacheEntry));
             expect(Math.abs(resolveCenterX(vOutputEntry) - resolveCenterX(vCacheEntry)))
                 .toBeLessThanOrEqual(resolveMaxHorizontalOffset(vOutputEntry, vCacheEntry));
-            expect(resolveCenterX(kCacheEntry)).toBeLessThan(resolveCenterX(kOutputEntry));
-            expect(resolveCenterX(vCacheEntry)).toBeLessThan(resolveCenterX(vOutputEntry));
+            expect(resolveCenterX(kCacheEntry)).toBeGreaterThan(resolveCenterX(kOutputEntry));
+            expect(resolveCenterX(vCacheEntry)).toBeGreaterThan(resolveCenterX(vOutputEntry));
         } finally {
             fixtures.cleanup();
         }
@@ -954,7 +956,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
-    it('applies larger overlay label scaling to layer norm gamma and beta captions', () => {
+    it('applies targeted overlay label scaling to layer norm gamma and beta captions', () => {
         const fixtures = buildLayerNormDetailFixtures();
         const {
             scene,
@@ -996,8 +998,8 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             );
 
             expect(inputLabelRoleScale).toBe(1);
-            expect(scaleLabelRoleScale).toBeGreaterThan(2.5);
-            expect(shiftLabelRoleScale).toBeGreaterThan(2.5);
+            expect(scaleLabelRoleScale).toBeGreaterThan(1);
+            expect(shiftLabelRoleScale).toBeGreaterThan(1);
             expect(scaleLabelRoleScale).toBe(shiftLabelRoleScale);
         } finally {
             cleanup();

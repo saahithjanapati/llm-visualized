@@ -1,4 +1,8 @@
-import { mapValueToColor } from '../../utils/colors.js';
+import {
+    buildHueRangeOptions,
+    mapValueToColor,
+    mapValueToHueRange
+} from '../../utils/colors.js';
 import { PRISM_DIMENSIONS_PER_UNIT } from '../../utils/constants.js';
 import {
     D_MODEL,
@@ -46,6 +50,7 @@ const BASE_VECTOR_ROW_GAP = 0;
 const BASE_VECTOR_PADDING_Y = 0;
 const BASE_VECTOR_PADDING_X = 0;
 const INPUT_CAPTION_LABEL_SCALE = 0.9;
+const MLP_BIAS_CAPTION_LABEL_SCALE = 1.32;
 const MLP_UP_STAGE_INLINE_GAP = 12;
 const MLP_UP_STAGE_INLINE_GAP_SMALL = 10;
 const MLP_UP_EQUATION_GAP = 12;
@@ -128,47 +133,34 @@ function colorToCss(color) {
     return color?.isColor ? `#${color.getHexString()}` : 'transparent';
 }
 
-function hexToRgb(hexValue = 0xFFFFFF) {
-    const safe = Number.isFinite(hexValue)
-        ? Math.max(0, Math.min(0xFFFFFF, Math.floor(hexValue)))
-        : 0xFFFFFF;
-    return [
-        (safe >> 16) & 0xFF,
-        (safe >> 8) & 0xFF,
-        safe & 0xFF
-    ];
-}
-
-function hexToCss(hexValue = 0xFFFFFF, alpha = 1) {
-    const [r, g, b] = hexToRgb(hexValue);
-    if (alpha >= 1) {
-        return `rgb(${r}, ${g}, ${b})`;
-    }
-    return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha)).toFixed(3)})`;
-}
-
 function hexToKatexColor(hexValue = 0xFFFFFF) {
     return `#${Math.max(0, Math.min(0xFFFFFF, Math.floor(
         Number.isFinite(hexValue) ? hexValue : 0xFFFFFF
     ))).toString(16).padStart(6, '0')}`;
 }
 
-function mixHexValues(fromHex = 0xFFFFFF, toHex = 0xFFFFFF, amount = 0.5) {
-    const t = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0.5));
-    const [fromR, fromG, fromB] = hexToRgb(fromHex);
-    const [toR, toG, toB] = hexToRgb(toHex);
-    const mix = (from, to) => Math.round(from + ((to - from) * t));
-    return (mix(fromR, toR) << 16) | (mix(fromG, toG) << 8) | mix(fromB, toB);
-}
-
-function buildMlpBiasGradientCss() {
-    return `linear-gradient(138deg, ${
-        hexToCss(mixHexValues(FINAL_MLP_COLOR, 0xFFFFFF, 0.28), 0.82)
-    } 0%, ${
-        hexToCss(FINAL_MLP_COLOR, 0.98)
-    } 56%, ${
-        hexToCss(mixHexValues(FINAL_MLP_COLOR, 0x000000, 0.06), 0.84)
-    } 100%)`;
+function buildMlpBiasGradientCss(values = [], direction = '90deg') {
+    const safeValues = cleanNumberArray(values);
+    if (!safeValues.length) return 'none';
+    const maxAbsValue = safeValues.reduce((maxValue, value) => (
+        Number.isFinite(value) ? Math.max(maxValue, Math.abs(value)) : maxValue
+    ), 0);
+    const clampRange = maxAbsValue > 1e-6 ? maxAbsValue : 1;
+    const rangeOptions = buildHueRangeOptions(FINAL_MLP_COLOR, {
+        hueSpread: 0.1,
+        valueMin: -clampRange,
+        valueMax: clampRange,
+        minLightness: 0.36,
+        maxLightness: 0.72
+    });
+    const stops = safeValues.map((value, index) => {
+        const ratio = safeValues.length > 1 ? index / (safeValues.length - 1) : 0;
+        return `${colorToCss(mapValueToHueRange(value, rangeOptions))} ${(ratio * 100).toFixed(4)}%`;
+    });
+    if (stops.length === 1) {
+        return `linear-gradient(${direction}, ${stops[0].replace(' 0.0000%', ' 0%')}, ${stops[0].replace(' 0.0000%', ' 100%')})`;
+    }
+    return `linear-gradient(${direction}, ${stops.join(', ')})`;
 }
 
 function buildGradientCss(values = []) {
@@ -356,7 +348,7 @@ function buildMlpBiasRowItems(layerIndex = null, {
         label: '',
         semantic,
         rawValues: values,
-        gradientCss: buildMlpBiasGradientCss(),
+        gradientCss: buildMlpBiasGradientCss(values),
         title: safeKind === 'down' ? 'b_down' : 'b_up'
     }];
 }
@@ -659,7 +651,7 @@ export function buildMlpDetailSceneModel({
         compactWidth: mlpExpandedMetrics.compactWidth,
         rowHeight: isSmallScreen ? MLP_BIAS_ROW_HEIGHT_SMALL : MLP_BIAS_ROW_HEIGHT,
         captionPosition: 'bottom',
-        captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
+        captionLabelScale: MLP_BIAS_CAPTION_LABEL_SCALE,
         captionPreferStandardSizing: true,
         visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
         stripMetadata: createView2dVectorStripMetadata({
@@ -834,7 +826,7 @@ export function buildMlpDetailSceneModel({
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: isSmallScreen ? MLP_BIAS_ROW_HEIGHT_SMALL : MLP_BIAS_ROW_HEIGHT,
         captionPosition: 'bottom',
-        captionLabelScale: INPUT_CAPTION_LABEL_SCALE,
+        captionLabelScale: MLP_BIAS_CAPTION_LABEL_SCALE,
         captionPreferStandardSizing: true,
         visualStyleKey: VIEW2D_STYLE_KEYS.MLP,
         stripMetadata: createView2dVectorStripMetadata({

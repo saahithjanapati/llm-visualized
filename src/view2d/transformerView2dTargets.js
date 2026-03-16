@@ -240,6 +240,21 @@ function resolveSemanticPositionIndex(hit = null, tokenIndex = null) {
     return Number.isFinite(tokenIndex) ? tokenIndex + 1 : null;
 }
 
+function buildSemanticTokenChipLabel(tokenLabel = '', tokenIndex = null) {
+    const safeTokenLabel = typeof tokenLabel === 'string' ? tokenLabel.trim() : '';
+    const fallbackLabel = Number.isFinite(tokenIndex)
+        ? `Token ${Math.floor(tokenIndex) + 1}`
+        : '';
+    const detailLabel = safeTokenLabel || fallbackLabel;
+    return detailLabel ? `Token: ${detailLabel}` : 'Token';
+}
+
+function buildSemanticPositionChipLabel(positionIndex = null) {
+    return Number.isFinite(positionIndex)
+        ? `Position: ${Math.max(1, Math.floor(positionIndex))}`
+        : 'Position';
+}
+
 export function buildSemanticNodeHoverPayload(hit = null) {
     const entry = hit?.entry || null;
     const semantic = entry?.semantic || hit?.node?.semantic || null;
@@ -288,14 +303,15 @@ export function buildSemanticNodeHoverPayload(hit = null) {
         const tokenIndex = normalizeOptionalIndex(semantic.tokenIndex);
         const tokenLabel = resolveSemanticTokenLabel(hit, tokenIndex);
         const positionIndex = resolveSemanticPositionIndex(hit, tokenIndex);
+        const label = buildSemanticTokenChipLabel(tokenLabel, tokenIndex);
         return {
-            label: 'Input Token',
+            label,
             info: {
                 ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
                 ...(tokenLabel.length ? { tokenLabel } : {}),
                 ...(Number.isFinite(positionIndex) ? { positionIndex } : {}),
                 activationData: {
-                    label: 'Input Token',
+                    label,
                     stage: 'embedding.token',
                     ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
                     ...(tokenLabel.length ? { tokenLabel } : {}),
@@ -313,14 +329,15 @@ export function buildSemanticNodeHoverPayload(hit = null) {
         const tokenIndex = normalizeOptionalIndex(semantic.tokenIndex);
         const tokenLabel = resolveSemanticTokenLabel(hit, tokenIndex);
         const positionIndex = resolveSemanticPositionIndex(hit, tokenIndex);
+        const label = buildSemanticPositionChipLabel(positionIndex);
         return {
-            label: 'Input Position',
+            label,
             info: {
                 ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
                 ...(tokenLabel.length ? { tokenLabel } : {}),
                 ...(Number.isFinite(positionIndex) ? { positionIndex } : {}),
                 activationData: {
-                    label: 'Input Position',
+                    label,
                     stage: 'embedding.position',
                     ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
                     ...(tokenLabel.length ? { tokenLabel } : {}),
