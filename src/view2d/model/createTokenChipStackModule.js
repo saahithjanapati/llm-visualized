@@ -138,6 +138,9 @@ export function buildTokenChipStackModule({
         const tokenIndex = Number.isFinite(tokenRef?.tokenIndex)
             ? Math.floor(tokenRef.tokenIndex)
             : null;
+        const tokenId = Number.isFinite(tokenRef?.tokenId)
+            ? Math.floor(tokenRef.tokenId)
+            : null;
         const positionIndex = Number.isFinite(tokenRef?.positionIndex)
             ? Math.max(1, Math.floor(tokenRef.positionIndex))
             : (Number.isFinite(tokenIndex) ? tokenIndex + 1 : null);
@@ -224,7 +227,10 @@ export function buildTokenChipStackModule({
             ? NEUTRAL_CHIP_COLORS
             : resolveTokenChipColors({
                 tokenIndex,
-                tokenLabel
+                tokenId,
+                tokenLabel,
+                ...(Number.isFinite(tokenRef?.colorKey) ? { colorKey: Math.floor(tokenRef.colorKey) } : {}),
+                ...(Number.isFinite(tokenRef?.seed) ? { seed: Math.floor(tokenRef.seed) } : {})
             }, Number.isFinite(tokenIndex) ? tokenIndex : index);
         const chipSemantic = mergeSemantic(semantic, {
             role: chipRole,

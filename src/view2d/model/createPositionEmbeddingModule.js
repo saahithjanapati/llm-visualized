@@ -105,7 +105,7 @@ export function buildVocabularyEmbeddingModule({
 
 export function buildUnembeddingModule({
     semantic = {},
-    title = 'Unembedding',
+    title = 'Vocabulary Unembedding',
     cardWidth = 196,
     cardHeight = 144
 } = {}) {
@@ -113,8 +113,8 @@ export function buildUnembeddingModule({
         semantic,
         title,
         role: 'unembedding',
-        labelText: 'W_U',
-        labelTex: 'W_U',
+        labelText: 'Vocabulary Unembedding Matrix',
+        labelTex: 'Vocabulary Unembedding Matrix',
         styleKey: VIEW2D_STYLE_KEYS.EMBEDDING_TOKEN_STREAM,
         cardWidth,
         cardHeight,

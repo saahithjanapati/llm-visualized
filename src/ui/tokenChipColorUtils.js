@@ -133,6 +133,10 @@ export function setActivePromptTokenChipEntries(entries = []) {
 }
 
 export function resolveTokenChipColorKey(entry = null, fallbackIndex = 0, { lookup = null } = {}) {
+    const explicitColorKey = Number(entry?.colorKey ?? entry?.color_key);
+    if (Number.isFinite(explicitColorKey)) {
+        return Math.floor(explicitColorKey);
+    }
     const effectiveLookup = lookup instanceof Map ? lookup : activePromptTokenChipLookup;
     const normalized = normalizeTokenChipEntry(entry);
     if (effectiveLookup && normalized) {

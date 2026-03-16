@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { CaptureActivationSource } from '../../data/CaptureActivationSource.js';
 import { D_MODEL } from '../../ui/selectionPanelConstants.js';
+import {
+    buildPromptTokenChipEntries,
+    resolvePromptTokenChipColorState,
+    resolveTokenChipColors
+} from '../../ui/tokenChipColorUtils.js';
 import { NUM_HEAD_SETS_LAYER } from '../../utils/constants.js';
 import { buildSceneLayout } from '../layout/buildSceneLayout.js';
 import { flattenSceneNodes, VIEW2D_ANCHOR_SIDES, VIEW2D_NODE_KINDS } from '../schema/sceneTypes.js';
@@ -178,6 +183,12 @@ describe('buildTransformerSceneModel', () => {
             && node?.semantic?.componentKind === 'logits'
             && node?.semantic?.stage === 'unembedding'
         ));
+        const unembeddingTitleNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && node?.role === 'module-title'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'unembedding'
+        ));
         const lastResidualAddNode = nodes.find((node) => (
             node?.kind === VIEW2D_NODE_KINDS.MATRIX
             && node?.role === 'add-circle'
@@ -188,6 +199,7 @@ describe('buildTransformerSceneModel', () => {
         expect(outgoingResidualNode).toBeTruthy();
         expect(finalLayerNormNode).toBeTruthy();
         expect(unembeddingNode).toBeTruthy();
+        expect(unembeddingTitleNode?.text).toBe('Vocabulary Unembedding Matrix');
         expect(lastResidualAddNode).toBeTruthy();
 
         const connectors = nodes.filter((node) => node?.kind === VIEW2D_NODE_KINDS.CONNECTOR);
@@ -441,6 +453,44 @@ describe('buildTransformerSceneModel', () => {
         ).toBeGreaterThan(
             unembeddingEntry.anchors[VIEW2D_ANCHOR_SIDES.RIGHT].x
         );
+    });
+
+    it('matches chosen-token chip colors to the visible token-strip color context for generated tokens', () => {
+        const activationSource = createMockActivationSource({
+            promptTokenCount: 6,
+            completionTokenCount: 1
+        });
+        const tokenIndices = [4, 5, 6];
+        const tokenLabels = ['Token E', 'Token F', 'Token G'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            layerCount: 1
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const chosenTokenChipNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'chosen-token-chip'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'output'
+            && node?.semantic?.tokenIndex === 6
+        ));
+
+        const promptEntries = buildPromptTokenChipEntries({
+            tokenLabels,
+            tokenIndices,
+            tokenIds: tokenIndices.map((tokenIndex) => activationSource.getTokenId(tokenIndex))
+        });
+        const promptColorState = resolvePromptTokenChipColorState(promptEntries);
+        const expectedAccent = resolveTokenChipColors({
+            tokenIndex: 6,
+            tokenId: activationSource.getTokenId(6),
+            tokenLabel: 'Token G'
+        }, 2, { lookup: promptColorState.lookup }).border;
+
+        expect(chosenTokenChipNode?.visual?.accent).toBe(expectedAccent);
     });
 
     it('scales embedding and unembedding stream heights plus the vocab-position gap for denser token windows', () => {

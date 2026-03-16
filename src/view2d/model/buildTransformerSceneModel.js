@@ -49,7 +49,16 @@ import {
 } from './createPositionEmbeddingModule.js';
 import { buildTokenChipStackModule } from './createTokenChipStackModule.js';
 import { resolveEmbeddingStreamLayoutMetrics } from './embeddingStreamLayoutMetrics.js';
-import { resolvePreferredTokenLabel } from '../../utils/tokenLabelResolution.js';
+import {
+    isPlaceholderTokenLabel,
+    resolvePreferredTokenLabel
+} from '../../utils/tokenLabelResolution.js';
+import { getIncompleteUtf8TokenDisplay } from '../../utils/tokenEncodingNotes.js';
+import {
+    buildPromptTokenChipEntries,
+    resolvePromptTokenChipColorState
+} from '../../ui/tokenChipColorUtils.js';
+import { formatTokenLabel } from '../../app/gpt-tower/tokenLabels.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
 const SUMMARY_MODEL_COLS = 18;
@@ -261,6 +270,20 @@ function resolveVisibleTokenIndices(activationSource = null, tokenIndices = null
 }
 
 function resolveTokenLabel(activationSource = null, tokenIndex = 0, fallbackLabel = null, fallbackIndex = 0) {
+    const rawFallbackLabel = typeof fallbackLabel === 'string' ? fallbackLabel : '';
+    const trimmedFallbackLabel = rawFallbackLabel.trim();
+    if (trimmedFallbackLabel.length && !isPlaceholderTokenLabel(trimmedFallbackLabel)) {
+        return formatTokenLabel(rawFallbackLabel);
+    }
+    if (rawFallbackLabel.length && !trimmedFallbackLabel.length) {
+        return formatTokenLabel(rawFallbackLabel);
+    }
+
+    const tokenId = resolveTokenId(activationSource, tokenIndex);
+    const incompleteTokenDisplay = getIncompleteUtf8TokenDisplay(tokenId);
+    if (incompleteTokenDisplay) {
+        return incompleteTokenDisplay;
+    }
     const resolvedLabel = resolvePreferredTokenLabel({
         tokenLabel: fallbackLabel,
         tokenIndex,
@@ -270,10 +293,19 @@ function resolveTokenLabel(activationSource = null, tokenIndex = 0, fallbackLabe
     return `Token ${fallbackIndex + 1}`;
 }
 
+function resolveTokenId(activationSource = null, tokenIndex = null) {
+    if (!Number.isFinite(tokenIndex) || typeof activationSource?.getTokenId !== 'function') {
+        return null;
+    }
+    const resolvedTokenId = activationSource.getTokenId(Math.floor(tokenIndex));
+    return Number.isFinite(resolvedTokenId) ? Math.floor(resolvedTokenId) : null;
+}
+
 function resolveVisibleTokenRefs(activationSource = null, tokenIndices = null, tokenLabels = null) {
     return resolveVisibleTokenIndices(activationSource, tokenIndices).map((tokenIndex, rowIndex) => ({
         rowIndex,
         tokenIndex,
+        tokenId: resolveTokenId(activationSource, tokenIndex),
         tokenLabel: resolveTokenLabel(
             activationSource,
             tokenIndex,
@@ -393,6 +425,7 @@ function resolveUnembeddingOutputTokenRefs(tokenRefs = [], activationSource = nu
         return {
             rowIndex,
             tokenIndex: nextTokenIndex,
+            tokenId: resolveTokenId(activationSource, nextTokenIndex),
             positionIndex: nextTokenIndex + 1,
             tokenLabel: resolveTokenLabel(
                 activationSource,
@@ -401,6 +434,97 @@ function resolveUnembeddingOutputTokenRefs(tokenRefs = [], activationSource = nu
                 nextTokenIndex
             )
         };
+    });
+}
+
+function tokenChipEntriesMatchByIdentity(left = null, right = null) {
+    const leftTokenIndex = normalizeIndex(left?.tokenIndex);
+    const rightTokenIndex = normalizeIndex(right?.tokenIndex);
+    if (Number.isFinite(leftTokenIndex) && Number.isFinite(rightTokenIndex)) {
+        return leftTokenIndex === rightTokenIndex;
+    }
+
+    const leftTokenId = normalizeIndex(left?.tokenId ?? left?.token_id);
+    const rightTokenId = normalizeIndex(right?.tokenId ?? right?.token_id);
+    if (Number.isFinite(leftTokenId) && Number.isFinite(rightTokenId)) {
+        return leftTokenId === rightTokenId;
+    }
+
+    const leftTokenLabel = typeof (left?.tokenLabel ?? left?.token) === 'string'
+        ? String(left.tokenLabel ?? left.token)
+        : '';
+    const rightTokenLabel = typeof (right?.tokenLabel ?? right?.token) === 'string'
+        ? String(right.tokenLabel ?? right.token)
+        : '';
+    return !!leftTokenLabel && leftTokenLabel === rightTokenLabel;
+}
+
+function resolvePromptContextColorKey(colorState = null, targetEntry = null) {
+    const entries = Array.isArray(colorState?.entries) ? colorState.entries : [];
+    const colorKeys = Array.isArray(colorState?.colorKeys) ? colorState.colorKeys : [];
+    const matchIndex = entries.findIndex((entry) => tokenChipEntriesMatchByIdentity(entry, targetEntry));
+    return matchIndex >= 0 && Number.isFinite(colorKeys[matchIndex])
+        ? colorKeys[matchIndex]
+        : null;
+}
+
+function resolveChosenTokenChipRefs(tokenRefs = [], activationSource = null) {
+    const chosenTokenRefs = resolveUnembeddingOutputTokenRefs(tokenRefs, activationSource);
+    const visibleTokenRefs = Array.isArray(tokenRefs) ? tokenRefs.filter(Boolean) : [];
+    if (!chosenTokenRefs.length || !visibleTokenRefs.length) {
+        return chosenTokenRefs;
+    }
+
+    const promptEntries = buildPromptTokenChipEntries({
+        tokenLabels: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenLabel || ''),
+        tokenIndices: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenIndex ?? null),
+        tokenIds: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenId ?? null)
+    });
+    const promptColorState = resolvePromptTokenChipColorState(promptEntries);
+
+    const lastVisibleTokenRef = visibleTokenRefs[visibleTokenRefs.length - 1] || null;
+    const nextVisibleContinuationRef = (
+        Number.isFinite(lastVisibleTokenRef?.tokenIndex)
+            ? chosenTokenRefs.find((tokenRef) => (
+                tokenRef?.displayMode !== 'text'
+                && normalizeIndex(tokenRef?.tokenIndex) === Math.floor(lastVisibleTokenRef.tokenIndex) + 1
+            )) || null
+            : null
+    );
+    const promptWithGeneratedEntries = nextVisibleContinuationRef
+        ? buildPromptTokenChipEntries({
+            tokenLabels: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenLabel || ''),
+            tokenIndices: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenIndex ?? null),
+            tokenIds: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenId ?? null),
+            generatedToken: {
+                tokenLabel: nextVisibleContinuationRef.tokenLabel,
+                tokenIndex: nextVisibleContinuationRef.tokenIndex,
+                tokenId: nextVisibleContinuationRef.tokenId
+            }
+        })
+        : [];
+    const promptWithGeneratedColorState = nextVisibleContinuationRef
+        ? resolvePromptTokenChipColorState(promptWithGeneratedEntries)
+        : null;
+
+    return chosenTokenRefs.map((tokenRef) => {
+        if (tokenRef?.displayMode === 'text') {
+            return tokenRef;
+        }
+
+        const colorContextEntry = {
+            tokenIndex: tokenRef?.tokenIndex,
+            tokenId: tokenRef?.tokenId,
+            tokenLabel: tokenRef?.tokenLabel
+        };
+        const colorKey = resolvePromptContextColorKey(promptColorState, colorContextEntry)
+            ?? resolvePromptContextColorKey(promptWithGeneratedColorState, colorContextEntry);
+        return Number.isFinite(colorKey)
+            ? {
+                ...tokenRef,
+                colorKey
+            }
+            : tokenRef;
     });
 }
 
@@ -1800,7 +1924,7 @@ function buildFinalOutputGroup({
             componentKind: 'logits',
             stage: 'output'
         },
-        tokenRefs: resolveUnembeddingOutputTokenRefs(tokenRefs, activationSource),
+        tokenRefs: resolveChosenTokenChipRefs(tokenRefs, activationSource),
         stackRole: 'chosen-token-chip-stack',
         chipRole: 'chosen-token-chip',
         chipLabelRole: 'chosen-token-chip-label',
@@ -1953,7 +2077,7 @@ function buildLogitsModule({
         ? createMatrixNode({
             role: 'unembedding',
             semantic: buildSemantic(baseSemantic, { stage: 'unembedding', role: 'unembedding' }),
-            label: buildLabel('W_U', 'W_U'),
+            label: buildLabel('Vocabulary Unembedding Matrix', 'Vocabulary Unembedding Matrix'),
             dimensions: {
                 rows: D_MODEL,
                 cols: VOCAB_SIZE
