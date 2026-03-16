@@ -21,7 +21,9 @@ function toColorHex(value = 0) {
 }
 
 function isLayerNormScaleStage(stageLower = '', kind = '') {
-    return stageLower === `${kind}.scale` || stageLower === `${kind}.param.scale`;
+    return stageLower === `${kind}.scale`
+        || stageLower === `${kind}.product`
+        || stageLower === `${kind}.param.scale`;
 }
 
 function isLayerNormOutputVectorStage(stageLower = '', kind = '') {

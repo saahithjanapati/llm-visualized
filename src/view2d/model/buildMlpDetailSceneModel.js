@@ -260,6 +260,18 @@ function resolveMlpGeluStageGap(extraRows = 0, isSmallScreen = false) {
     return baseGap + Math.min(maxExtra, safeExtraRows * perExtraRow);
 }
 
+function resolveActivationSourceVectorLength(activationSource = null, fallbackLength = D_MODEL) {
+    const baseLength = (
+        activationSource && typeof activationSource.getBaseVectorLength === 'function'
+            ? activationSource.getBaseVectorLength()
+            : null
+    );
+    if (Number.isFinite(baseLength) && baseLength > 0) {
+        return Math.max(1, Math.floor(baseLength));
+    }
+    return Math.max(1, Math.floor(fallbackLength || D_MODEL));
+}
+
 function buildResidualRowItems(tokenRefs = [], {
     layerIndex = null,
     measureCols = INPUT_MEASURE_COLS,
@@ -445,12 +457,14 @@ export function buildMlpDetailSceneModel({
         ...mlpExpandedMetrics,
         measureCols: resolvePrismAlignedMeasureCols(MLP_INTERMEDIATE_SIZE)
     };
+    const sourceVectorLength = resolveActivationSourceVectorLength(activationSource, D_MODEL);
+    const expandedSourceVectorLength = Math.max(1, sourceVectorLength * 4);
     const residualRows = buildResidualRowItems(tokenRefs, {
         layerIndex,
         measureCols: vectorMetrics.measureCols,
         getVector: (tokenRef) => (
             typeof activationSource?.getLayerLn2 === 'function'
-                ? activationSource.getLayerLn2(layerIndex, 'shift', tokenRef.tokenIndex, D_MODEL)
+                ? activationSource.getLayerLn2(layerIndex, 'shift', tokenRef.tokenIndex, sourceVectorLength)
                 : null
         )
     });
@@ -459,7 +473,7 @@ export function buildMlpDetailSceneModel({
         measureCols: mlpExpandedStripMetrics.measureCols,
         getVector: (tokenRef) => (
             typeof activationSource?.getMlpUp === 'function'
-                ? activationSource.getMlpUp(layerIndex, tokenRef.tokenIndex, MLP_INTERMEDIATE_SIZE)
+                ? activationSource.getMlpUp(layerIndex, tokenRef.tokenIndex, expandedSourceVectorLength)
                 : null
         )
     });
@@ -469,7 +483,7 @@ export function buildMlpDetailSceneModel({
         rowRole: 'mlp-up-copy-row',
         getVector: (tokenRef) => (
             typeof activationSource?.getMlpUp === 'function'
-                ? activationSource.getMlpUp(layerIndex, tokenRef.tokenIndex, MLP_INTERMEDIATE_SIZE)
+                ? activationSource.getMlpUp(layerIndex, tokenRef.tokenIndex, expandedSourceVectorLength)
                 : null
         )
     });
@@ -480,7 +494,7 @@ export function buildMlpDetailSceneModel({
         rowRole: 'mlp-activation-row',
         getVector: (tokenRef) => (
             typeof activationSource?.getMlpActivation === 'function'
-                ? activationSource.getMlpActivation(layerIndex, tokenRef.tokenIndex, MLP_INTERMEDIATE_SIZE)
+                ? activationSource.getMlpActivation(layerIndex, tokenRef.tokenIndex, expandedSourceVectorLength)
                 : null
         )
     });
@@ -491,7 +505,7 @@ export function buildMlpDetailSceneModel({
         rowRole: 'mlp-activation-copy-row',
         getVector: (tokenRef) => (
             typeof activationSource?.getMlpActivation === 'function'
-                ? activationSource.getMlpActivation(layerIndex, tokenRef.tokenIndex, MLP_INTERMEDIATE_SIZE)
+                ? activationSource.getMlpActivation(layerIndex, tokenRef.tokenIndex, expandedSourceVectorLength)
                 : null
         )
     });
@@ -502,7 +516,7 @@ export function buildMlpDetailSceneModel({
         rowRole: 'mlp-down-row',
         getVector: (tokenRef) => (
             typeof activationSource?.getMlpDown === 'function'
-                ? activationSource.getMlpDown(layerIndex, tokenRef.tokenIndex, D_MODEL)
+                ? activationSource.getMlpDown(layerIndex, tokenRef.tokenIndex, sourceVectorLength)
                 : null
         )
     });

@@ -359,6 +359,211 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.tokenId).toBe(17);
     });
 
+    it('keeps layer norm product-vector selections on activation-source data when only a broad scene mesh exists', () => {
+        const scene = new THREE.Scene();
+        const sharedScaledMesh = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial(),
+            36
+        );
+        sharedScaledMesh.userData = {
+            isVector: true,
+            label: 'LN1 Scaled - source',
+            activationData: {
+                label: 'LN1 Scaled - source',
+                stage: 'ln1.scale',
+                layerIndex: 1,
+                tokenIndex: 2,
+                tokenLabel: 'source'
+            }
+        };
+        scene.add(sharedScaledMesh);
+
+        const panel = createPanelContext(scene);
+        panel.activationSource = {
+            getBaseVectorLength: () => 3,
+            getTokenId: () => 17,
+            getLayerLn1: (_layerIndex, stage) => (
+                stage === 'scale' ? [0.4, 0.5, 0.6] : null
+            )
+        };
+
+        const selection = {
+            label: 'LayerNorm 1 Product Vector',
+            info: {
+                activationData: {
+                    label: 'LayerNorm 1 Product Vector',
+                    stage: 'ln1.product',
+                    sourceStage: 'ln1.scale',
+                    layerIndex: 1,
+                    tokenIndex: 2,
+                    tokenLabel: 'source',
+                    layerNormKind: 'ln1'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('LayerNorm 1 Product Vector');
+        expect(resolved?.object).toBeUndefined();
+        expect(resolved?.hit).toBeUndefined();
+        expect(resolved?.info?.activationData?.stage).toBe('ln1.product');
+        expect(resolved?.info?.activationData?.sourceStage).toBe('ln1.scale');
+        expect(resolved?.info?.activationData?.values).toEqual([0.4, 0.5, 0.6]);
+        expect(resolved?.info?.tokenId).toBe(17);
+    });
+
+    it('keeps layer norm normalized-vector selections on activation-source data when only a broad scene mesh exists', () => {
+        const scene = new THREE.Scene();
+        const sharedNormalizedMesh = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial(),
+            36
+        );
+        sharedNormalizedMesh.userData = {
+            isVector: true,
+            label: 'LN1 Normalized - source',
+            activationData: {
+                label: 'LN1 Normalized - source',
+                stage: 'ln1.norm',
+                layerIndex: 1,
+                tokenIndex: 2,
+                tokenLabel: 'source'
+            }
+        };
+        scene.add(sharedNormalizedMesh);
+
+        const panel = createPanelContext(scene);
+        panel.activationSource = {
+            getBaseVectorLength: () => 3,
+            getTokenId: () => 17,
+            getLayerLn1: (_layerIndex, stage) => (
+                stage === 'norm' ? [0.15, 0.25, 0.35] : null
+            )
+        };
+
+        const selection = {
+            label: 'LayerNorm 1 Normalized Vector',
+            info: {
+                activationData: {
+                    label: 'LayerNorm 1 Normalized Vector',
+                    stage: 'ln1.norm',
+                    sourceStage: 'ln1.norm',
+                    layerIndex: 1,
+                    tokenIndex: 2,
+                    tokenLabel: 'source',
+                    layerNormKind: 'ln1'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Normalized Residual Stream Vector');
+        expect(resolved?.object).toBeUndefined();
+        expect(resolved?.hit).toBeUndefined();
+        expect(resolved?.info?.activationData?.stage).toBe('ln1.norm');
+        expect(resolved?.info?.activationData?.values).toEqual([0.15, 0.25, 0.35]);
+        expect(resolved?.info?.tokenId).toBe(17);
+    });
+
+    it('keeps layer norm output selections on activation-source data when only a broad scene mesh exists', () => {
+        const scene = new THREE.Scene();
+        const sharedOutputMesh = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial(),
+            36
+        );
+        sharedOutputMesh.userData = {
+            isVector: true,
+            label: 'Post-LayerNorm Residual Vector',
+            activationData: {
+                label: 'Post-LayerNorm Residual Vector',
+                stage: 'ln1.output',
+                sourceStage: 'ln1.shift',
+                layerIndex: 1,
+                tokenIndex: 2,
+                tokenLabel: 'source'
+            }
+        };
+        scene.add(sharedOutputMesh);
+
+        const panel = createPanelContext(scene);
+        panel.activationSource = {
+            getBaseVectorLength: () => 3,
+            getTokenId: () => 17,
+            getLayerLn1: (_layerIndex, stage) => (
+                stage === 'shift' ? [0.7, 0.8, 0.9] : null
+            )
+        };
+
+        const selection = {
+            label: 'Post LayerNorm 1 Residual Vector',
+            info: {
+                activationData: {
+                    label: 'Post LayerNorm 1 Residual Vector',
+                    stage: 'ln1.output',
+                    sourceStage: 'ln1.shift',
+                    layerIndex: 1,
+                    tokenIndex: 2,
+                    tokenLabel: 'source',
+                    layerNormKind: 'ln1'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Post LayerNorm 1 Residual Vector');
+        expect(resolved?.object).toBeUndefined();
+        expect(resolved?.hit).toBeUndefined();
+        expect(resolved?.info?.activationData?.stage).toBe('ln1.output');
+        expect(resolved?.info?.activationData?.sourceStage).toBe('ln1.shift');
+        expect(resolved?.info?.activationData?.values).toEqual([0.7, 0.8, 0.9]);
+        expect(resolved?.info?.tokenId).toBe(17);
+    });
+
+    it('keeps layer norm parameter selections off broad scene meshes', () => {
+        const scene = new THREE.Scene();
+        const sharedScaleMesh = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshBasicMaterial(),
+            36
+        );
+        sharedScaleMesh.userData = {
+            isVector: true,
+            label: 'LayerNorm 1 Scale',
+            activationData: {
+                label: 'LayerNorm 1 Scale',
+                stage: 'ln1.param.scale',
+                layerIndex: 1,
+                layerNormKind: 'ln1'
+            }
+        };
+        scene.add(sharedScaleMesh);
+
+        const panel = createPanelContext(scene);
+        const selection = {
+            label: 'LayerNorm 1 Scale',
+            info: {
+                activationData: {
+                    label: 'LayerNorm 1 Scale',
+                    stage: 'ln1.param.scale',
+                    layerIndex: 1,
+                    layerNormKind: 'ln1'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('LayerNorm 1 Scale');
+        expect(resolved?.object).toBeUndefined();
+        expect(resolved?.hit).toBeUndefined();
+        expect(resolved?.info?.activationData?.stage).toBe('ln1.param.scale');
+    });
+
     it('recovers the live MLP-down vector for MLP detail output selections', () => {
         const panel = createPanelContext();
         const downMesh = createSceneNode('MLP Down Projection', {

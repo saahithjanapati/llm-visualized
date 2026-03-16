@@ -11,6 +11,7 @@ import {
 } from './gpt2LayerUtils.js';
 import { BatchedPrismVectorSet } from '../../components/BatchedPrismVectorSet.js';
 import { logRandomColorDebug } from '../../utils/randomColorDebug.js';
+import { LAYER_NORM_PARAM_COLOR_OPTIONS } from '../../utils/layerNormParamColorOptions.js';
 import {
     LN_PARAMS,
     LAYER_NORM_1_Y_POS,
@@ -33,14 +34,7 @@ import { HORIZ_PHASE, LN2_PHASE } from './gpt2LanePhases.js';
 const TMP_WORLD_POS = new THREE.Vector3();
 const LN_ADD_VECTOR_OFFSET_FRACTION = 0.25; // fraction of LN height above centre for bias addition
 export const LN_PARAM_MONOCHROME = {
-    type: 'monochromatic',
-    baseHue: 0,
-    saturation: 0,
-    minLightness: 0.03,
-    maxLightness: 0.88,
-    useData: true,
-    valueMin: -1.8,
-    valueMax: 1.8
+    ...LAYER_NORM_PARAM_COLOR_OPTIONS
 };
 
 function getPrismVectorHeight(vec) {

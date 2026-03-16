@@ -30,6 +30,15 @@ const LAYER_NORM_NORMALIZED_STAGE_KIND = Object.freeze({
     'final_ln.norm': 'final'
 });
 
+const LAYER_NORM_PRODUCT_STAGE_KIND = Object.freeze({
+    'ln1.scale': 'ln1',
+    'ln1.product': 'ln1',
+    'ln2.scale': 'ln2',
+    'ln2.product': 'ln2',
+    'final_ln.scale': 'final',
+    'final_ln.product': 'final'
+});
+
 function matchPostLayerNormResidualLabel(label = '') {
     return String(label || '')
         .toLowerCase()
@@ -80,6 +89,26 @@ export function isLayerNormOutputStage(stage = '') {
 
 export function isLayerNormNormalizedStage(stage = '') {
     return !!LAYER_NORM_NORMALIZED_STAGE_KIND[String(stage || '').toLowerCase()];
+}
+
+export function normalizeLayerNormProductStage(stage = '', {
+    preferLegacy = false
+} = {}) {
+    const stageLower = String(stage || '').toLowerCase();
+    const kind = LAYER_NORM_PRODUCT_STAGE_KIND[stageLower] || null;
+    if (!kind) return '';
+    if (preferLegacy) {
+        return kind === 'final'
+            ? 'final_ln.scale'
+            : `${kind}.scale`;
+    }
+    return kind === 'final'
+        ? 'final_ln.product'
+        : `${kind}.product`;
+}
+
+export function isLayerNormProductStage(stage = '') {
+    return !!normalizeLayerNormProductStage(stage);
 }
 
 export function resolveLayerNormKind({
@@ -197,6 +226,26 @@ export function formatLayerNormParamLabel(kind = null, param = 'scale') {
         return `${formatLayerNormLabel(safeKind)} ${safeParam}`;
     }
     return `LayerNorm ${safeParam}`;
+}
+
+export function formatLayerNormProductVectorLabel(kind = null) {
+    const safeKind = normalizeLayerNormKind(kind);
+    if (safeKind === 'ln1' || safeKind === 'ln2' || safeKind === 'final') {
+        return `${formatLayerNormLabel(safeKind)} Product Vector`;
+    }
+    return 'LayerNorm Product Vector';
+}
+
+export function resolveLayerNormProductVectorLabel({
+    label = '',
+    stage = '',
+    explicitKind = null
+} = {}) {
+    return formatLayerNormProductVectorLabel(resolveLayerNormKind({
+        label,
+        stage,
+        explicitKind
+    }));
 }
 
 export function resolveLayerNormParamSpec({

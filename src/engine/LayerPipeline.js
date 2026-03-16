@@ -46,6 +46,7 @@ import {
     MHA_VALUE_CLAMP_MAX
 } from '../animations/LayerAnimationConstants.js';
 import { buildHueRangeOptions, mapValueToHueRange } from '../utils/colors.js';
+import { LAYER_NORM_PARAM_COLOR_OPTIONS } from '../utils/layerNormParamColorOptions.js';
 import { setGlobalTrailMaxStepDistance, clearTrailsFromScene, refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import { applyLayerNormMaterial } from './layers/gpt2LayerUtils.js';
 import { animatePrismMultiplyTransition } from './layers/gpt2MultiplyTransition.js';
@@ -66,14 +67,7 @@ const COLOR_DARK_GRAY = new THREE.Color(INACTIVE_COMPONENT_COLOR);
 const COLOR_LIGHT_YELLOW = new THREE.Color(0xffffff);
 const COLOR_BRIGHT_YELLOW = new THREE.Color(0xffffff);
 const LN_PARAM_MONOCHROME = {
-    type: 'monochromatic',
-    baseHue: 0,
-    saturation: 0,
-    minLightness: 0.03,
-    maxLightness: 0.88,
-    useData: true,
-    valueMin: -1.8,
-    valueMax: 1.8
+    ...LAYER_NORM_PARAM_COLOR_OPTIONS
 };
 
 const SKIP_SPEED_RAMP_IN_MS = 40;

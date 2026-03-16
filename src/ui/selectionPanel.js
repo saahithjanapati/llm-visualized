@@ -10,6 +10,7 @@ import { resolveLogitEntryText } from '../utils/logitTokenText.js';
 import {
     formatLayerNormLabel,
     formatLayerNormParamLabel,
+    normalizeLayerNormProductStage,
     isPostLayerNormResidualSelection,
     normalizePostLayerNormResidualStage,
     resolvePostLayerNormResidualLabel,
@@ -114,7 +115,8 @@ import {
 import {
     LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
     resolveLiveLayerNormNormalizedPreviewSelection,
-    resolveLayerNormParameterSummary
+    resolveLayerNormParameterSummary,
+    resolveLayerNormProductStageSummary
 } from './selectionPanelLayerNormPreviewUtils.js';
 import { resolveSelectionPrimaryActionConfig } from './selectionPanelPrimaryActionUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
@@ -3049,6 +3051,25 @@ function resolveVectorPreviewInstanceCount(selectionInfo, label = '') {
     return PREVIEW_VECTOR_BODY_INSTANCES;
 }
 
+function isLayerNormSingleVectorFallbackSelection(label = '', selectionInfo = null) {
+    const activationData = getActivationDataFromSelection(selectionInfo);
+    const stageLower = String(activationData?.stage || '').toLowerCase();
+    const sourceStageLower = String(activationData?.sourceStage || '').toLowerCase();
+    const stageCandidates = [stageLower, sourceStageLower].filter(Boolean);
+
+    if (stageCandidates.some((stage) => Boolean(normalizeLayerNormProductStage(stage)))) {
+        return true;
+    }
+
+    return stageCandidates.some((stage) => (
+        stage === 'ln1.norm'
+        || stage === 'ln2.norm'
+        || stage === 'final_ln.input'
+        || stage === 'final_ln.norm'
+        || stage === 'final_ln.output'
+    ));
+}
+
 export function buildVectorClonePreview(selectionInfo, label = '') {
     const weightedSumSelection = isWeightedSumSelection(label, selectionInfo);
     const kvCacheVectorSelection = isKvCacheVectorSelection(selectionInfo);
@@ -3099,6 +3120,7 @@ export function buildVectorClonePreview(selectionInfo, label = '') {
                 label,
                 stage: getActivationDataFromSelection(selectionInfo)?.stage || ''
             })
+            || isLayerNormSingleVectorFallbackSelection(label, selectionInfo)
             || isMlpDownVectorSelection)
             && Array.isArray(fallbackData)
             && fallbackData.length > 0
@@ -3589,6 +3611,9 @@ export class SelectionPanel {
         this.subtitleTertiary = document.getElementById('detailSubtitleTertiary');
         this.params = document.getElementById('detailParams');
         this.paramsRow = document.getElementById('detailParamsRow');
+        this.layerNormStageRow = document.getElementById('detailLayerNormStageRow');
+        this.layerNormStageLabel = document.getElementById('detailLayerNormStageLabel');
+        this.layerNormStageValue = document.getElementById('detailLayerNormStageValue');
         this.inputDim = document.getElementById('detailInputDim');
         this.inputDimLabel = document.getElementById('detailInputDimLabel');
         this.inputDimHalf = document.getElementById('detailInputDimHalf');
@@ -6853,6 +6878,36 @@ export class SelectionPanel {
         });
     }
 
+    _isBroadTransformerView2dSceneVectorSelection(selection = null) {
+        if (!selection?.object && !selection?.hit?.object) return false;
+        if (selection?.info?.vectorRef) return false;
+        if (Number.isFinite(selection?.hit?.instanceId)) return false;
+
+        const prismCountCandidates = [
+            selection?.info?.prismCount,
+            selection?.object?.userData?.prismCount,
+            selection?.hit?.object?.userData?.prismCount
+        ];
+        if (prismCountCandidates.some((count) => Number.isFinite(count) && count > 0)) {
+            return false;
+        }
+
+        const vectorMesh = findVectorSourceMesh(selection);
+        if (!vectorMesh?.isInstancedMesh) return false;
+
+        const meshCount = Number.isFinite(vectorMesh.count)
+            ? vectorMesh.count
+            : vectorMesh.instanceMatrix?.count;
+        return Number.isFinite(meshCount) && meshCount > 1;
+    }
+
+    _preferTransformerView2dFallbackVectorSelection(selection = null, fallbackSelection = null) {
+        if (!this._isBroadTransformerView2dSceneVectorSelection(selection)) {
+            return selection;
+        }
+        return fallbackSelection || selection;
+    }
+
     _normalizeTransformerView2dSceneLookupLabel(label = '', selectionInfo = null) {
         const normalizedLabel = normalizeSelectionLabel(label, selectionInfo);
         const simplifiedLabel = simplifyLayerNormParamDisplayLabel(normalizedLabel, selectionInfo);
@@ -8080,6 +8135,9 @@ export class SelectionPanel {
             return selection;
         }
         const sceneLabelFallbackSelection = () => this._findTransformerView2dFallbackSceneSelection(fallbackSelection);
+        const preferFallbackIfBroadVector = (resolvedSelection = null) => (
+            this._preferTransformerView2dFallbackVectorSelection(resolvedSelection, fallbackSelection)
+        );
 
         const label = fallbackSelection.label;
         const lower = label.toLowerCase();
@@ -8141,8 +8199,10 @@ export class SelectionPanel {
 
         const layerNormParamSpec = resolveLayerNormParamPreviewSpec(label, fallbackSelection);
         if (layerNormParamSpec) {
-            return this._findLayerNormParamSceneSelection(layerNormParamSpec)
+            return preferFallbackIfBroadVector(
+                this._findLayerNormParamSceneSelection(layerNormParamSpec)
                 || sceneLabelFallbackSelection()
+            )
                 || this._buildFallbackLayerNormParamSelection(layerNormParamSpec);
         }
 
@@ -8257,7 +8317,7 @@ export class SelectionPanel {
         }
 
         if (normalizedPostLayerNormStage === 'ln1.output' || normalizedPostLayerNormSourceStage === 'ln1.output') {
-            return this._findRuntimeQkvSourceVectorSelection({
+            return preferFallbackIfBroadVector(this._findRuntimeQkvSourceVectorSelection({
                 layerIndex,
                 headIndex,
                 tokenIndex: tokenContext.tokenIndex,
@@ -8280,11 +8340,11 @@ export class SelectionPanel {
                 tokenIndex: tokenContext.tokenIndex,
                 tokenId: tokenContext.tokenId,
                 tokenLabel: tokenContext.tokenLabel
-            });
+            }));
         }
 
         if (normalizedPostLayerNormStage === 'ln2.output' || normalizedPostLayerNormSourceStage === 'ln2.output') {
-            return this._findRuntimeResidualVectorSelection({
+            return preferFallbackIfBroadVector(this._findRuntimeResidualVectorSelection({
                 stage: 'ln2.output',
                 layerIndex,
                 tokenIndex: tokenContext.tokenIndex,
@@ -8298,7 +8358,30 @@ export class SelectionPanel {
                 tokenId: tokenContext.tokenId,
                 tokenLabel: tokenContext.tokenLabel,
                 defaultLabel: label
-            }) || sceneLabelFallbackSelection() || fallbackSelection;
+            }) || sceneLabelFallbackSelection() || fallbackSelection);
+        }
+
+        const layerNormProductStage = liveVectorStages.find((stage) => (
+            Boolean(normalizeLayerNormProductStage(stage))
+        )) || '';
+        if (layerNormProductStage) {
+            const normalizedProductStage = normalizeLayerNormProductStage(layerNormProductStage);
+            const legacyProductStage = normalizeLayerNormProductStage(layerNormProductStage, {
+                preferLegacy: true
+            });
+            return this._findGenericSceneVectorSelection({
+                activationStages: [...new Set([
+                    legacyProductStage,
+                    normalizedProductStage
+                ].filter(Boolean))],
+                layerIndex,
+                headIndex,
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenLabel: tokenContext.tokenLabel,
+                defaultLabel: label,
+                allowGenericObjectFallback: false
+            }) || fallbackSelection;
         }
 
         const residualStreamStage = liveVectorStages.find((stage) => (
@@ -8416,7 +8499,7 @@ export class SelectionPanel {
             || liveVectorStages.includes('attention.concatenate')
         );
         if (genericVectorSelection) {
-            return this._findGenericSceneVectorSelection({
+            const resolvedSelection = this._findGenericSceneVectorSelection({
                 activationStages: liveVectorStages,
                 layerIndex,
                 headIndex,
@@ -8424,7 +8507,16 @@ export class SelectionPanel {
                 tokenId: tokenContext.tokenId,
                 tokenLabel: tokenContext.tokenLabel,
                 defaultLabel: label
-            }) || sceneLabelFallbackSelection() || fallbackSelection;
+            }) || sceneLabelFallbackSelection();
+            const hasLayerNormVectorStage = liveVectorStages.some((stage) => (
+                stage.startsWith('ln1.')
+                || stage.startsWith('ln2.')
+                || stage.startsWith('final_ln.')
+            ));
+            return (hasLayerNormVectorStage
+                ? preferFallbackIfBroadVector(resolvedSelection)
+                : resolvedSelection)
+                || fallbackSelection;
         }
 
         return sceneLabelFallbackSelection() || fallbackSelection;
@@ -15415,6 +15507,7 @@ export class SelectionPanel {
         const layerNormParameterSummary = hideLayerNormFields
             ? resolveLayerNormParameterSummary(selection, this.engine)
             : null;
+        const layerNormProductStageSummary = resolveLayerNormProductStageSummary(selection, this.engine);
         const isLogitTokenSelection = !!logitHeader;
         const hideTensorDimsField = hideLayerNormFields
             || isAttentionScore
@@ -15450,6 +15543,15 @@ export class SelectionPanel {
             } else {
                 this.params.textContent = showParamCount ? metadata.params : '';
             }
+        }
+        if (this.layerNormStageRow) {
+            this.layerNormStageRow.style.display = layerNormProductStageSummary ? '' : 'none';
+        }
+        if (this.layerNormStageLabel) {
+            this.layerNormStageLabel.textContent = layerNormProductStageSummary?.label || 'Current stage';
+        }
+        if (this.layerNormStageValue) {
+            this.layerNormStageValue.textContent = layerNormProductStageSummary?.value || '';
         }
         const showBiasDim = !hideTensorDimsField && !isVectorMetadata && metadata.hasBiasDim;
         if (this.biasDimRow) this.biasDimRow.style.display = showBiasDim ? '' : 'none';

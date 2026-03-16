@@ -42,6 +42,7 @@ import { resolveHoverTokenChipSyncEntries } from '../../engine/coreHoverTokenCon
 import { loadActivationState } from './activation.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
 import { buildPassState, initGenerationController } from './generationController.js';
+import { resolveGenerationRoute } from './generationRoute.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { initPassIntroOverlay } from './passIntroOverlay.js';
 import {
@@ -131,6 +132,15 @@ if (!isFullTokenMode && activationSource && typeof activationSource.getTokenCoun
         initialLaneCount = Math.max(1, Math.min(tokenCount, promptCount || laneCount));
     }
 }
+const baseLaneCount = initialLaneCount;
+const initialGenerationRoute = resolveGenerationRoute(window.location, {
+    defaultLaneCount: initialLaneCount,
+    baseLaneCount,
+    maxLaneCount: activationSource && typeof activationSource.getTokenCount === 'function'
+        ? activationSource.getTokenCount()
+        : initialLaneCount
+});
+initialLaneCount = initialGenerationRoute.laneCount;
 
 const initialPassState = buildPassState({
     activationSource,
@@ -402,6 +412,7 @@ const generationController = initGenerationController({
     pipeline,
     activationSource,
     initialLaneCount,
+    baseLaneCount,
     initialPassState,
     fallbackTokenLabels: PROMPT_TOKENS,
     fallbackPositionLabels: POSITION_TOKENS,
@@ -440,6 +451,8 @@ const initialTransformerView2dRoute = initialAppView?.kind === 'transformer-view
     ? initialAppView
     : null;
 const shouldBypassInitialPassIntro = shouldSkipInitialPassIntro();
+const shouldBypassInitialGenerationRouteIntro = initialGenerationRoute.hasExplicitRoute
+    && initialGenerationRoute.laneCount > baseLaneCount;
 
 Promise.resolve().then(async () => {
     if (shouldOpenMhsaDirectly) {
@@ -472,7 +485,7 @@ Promise.resolve().then(async () => {
         }
         return;
     }
-    if (shouldBypassInitialPassIntro) {
+    if (shouldBypassInitialPassIntro || shouldBypassInitialGenerationRouteIntro) {
         try {
             hideLoadingOverlay();
             pipeline?.engine?.resume?.('initial-pass-intro');

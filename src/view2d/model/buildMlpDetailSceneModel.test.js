@@ -406,6 +406,66 @@ describe('buildMlpDetailSceneModel', () => {
         expect(denseGap).toBeGreaterThan(baseGap);
     });
 
+    it('uses the activation-source base vector length for MLP detail activation rows', () => {
+        const inputValues = Array.from({ length: 12 }, (_, index) => Number((0.25 + (index * 0.1)).toFixed(4)));
+        const upValues = Array.from({ length: 48 }, (_, index) => Number((0.5 + (index * 0.1)).toFixed(4)));
+        const activationValues = Array.from({ length: 48 }, (_, index) => Number((0.75 + (index * 0.1)).toFixed(4)));
+        const downValues = Array.from({ length: 12 }, (_, index) => Number((1 + (index * 0.1)).toFixed(4)));
+        const requestedLengths = {
+            input: [],
+            up: [],
+            activation: [],
+            down: []
+        };
+        const activationSource = {
+            getBaseVectorLength() {
+                return 12;
+            },
+            getLayerLn2(_layerIndex = 0, _stage = 'shift', _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.input.push(targetLength);
+                return targetLength === inputValues.length ? inputValues : createVector(0.25, targetLength);
+            },
+            getMlpUp(_layerIndex = 0, _tokenIndex = 0, targetLength = D_MODEL * 4) {
+                requestedLengths.up.push(targetLength);
+                return targetLength === upValues.length ? upValues : createVector(0.5, targetLength);
+            },
+            getMlpActivation(_layerIndex = 0, _tokenIndex = 0, targetLength = D_MODEL * 4) {
+                requestedLengths.activation.push(targetLength);
+                return targetLength === activationValues.length ? activationValues : createVector(0.75, targetLength);
+            },
+            getMlpDown(_layerIndex = 0, _tokenIndex = 0, targetLength = D_MODEL) {
+                requestedLengths.down.push(targetLength);
+                return targetLength === downValues.length ? downValues : createVector(1, targetLength);
+            }
+        };
+
+        const scene = buildMlpDetailSceneModel({
+            activationSource,
+            mlpDetailTarget: {
+                layerIndex: 4
+            },
+            tokenRefs: [{
+                rowIndex: 0,
+                tokenIndex: 0,
+                tokenLabel: 'Token A'
+            }]
+        });
+        const nodes = flattenSceneNodes(scene);
+        const inputNode = nodes.find((node) => node?.role === 'projection-source-xln') || null;
+        const outputNode = nodes.find((node) => node?.role === 'mlp-up-output') || null;
+        const activationNode = nodes.find((node) => node?.role === 'mlp-activation-output') || null;
+        const downOutputNode = nodes.find((node) => node?.role === 'mlp-down-output') || null;
+
+        expect(requestedLengths.input).toEqual([12]);
+        expect(requestedLengths.up).toEqual([48, 48]);
+        expect(requestedLengths.activation).toEqual([48, 48]);
+        expect(requestedLengths.down).toEqual([12]);
+        expect(inputNode?.rowItems?.[0]?.rawValues).toEqual(inputValues);
+        expect(outputNode?.rowItems?.[0]?.rawValues).toEqual(upValues);
+        expect(activationNode?.rowItems?.[0]?.rawValues).toEqual(activationValues);
+        expect(downOutputNode?.rowItems?.[0]?.rawValues).toEqual(downValues);
+    });
+
     it('reuses the detail-scene row hover behavior for ln2 x_ln rows', () => {
         const scene = buildScene();
         const nodes = flattenSceneNodes(scene);
@@ -429,6 +489,7 @@ describe('buildMlpDetailSceneModel', () => {
         expect(hoverState?.info?.activationData?.sourceStage).toBe('ln2.shift');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(1);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token B');
+        expect(hoverState?.info?.activationData?.values).toEqual(inputNode?.rowItems?.[1]?.rawValues);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputCopyNode?.id);
@@ -485,6 +546,7 @@ describe('buildMlpDetailSceneModel', () => {
         expect(hoverState?.info?.activationData?.stage).toBe('mlp.up');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(0);
         expect(hoverState?.info?.activationData?.tokenLabel).toBe('Token A');
+        expect(hoverState?.info?.activationData?.values).toEqual(outputNode?.rowItems?.[0]?.rawValues);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputCopyNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
@@ -565,6 +627,7 @@ describe('buildMlpDetailSceneModel', () => {
         expect(hoverState?.info?.activationData?.label).toBe(MLP_ACTIVATION_TOOLTIP_LABEL);
         expect(hoverState?.info?.activationData?.stage).toBe('mlp.activation');
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(0);
+        expect(hoverState?.info?.activationData?.values).toEqual(activationNode?.rowItems?.[0]?.rawValues);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputCopyNode?.id);
@@ -655,6 +718,7 @@ describe('buildMlpDetailSceneModel', () => {
         expect(hoverState?.info?.suppressTokenChip).toBeUndefined();
         expect(hoverState?.info?.activationData?.suppressTokenChip).toBeUndefined();
         expect(hoverState?.info?.activationData?.tokenIndex).toBe(0);
+        expect(hoverState?.info?.activationData?.values).toEqual(downOutputNode?.rowItems?.[0]?.rawValues);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(outputCopyNode?.id);

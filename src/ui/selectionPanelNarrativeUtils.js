@@ -1301,6 +1301,7 @@ function resolveLayerNormEquationHighlight(lower, stageLower = '') {
         lower.includes('scale')
         || lower.includes('gamma')
         || stageLower.endsWith('.scale')
+        || stageLower.endsWith('.product')
         || stageLower.endsWith('.param.scale')
     ) {
         return 'scale';
@@ -1429,13 +1430,13 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (stageLower === 'ln1.norm') {
         return buildLayerNormEntries('ln1', 'norm');
     }
-    if (stageLower === 'ln1.scale' || stageLower === 'ln1.output' || stageLower === 'ln1.shift' || stageLower === 'ln1.param.scale' || stageLower === 'ln1.param.shift') {
+    if (stageLower === 'ln1.scale' || stageLower === 'ln1.product' || stageLower === 'ln1.output' || stageLower === 'ln1.shift' || stageLower === 'ln1.param.scale' || stageLower === 'ln1.param.shift') {
         return buildLayerNormEntries('ln1', resolveLayerNormEquationHighlight(lower, stageLower));
     }
     if (stageLower === 'ln2.norm') {
         return buildLayerNormEntries('ln2', 'norm');
     }
-    if (stageLower === 'ln2.scale' || stageLower === 'ln2.output' || stageLower === 'ln2.shift' || stageLower === 'ln2.param.scale' || stageLower === 'ln2.param.shift') {
+    if (stageLower === 'ln2.scale' || stageLower === 'ln2.product' || stageLower === 'ln2.output' || stageLower === 'ln2.shift' || stageLower === 'ln2.param.scale' || stageLower === 'ln2.param.shift') {
         return buildLayerNormEntries('ln2', resolveLayerNormEquationHighlight(lower, stageLower));
     }
     if (stageLower === 'final_ln.norm') {
@@ -1443,6 +1444,7 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     }
     if (
         stageLower === 'final_ln.scale'
+        || stageLower === 'final_ln.product'
         || stageLower === 'final_ln.output'
         || stageLower === 'final_ln.shift'
         || stageLower === 'final_ln.param.scale'
@@ -1666,7 +1668,7 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         if (stageLower === 'ln1.norm' || stageLower === 'ln2.norm') {
             return buildLayerNormNormalizedVectorDescription(selectionInfo);
         }
-        if (stageLower === 'ln1.scale' || stageLower === 'ln2.scale') {
+        if (stageLower === 'ln1.scale' || stageLower === 'ln1.product' || stageLower === 'ln2.scale' || stageLower === 'ln2.product') {
             return buildLayerNormScaledVectorDescription(selectionInfo);
         }
         if (stageLower === 'ln1.output' || stageLower === 'ln1.shift') {
@@ -1729,8 +1731,8 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         if (stageLower === 'final_ln.norm') {
             return buildFinalLayerNormNormalizedVectorDescription(selectionInfo);
         }
-        if (stageLower === 'final_ln.scale') {
-            return FINAL_LN_SCALE_DESCRIPTION;
+        if (stageLower === 'final_ln.scale' || stageLower === 'final_ln.product') {
+            return buildLayerNormScaledVectorDescription(selectionInfo);
         }
         if (stageLower === 'final_ln.output' || stageLower === 'final_ln.shift') {
             return FINAL_LN_SHIFT_DESCRIPTION;
@@ -1776,6 +1778,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     }
     if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('normed') || lower.includes('normalized'))) {
         return buildLayerNormNormalizedVectorDescription(selectionInfo);
+    }
+    if ((lower.includes('ln1') || lower.includes('ln2') || lower.includes('layernorm (top)') || lower.includes('final ln')) && lower.includes('product vector')) {
+        return buildLayerNormScaledVectorDescription(selectionInfo);
     }
     if ((lower.includes('ln1') || lower.includes('ln2')) && (lower.includes('shift') || lower.includes('beta'))) {
         return LN_SHIFT_PARAMETER_DESCRIPTION;

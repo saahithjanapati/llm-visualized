@@ -161,8 +161,12 @@ export function buildProjectionBiasHoverInfo(node = null, rowItem = null, kind =
 export function buildMlpUpProjectionHoverInfo(node = null, rowItem = null) {
     const tokenInfo = createTokenInfo(rowItem) || {};
     const label = 'MLP Up Projection';
+    const values = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
     const info = buildProjectionHoverInfo(node, label, {
         stage: 'mlp.up',
+        ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -175,6 +179,7 @@ export function buildMlpUpProjectionHoverInfo(node = null, rowItem = null) {
         activationData: {
             ...(info.activationData || {}),
             stage: 'mlp.up',
+            ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
@@ -201,8 +206,12 @@ export function buildMlpUpWeightHoverInfo(node = null) {
 export function buildMlpActivationHoverInfo(node = null, rowItem = null) {
     const tokenInfo = createTokenInfo(rowItem) || {};
     const label = MLP_ACTIVATION_TOOLTIP_LABEL;
+    const values = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
     const info = buildProjectionHoverInfo(node, label, {
         stage: 'mlp.activation',
+        ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -215,6 +224,7 @@ export function buildMlpActivationHoverInfo(node = null, rowItem = null) {
         activationData: {
             ...(info.activationData || {}),
             stage: 'mlp.activation',
+            ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
@@ -226,8 +236,12 @@ export function buildMlpActivationHoverInfo(node = null, rowItem = null) {
 export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
     const tokenInfo = createTokenInfo(rowItem) || {};
     const label = 'MLP Down Projection';
+    const values = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
     const info = buildProjectionHoverInfo(node, label, {
         stage: 'mlp.down',
+        ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -240,6 +254,7 @@ export function buildMlpDownProjectionHoverInfo(node = null, rowItem = null) {
         activationData: {
             ...(info.activationData || {}),
             stage: 'mlp.down',
+            ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }
@@ -324,9 +339,13 @@ export function buildPostLayerNormResidualHoverInfo(node = null, rowItem = null)
     ) || 'ln1.output';
     const sourceStage = normalizePostLayerNormResidualStage(activationStage, { preferLegacy: true });
     const label = resolvePostLayerNormResidualLabel({ stage: activationStage });
+    const values = Array.isArray(rowItem?.rawValues) || ArrayBuffer.isView(rowItem?.rawValues)
+        ? Array.from(rowItem.rawValues).map((value) => (Number.isFinite(value) ? value : 0))
+        : null;
     const info = buildProjectionHoverInfo(node, label, {
         stage: activationStage,
         sourceStage,
+        ...(values?.length ? { values } : {}),
         ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
         ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
             ? { tokenLabel: tokenInfo.tokenLabel }
@@ -340,6 +359,7 @@ export function buildPostLayerNormResidualHoverInfo(node = null, rowItem = null)
             ...(info.activationData || {}),
             stage: activationStage,
             sourceStage,
+            ...(values?.length ? { values } : {}),
             ...(Number.isFinite(tokenInfo.tokenIndex) ? { tokenIndex: tokenInfo.tokenIndex } : {}),
             ...(typeof tokenInfo.tokenLabel === 'string' && tokenInfo.tokenLabel.length
                 ? { tokenLabel: tokenInfo.tokenLabel }

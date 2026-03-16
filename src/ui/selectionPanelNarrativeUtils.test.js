@@ -29,6 +29,43 @@ describe('selectionPanelNarrativeUtils bias narratives', () => {
         expect(description).toContain('scale and shift');
     });
 
+    it('describes LayerNorm product-vector stages as intermediate affine states', () => {
+        const selection = {
+            label: 'LayerNorm 1 Product Vector',
+            info: {
+                activationData: {
+                    stage: 'ln1.product',
+                    layerIndex: 4,
+                    tokenIndex: 1,
+                    tokenLabel: 'the'
+                }
+            }
+        };
+
+        const description = resolveDescription('LayerNorm 1 Product Vector', 'vector', selection);
+        expect(description).toContain('after normalization');
+        expect(description).toContain('multiplication by the learned scale vector');
+        expect(description).toContain('before the learned shift');
+    });
+
+    it('treats final_ln.scale as the final LayerNorm product-vector stage, not the gamma parameter', () => {
+        const selection = {
+            label: 'LayerNorm (Top) Product Vector',
+            info: {
+                activationData: {
+                    stage: 'final_ln.scale',
+                    tokenIndex: 1,
+                    tokenLabel: 'the'
+                }
+            }
+        };
+
+        const description = resolveDescription('LayerNorm (Top) Product Vector', 'vector', selection);
+        expect(description).toContain('after normalization');
+        expect(description).toContain('before the learned shift');
+        expect(description).not.toContain('learned scale vector for the final LayerNorm');
+    });
+
     it('returns bias-specific copy for the MLP up bias term', () => {
         const selection = {
             label: MLP_UP_BIAS_TOOLTIP_LABEL,

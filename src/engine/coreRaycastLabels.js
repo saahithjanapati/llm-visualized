@@ -2,8 +2,10 @@ import {
     expandLayerNormLabel,
     formatNormalizedResidualStreamLabel,
     formatLayerNormParamLabel,
+    isLayerNormProductStage,
     isLayerNormNormalizedStage,
     isPostLayerNormResidualSelection,
+    resolveLayerNormProductVectorLabel,
     resolveLayerNormKind,
     resolvePostLayerNormResidualLabel
 } from '../utils/layerNormLabels.js';
@@ -39,6 +41,16 @@ export function normalizeRaycastLabel(label, info = null, object = null) {
         return formatNormalizedResidualStreamLabel();
     }
 
+    if (isLayerNormProductStage(stageLower)) {
+        return resolveLayerNormProductVectorLabel({
+            label: raw,
+            stage,
+            explicitKind: info?.layerNormKind
+                || info?.activationData?.layerNormKind
+                || findObjectUserDataValue(object, 'layerNormKind')
+        });
+    }
+
     const isPostLayerNormResidual = !explicitQkvLabel && isPostLayerNormResidualSelection({
         label: raw,
         stage
@@ -70,6 +82,15 @@ export function simplifyLayerNormParamHoverLabel(label, info = null, object = nu
     const stageLower = String(stage).toLowerCase();
     if (isPostLayerNormResidualSelection({ label: raw, stage })) {
         return resolvePostLayerNormResidualLabel({
+            label: raw,
+            stage,
+            explicitKind: info?.layerNormKind
+                || info?.activationData?.layerNormKind
+                || findObjectUserDataValue(object, 'layerNormKind')
+        });
+    }
+    if (isLayerNormProductStage(stageLower)) {
+        return resolveLayerNormProductVectorLabel({
             label: raw,
             stage,
             explicitKind: info?.layerNormKind

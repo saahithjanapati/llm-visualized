@@ -2,8 +2,10 @@ import {
     expandLayerNormLabel,
     formatNormalizedResidualStreamLabel,
     formatLayerNormParamLabel,
+    isLayerNormProductStage,
     isLayerNormNormalizedStage,
     isPostLayerNormResidualSelection,
+    resolveLayerNormProductVectorLabel,
     resolveLayerNormKind,
     resolvePostLayerNormResidualLabel,
     resolveLayerNormParamSpec
@@ -56,6 +58,14 @@ export function normalizeSelectionLabel(label, selectionInfo = null) {
         return formatNormalizedResidualStreamLabel();
     }
 
+    if (isLayerNormProductStage(stageLower)) {
+        return resolveLayerNormProductVectorLabel({
+            label: raw,
+            stage: activation?.stage || '',
+            explicitKind: findUserDataString(selectionInfo, 'layerNormKind')
+        });
+    }
+
     const isPostLayerNormResidual = !explicitQkvLabel && isPostLayerNormResidualSelection({
         label: raw,
         stage: activation?.stage || ''
@@ -98,6 +108,13 @@ export function simplifyLayerNormParamDisplayLabel(label, selectionInfo = null) 
     const activationStage = getActivationDataFromSelection(selectionInfo)?.stage || '';
     if (isPostLayerNormResidualSelection({ label: raw, stage: activationStage })) {
         return resolvePostLayerNormResidualLabel({
+            label: raw,
+            stage: activationStage,
+            explicitKind: findUserDataString(selectionInfo, 'layerNormKind')
+        });
+    }
+    if (isLayerNormProductStage(stageLower)) {
+        return resolveLayerNormProductVectorLabel({
             label: raw,
             stage: activationStage,
             explicitKind: findUserDataString(selectionInfo, 'layerNormKind')

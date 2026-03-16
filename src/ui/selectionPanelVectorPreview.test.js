@@ -429,6 +429,60 @@ describe('buildVectorClonePreview', () => {
         preview.dispose?.();
     });
 
+    it('renders data-backed layer norm product selections as one vector instead of the three-lane placeholder', () => {
+        const values = new Array(768).fill(0).map((_, index) => Math.sin(index / 28));
+        const selection = {
+            label: 'LayerNorm 2 Product Vector',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'LayerNorm 2 Product Vector',
+                    stage: 'ln2.product',
+                    sourceStage: 'ln2.scale',
+                    values
+                },
+                values
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+        expect(countPreviewMeshes(preview?.object)).toBe(1);
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(12);
+
+        preview.dispose?.();
+    });
+
+    it('renders data-backed layer norm normalized selections as one vector instead of the three-lane placeholder', () => {
+        const values = new Array(768).fill(0).map((_, index) => Math.cos(index / 31));
+        const selection = {
+            label: 'Normalized Residual Stream Vector',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'Normalized Residual Stream Vector',
+                    stage: 'ln2.norm',
+                    sourceStage: 'ln2.norm',
+                    values
+                },
+                values
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+        expect(countPreviewMeshes(preview?.object)).toBe(1);
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(12);
+
+        preview.dispose?.();
+    });
+
     it('builds exact ln2 residual previews from batched vectors with cyclic raycast metadata', () => {
         const prismCount = 12;
         const label = 'Post LayerNorm 2 Residual Vector';

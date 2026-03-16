@@ -6588,6 +6588,15 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     overflow-wrap: anywhere;
     line-height: 1.35;
 }
+.detail-row-stage-note {
+    align-items: flex-start;
+}
+.detail-row-stage-note .detail-value {
+    max-width: 70%;
+    text-align: right;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+}
 .detail-prompt-context {
     margin: 0 16px;
     padding: 10px 12px;

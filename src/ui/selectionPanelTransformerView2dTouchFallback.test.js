@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-    initTransformerView2dTouchActionFallback,
-    TRANSFORMER_VIEW2D_TOUCH_ACTION_SELECTOR
-} from './selectionPanelTransformerView2dTouchFallback.js';
+import { initTransformerView2dTouchActionFallback } from './selectionPanelTransformerView2dTouchFallback.js';
 
 function createTouchPointerEvent(type, {
     pointerId = 1,
@@ -31,16 +28,18 @@ afterEach(() => {
 describe('selectionPanelTransformerView2dTouchFallback', () => {
     it('activates 2D toolbar buttons on touch pointerdown', () => {
         document.body.innerHTML = `
-            <div class="detail-transformer-view2d-hud">
-                <button type="button" class="detail-transformer-view2d-action">Fit scene</button>
-            </div>
+            <section class="detail-transformer-view2d">
+                <div class="detail-transformer-view2d-hud">
+                    <button type="button" class="detail-transformer-view2d-action">Fit scene</button>
+                </div>
+            </section>
         `;
-        const hud = document.querySelector('.detail-transformer-view2d-hud');
-        const button = document.querySelector(TRANSFORMER_VIEW2D_TOUCH_ACTION_SELECTOR);
+        const root = document.querySelector('.detail-transformer-view2d');
+        const button = document.querySelector('.detail-transformer-view2d-action');
         const onClick = vi.fn();
         button.addEventListener('click', onClick);
 
-        const cleanup = initTransformerView2dTouchActionFallback(hud);
+        const cleanup = initTransformerView2dTouchActionFallback(root);
         button.dispatchEvent(createTouchPointerEvent('pointerdown'));
 
         expect(onClick).toHaveBeenCalledTimes(1);
@@ -48,18 +47,41 @@ describe('selectionPanelTransformerView2dTouchFallback', () => {
         cleanup();
     });
 
-    it('ignores non-toolbar targets', () => {
+    it('activates the selection sidebar close button on touch pointerdown', () => {
         document.body.innerHTML = `
-            <div class="detail-transformer-view2d-hud">
-                <button type="button" class="other-action">Other</button>
-            </div>
+            <section class="detail-transformer-view2d">
+                <aside class="detail-transformer-view2d-selection-sidebar">
+                    <button type="button" class="detail-transformer-view2d-selection-sidebar-close">×</button>
+                </aside>
+            </section>
         `;
-        const hud = document.querySelector('.detail-transformer-view2d-hud');
+        const root = document.querySelector('.detail-transformer-view2d');
+        const button = document.querySelector('.detail-transformer-view2d-selection-sidebar-close');
+        const onClick = vi.fn();
+        button.addEventListener('click', onClick);
+
+        const cleanup = initTransformerView2dTouchActionFallback(root);
+        button.dispatchEvent(createTouchPointerEvent('pointerdown'));
+
+        expect(onClick).toHaveBeenCalledTimes(1);
+
+        cleanup();
+    });
+
+    it('ignores non-2D-action buttons inside the view', () => {
+        document.body.innerHTML = `
+            <section class="detail-transformer-view2d">
+                <div class="detail-transformer-view2d-hud">
+                    <button type="button" class="other-action">Other</button>
+                </div>
+            </section>
+        `;
+        const root = document.querySelector('.detail-transformer-view2d');
         const button = document.querySelector('.other-action');
         const onClick = vi.fn();
         button.addEventListener('click', onClick);
 
-        const cleanup = initTransformerView2dTouchActionFallback(hud);
+        const cleanup = initTransformerView2dTouchActionFallback(root);
         button.dispatchEvent(createTouchPointerEvent('pointerdown'));
 
         expect(onClick).not.toHaveBeenCalled();

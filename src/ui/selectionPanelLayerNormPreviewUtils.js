@@ -1,7 +1,8 @@
-import { MHA_FINAL_Q_COLOR } from '../animations/LayerAnimationConstants.js';
 import { getLayerNormParamMeta } from '../data/layerNormParams.js';
-import { buildHueRangeOptions } from '../utils/colors.js';
+import { LAYER_NORM_PARAM_COLOR_OPTIONS } from '../utils/layerNormParamColorOptions.js';
 import {
+    formatLayerNormProductVectorLabel,
+    isLayerNormProductStage,
     isLayerNormNormalizedStage,
     resolveLayerNormKind
 } from '../utils/layerNormLabels.js';
@@ -13,16 +14,7 @@ import {
 import { D_MODEL } from './selectionPanelConstants.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 
-export const LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS = Object.freeze(buildHueRangeOptions(
-    MHA_FINAL_Q_COLOR,
-    {
-        hueSpread: 0.1,
-        minLightness: 0.34,
-        maxLightness: 0.74,
-        valueMin: -1.8,
-        valueMax: 1.8
-    }
-));
+export const LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS = LAYER_NORM_PARAM_COLOR_OPTIONS;
 
 function resolveLayerFromEngine(engine = null, layerNormKind = null, layerIndex = null) {
     const layers = Array.isArray(engine?._layers) ? engine._layers : [];
@@ -164,6 +156,33 @@ export function resolveLayerNormParameterSummary(selectionInfo = null, engine = 
         ...previewContext,
         perParameterCount: hiddenSize,
         totalParameterCount: hiddenSize * 2
+    };
+}
+
+export function resolveLayerNormProductStageSummary(selectionInfo = null, engine = null) {
+    const activationStage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
+    if (!isLayerNormProductStage(activationStage)) return null;
+
+    const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
+    const layerNormKind = previewContext?.layerNormKind || resolveLayerNormKind({
+        label: selectionInfo?.label || '',
+        stage: activationStage,
+        explicitKind: findUserDataString(selectionInfo, 'layerNormKind') || null
+    });
+    const vectorLabel = formatLayerNormProductVectorLabel(layerNormKind);
+
+    let summary = 'Normalized vector multiplied elementwise by gamma, before beta is added.';
+    if (layerNormKind === 'ln1') {
+        summary = 'Normalized vector multiplied elementwise by gamma, before beta is added and attention reads the LayerNorm output.';
+    } else if (layerNormKind === 'ln2') {
+        summary = 'Normalized vector multiplied elementwise by gamma, before beta is added and the MLP reads the LayerNorm output.';
+    } else if (layerNormKind === 'final') {
+        summary = 'Normalized vector multiplied elementwise by gamma, before the final beta shift and the unembedding step.';
+    }
+
+    return {
+        label: 'Current stage',
+        value: `${vectorLabel}: ${summary}`
     };
 }
 

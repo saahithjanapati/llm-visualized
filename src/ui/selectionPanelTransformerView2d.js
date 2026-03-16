@@ -71,6 +71,10 @@ import {
     resolveTransformerView2dOverviewMinScale,
     TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT
 } from './selectionPanelTransformerView2dViewportUtils.js';
+import {
+    shouldKeepTransformerView2dHeadDetailFitView,
+    TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
+} from './selectionPanelTransformerView2dTransitionUtils.js';
 import { initTransformerView2dTouchActionFallback } from './selectionPanelTransformerView2dTouchFallback.js';
 import { applyTokenChipColors } from './tokenChipColorUtils.js';
 import {
@@ -125,9 +129,6 @@ const VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
 const VIEW2D_STAGED_FOCUS_OVERVIEW_HOLD_MS = 280;
 const VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS = 1120;
 const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_HOLD_MS = 300;
-const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS = 1280;
-const VIEW2D_STAGED_HEAD_DETAIL_HEAD_HOLD_MS = 180;
-const VIEW2D_STAGED_HEAD_DETAIL_HEAD_TO_COMPONENT_DURATION_MS = 980;
 const VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO = 0.97;
 const VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO = 0.95;
 
@@ -473,7 +474,7 @@ export function createTransformerView2dDetailView(panelEl, {
         parent: canvasCard
     });
 
-    initTransformerView2dTouchActionFallback(hud || root);
+    initTransformerView2dTouchActionFallback(root);
 
     const renderer = new CanvasSceneRenderer({
         canvas,
@@ -805,6 +806,12 @@ export function createTransformerView2dDetailView(panelEl, {
             || state.mlpDetailTarget
             || state.layerNormDetailTarget
         );
+    }
+
+    function shouldKeepHeadDetailSceneFitView() {
+        return !!state.headDetailTarget
+            && hasSceneBackedDetailTarget()
+            && shouldKeepTransformerView2dHeadDetailFitView(state.detailSemanticTargets);
     }
 
     function setDetailTargets({
@@ -1202,31 +1209,7 @@ export function createTransformerView2dDetailView(panelEl, {
                     clearStagedHeadDetailTransition();
                     return;
                 }
-                if (!state.detailSemanticTargets.length) {
-                    clearStagedHeadDetailTransition();
-                    return;
-                }
-                state.stagedHeadDetailTransition = {
-                    ...latestTransition,
-                    phase: 'head-hold',
-                    phaseStartTime: null
-                };
-                scheduleStagedHeadDetailPhase(VIEW2D_STAGED_HEAD_DETAIL_HEAD_HOLD_MS, () => {
-                    const currentTransition = state.stagedHeadDetailTransition;
-                    if (
-                        !currentTransition
-                        || currentTransition.phase !== 'head-hold'
-                        || !state.headDetailDepthActive
-                        || !state.headDetailTarget
-                    ) {
-                        return;
-                    }
-                    focusHeadDetailTarget({
-                        animate: true,
-                        durationMs: VIEW2D_STAGED_HEAD_DETAIL_HEAD_TO_COMPONENT_DURATION_MS
-                    });
-                    clearStagedHeadDetailTransition();
-                });
+                clearStagedHeadDetailTransition();
             });
         });
     }
@@ -2455,6 +2438,19 @@ export function createTransformerView2dDetailView(panelEl, {
         durationMs = null
     } = {}) {
         if (state.headDetailDepthActive && hasSceneBackedDetailTarget()) {
+            if (shouldKeepHeadDetailSceneFitView()) {
+                const didFit = syncHeadDetailViewport({
+                    forceFit: true,
+                    animate
+                });
+                if (!didFit) return false;
+                state.focusLabel = resolveActiveFocusLabel(state);
+                updateReadouts();
+                if (!animate) {
+                    render();
+                }
+                return true;
+            }
             if (focusHeadDetailTarget({ animate })) {
                 if (!animate) {
                     render();

@@ -14,6 +14,10 @@ import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { resolveLogitTokenSeed } from './logitColor.js';
 import {
+    resolveGenerationRoute,
+    syncGenerationRoute
+} from './generationRoute.js';
+import {
     resolveKvCachePassMode,
     resolveKvPrefillBaseLaneCount
 } from './kvCachePassMode.js';
@@ -586,6 +590,7 @@ export function initGenerationController({
     pipeline,
     activationSource,
     initialLaneCount,
+    baseLaneCount = initialLaneCount,
     initialPassState,
     fallbackTokenLabels = [],
     fallbackPositionLabels = [],
@@ -603,7 +608,11 @@ export function initGenerationController({
 
     const totalTokenCount = resolveTokenCount(activationSource, initialLaneCount);
     const maxLaneCount = Math.max(1, totalTokenCount || initialLaneCount);
-    const canLoop = !!activationSource && maxLaneCount > initialLaneCount;
+    const generationBaseLaneCount = Math.max(
+        1,
+        Math.min(maxLaneCount, Math.floor(baseLaneCount || initialLaneCount || 1))
+    );
+    const canLoop = !!activationSource && maxLaneCount > generationBaseLaneCount;
     const kvPrefillBaseLaneCount = resolveKvPrefillBaseLaneCount({ initialLaneCount });
 
     const overlay = createAdvanceOverlay();
@@ -629,6 +638,20 @@ export function initGenerationController({
     let kvSessionBaseLaneCount = kvModeEnabled
         ? kvPrefillBaseLaneCount
         : null;
+    const syncCurrentRoute = ({
+        laneCount = currentLaneCount,
+        historyMode = 'replace'
+    } = {}) => syncGenerationRoute({
+        laneCount,
+        baseLaneCount: generationBaseLaneCount,
+        maxLaneCount,
+        historyMode
+    });
+    const resolveLaneCountFromCurrentUrl = () => resolveGenerationRoute(window.location, {
+        defaultLaneCount: generationBaseLaneCount,
+        baseLaneCount: generationBaseLaneCount,
+        maxLaneCount
+    }).laneCount;
 
     const resolveKvSessionBase = (laneCountValue) => {
         const initialBase = kvPrefillBaseLaneCount;
@@ -902,7 +925,13 @@ export function initGenerationController({
     let latestPassState = null;
     let latestAttentionState = null;
 
-    const rebuildPass = ({ laneCount, passState, resetPipeline = false, fromCompletedPass = false } = {}) => {
+    const rebuildPass = ({
+        laneCount,
+        passState,
+        resetPipeline = false,
+        fromCompletedPass = false,
+        routeHistory = 'replace'
+    } = {}) => {
         const nextLaneCount = Math.max(1, Math.floor(laneCount || 1));
         const passPlan = resolvePassPlan(nextLaneCount);
         const state = passState || buildPassState({
@@ -1005,6 +1034,12 @@ export function initGenerationController({
         syncPromptTokenStrip(state, attentionState, { showGeneratedLogitChip: false });
 
         currentLaneCount = nextLaneCount;
+        if (routeHistory !== 'ignore') {
+            syncCurrentRoute({
+                laneCount: nextLaneCount,
+                historyMode: routeHistory
+            });
+        }
         passComplete = false;
         autoAdvancePaused = false;
         countdownActive = false;
@@ -1052,6 +1087,39 @@ export function initGenerationController({
         window.addEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
     }
 
+    const syncFromUrl = ({ historyMode = 'replace' } = {}) => {
+        const targetLaneCount = resolveLaneCountFromCurrentUrl();
+        if (targetLaneCount === currentLaneCount) {
+            syncCurrentRoute({
+                laneCount: currentLaneCount,
+                historyMode
+            });
+            return false;
+        }
+        if (forwardPassJumpPending) return false;
+        rebuildPass({
+            laneCount: targetLaneCount,
+            resetPipeline: true,
+            routeHistory: historyMode
+        });
+        updateOverlay();
+        updateNextTokenButton();
+        return true;
+    };
+
+    const handleRoutePopState = () => {
+        syncFromUrl({ historyMode: 'replace' });
+    };
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        const previousRoutePopstateListener = window.__llmVisualizedGenerationRoutePopstateListener;
+        if (typeof previousRoutePopstateListener === 'function') {
+            window.removeEventListener('popstate', previousRoutePopstateListener);
+        }
+        window.__llmVisualizedGenerationRoutePopstateListener = handleRoutePopState;
+        window.addEventListener('popstate', handleRoutePopState);
+    }
+
     rebuildPass({
         laneCount: currentLaneCount,
         passState: initialPassState,
@@ -1083,14 +1151,20 @@ export function initGenerationController({
             hasLastForwardPass: () => false,
             isForwardPassJumpPending: () => forwardPassJumpPending,
             isNextForwardPassPending: () => forwardPassJumpPending,
+            syncFromUrl,
             dispose: () => {
                 if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                     window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
+                    if (window.__llmVisualizedGenerationRoutePopstateListener === handleRoutePopState) {
+                        delete window.__llmVisualizedGenerationRoutePopstateListener;
+                    }
+                    window.removeEventListener('popstate', handleRoutePopState);
                 }
                 if (chipCleanup?.dispose) chipCleanup.dispose();
                 if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
                 if (overlayTouchCleanup) overlayTouchCleanup();
                 if (nextTokenButtonTouchCleanup) nextTokenButtonTouchCleanup();
+                if (nextTokenButtonLayoutCleanup) nextTokenButtonLayoutCleanup();
                 promptTokenStrip?.dispose?.();
             }
         };
@@ -1098,7 +1172,8 @@ export function initGenerationController({
 
     const runForwardPassJump = ({
         targetLaneCount,
-        fromCompletedPass = true
+        fromCompletedPass = true,
+        historyMode = 'push'
     } = {}) => {
         if (forwardPassJumpPending) return false;
 
@@ -1125,7 +1200,8 @@ export function initGenerationController({
                 rebuildPass({
                     laneCount: nextLaneCount,
                     resetPipeline: true,
-                    fromCompletedPass: !!fromCompletedPass
+                    fromCompletedPass: !!fromCompletedPass,
+                    routeHistory: historyMode
                 });
                 await playPendingPassIntro({
                     passState: latestPassState,
@@ -1145,29 +1221,37 @@ export function initGenerationController({
         return true;
     };
 
-    const advanceToNextPass = ({ fromCompletedPass = true } = {}) => {
+    const advanceToNextPass = ({
+        fromCompletedPass = true,
+        historyMode = 'push'
+    } = {}) => {
         if (!hasNextForwardPass()) {
             markNoFurtherPasses();
             return false;
         }
         return runForwardPassJump({
             targetLaneCount: Math.min(maxLaneCount, currentLaneCount + 1),
-            fromCompletedPass
+            fromCompletedPass,
+            historyMode
         });
     };
 
-    const advanceToLastPass = ({ fromCompletedPass = true } = {}) => {
+    const advanceToLastPass = ({
+        fromCompletedPass = true,
+        historyMode = 'push'
+    } = {}) => {
         if (!hasLastForwardPass()) {
             markNoFurtherPasses();
             return false;
         }
         return runForwardPassJump({
             targetLaneCount: maxLaneCount,
-            fromCompletedPass
+            fromCompletedPass,
+            historyMode
         });
     };
 
-    const restartGeneration = () => {
+    const restartGeneration = ({ historyMode = 'push' } = {}) => {
         if (forwardPassJumpPending) return false;
 
         forwardPassJumpPending = true;
@@ -1182,8 +1266,9 @@ export function initGenerationController({
             engine?.pause?.(PASS_INTRO_ENGINE_PAUSE_REASON);
             try {
                 rebuildPass({
-                    laneCount: Math.max(1, Math.floor(initialLaneCount || 1)),
-                    resetPipeline: true
+                    laneCount: generationBaseLaneCount,
+                    resetPipeline: true,
+                    routeHistory: historyMode
                 });
                 syncPromptTokenStrip(latestPassState, latestAttentionState, { showGeneratedLogitChip: false });
             } catch (err) {
@@ -1210,7 +1295,10 @@ export function initGenerationController({
             typeof pipeline?.isForwardPassComplete === 'function' && pipeline.isForwardPassComplete()
         );
         prepareUiForImmediatePassJump();
-        return advanceToNextPass({ fromCompletedPass: currentPassComplete });
+        return advanceToNextPass({
+            fromCompletedPass: currentPassComplete,
+            historyMode: 'push'
+        });
     };
 
     const requestLastForwardPass = () => {
@@ -1221,7 +1309,10 @@ export function initGenerationController({
         const currentPassComplete = passComplete || (
             typeof pipeline?.isForwardPassComplete === 'function' && pipeline.isForwardPassComplete()
         );
-        return advanceToLastPass({ fromCompletedPass: currentPassComplete });
+        return advanceToLastPass({
+            fromCompletedPass: currentPassComplete,
+            historyMode: 'push'
+        });
     };
 
     if (overlay.stayBtn) {
@@ -1239,7 +1330,7 @@ export function initGenerationController({
         overlay.advanceBtn.onclick = (event) => {
             event.preventDefault();
             if (!passComplete) return;
-            advanceToNextPass();
+            advanceToNextPass({ historyMode: 'push' });
         };
     }
 
@@ -1248,10 +1339,10 @@ export function initGenerationController({
             event.preventDefault();
             if (!passComplete) return;
             if (currentLaneCount >= maxLaneCount) {
-                restartGeneration();
+                restartGeneration({ historyMode: 'push' });
                 return;
             }
-            advanceToNextPass();
+            advanceToNextPass({ historyMode: 'push' });
         };
     }
 
@@ -1264,7 +1355,9 @@ export function initGenerationController({
             if (isComplete) {
                 passComplete = true;
                 remainingMs = countdownMs;
-                countdownActive = !autoAdvancePaused;
+                const atLastPass = currentLaneCount >= maxLaneCount;
+                autoAdvancePaused = atLastPass ? true : autoAdvancePaused;
+                countdownActive = atLastPass ? false : !autoAdvancePaused;
                 lastTick = now;
                 syncPromptTokenStrip(latestPassState, latestAttentionState, { showGeneratedLogitChip: true });
                 updateOverlay();
@@ -1280,7 +1373,7 @@ export function initGenerationController({
                 lastTick = now;
             }
             if (remainingMs <= 0) {
-                advanceToNextPass();
+                advanceToNextPass({ historyMode: 'push' });
             }
             updateOverlay();
         }
@@ -1298,9 +1391,14 @@ export function initGenerationController({
         hasLastForwardPass,
         isForwardPassJumpPending: () => forwardPassJumpPending,
         isNextForwardPassPending: () => forwardPassJumpPending,
+        syncFromUrl,
         dispose: () => {
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
+                if (window.__llmVisualizedGenerationRoutePopstateListener === handleRoutePopState) {
+                    delete window.__llmVisualizedGenerationRoutePopstateListener;
+                }
+                window.removeEventListener('popstate', handleRoutePopState);
             }
             if (chipCleanup?.dispose) chipCleanup.dispose();
             if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);

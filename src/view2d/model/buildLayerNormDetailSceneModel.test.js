@@ -56,6 +56,17 @@ function createMockActivationSource() {
     };
 }
 
+function expectGradientToUseActiveColorStops(gradientCss = '') {
+    const matches = String(gradientCss || '').match(/#([0-9a-f]{6})/gi) || [];
+    expect(matches.length).toBeGreaterThan(0);
+    const hasColoredStop = matches.some((token) => {
+        const hex = token.slice(1).toLowerCase();
+        return hex.slice(0, 2) !== hex.slice(2, 4)
+            || hex.slice(2, 4) !== hex.slice(4, 6);
+    });
+    expect(hasColoredStop).toBe(true);
+}
+
 describe('buildLayerNormDetailSceneModel', () => {
     function buildScene(target = {
         layerNormKind: 'ln1',
@@ -115,6 +126,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizedCopyNode?.label?.tex).toBe('\\hat{x}');
         expect(scaleNode?.label?.tex).toBe('\\gamma');
         expect(scaleNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.1);
+        expect(scaleNode?.metadata?.card?.cornerRadius).toBe(5);
         expect(scaleNode?.dimensions).toEqual({
             rows: 1,
             cols: D_MODEL
@@ -123,6 +135,8 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(scaledCopyNode?.label?.tex).toBe('\\gamma \\odot \\hat{x}');
         expect(shiftNode?.label?.tex).toBe('\\beta');
         expect(shiftNode?.metadata?.caption?.labelScale).toBeGreaterThan(1.1);
+        expect(shiftNode?.metadata?.card?.cornerRadius).toBe(5);
+        expect(inputNode?.metadata?.card?.cornerRadius).toBe(10);
         expect(outputNode?.label?.tex).toBe('x_{\\ln}');
         expect(normalizationEquationNode?.tex).toBe('\\hat{x} = \\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}');
         expect(normalizationEquationNode?.metadata?.fontScale).toBeGreaterThan(1.3);
@@ -178,7 +192,9 @@ describe('buildLayerNormDetailSceneModel', () => {
             tokenIndex: 1
         });
         expect(scaleNode?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
+        expectGradientToUseActiveColorStops(scaleNode?.rowItems?.[0]?.gradientCss);
         expect(shiftNode?.rowItems?.[0]?.gradientCss).toContain('linear-gradient(');
+        expectGradientToUseActiveColorStops(shiftNode?.rowItems?.[0]?.gradientCss);
         expect(outputNode?.rowItems?.[1]?.gradientCss).toContain('linear-gradient(');
         expect(inputConnectorNode?.source).toMatchObject({
             nodeId: incomingSpacerNode?.id,

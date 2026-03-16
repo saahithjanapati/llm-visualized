@@ -1,4 +1,3 @@
-import { MHA_FINAL_Q_COLOR } from '../../animations/LayerAnimationConstants.js';
 import { getLayerNormParamData } from '../../data/layerNormParams.js';
 import {
     D_MODEL,
@@ -6,10 +5,10 @@ import {
 } from '../../ui/selectionPanelConstants.js';
 import { resolveMhsaTokenMatrixLayoutMetrics } from '../../ui/selectionPanelMhsaLayoutUtils.js';
 import {
-    buildHueRangeOptions,
     mapValueToColor,
     mapValueToHueRange
 } from '../../utils/colors.js';
+import { LAYER_NORM_PARAM_ACTIVE_COLOR_OPTIONS } from '../../utils/layerNormParamColorOptions.js';
 import {
     formatLayerNormLabel,
     formatLayerNormParamLabel
@@ -80,14 +79,8 @@ const NORMALIZATION_EQUATION_OFFSET_Y_SMALL = -11;
 const CONNECTOR_LAYER_GAP = 0;
 const HADAMARD_OPERATOR_TEXT = '⊙';
 const LAYER_NORM_EQUATION_TEX = '\\hat{x} = \\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}';
-
-const LAYER_NORM_PARAM_RANGE_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
-    hueSpread: 0.1,
-    minLightness: 0.34,
-    maxLightness: 0.74,
-    valueMin: -1.8,
-    valueMax: 1.8
-});
+const LAYER_NORM_VECTOR_CORNER_RADIUS = 10;
+const LAYER_NORM_PARAM_CORNER_RADIUS = 5;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -153,7 +146,7 @@ function buildLayerNormParamGradientCss(values = [], direction = '90deg') {
     if (!safeValues.length) return 'none';
     const stops = safeValues.map((value, index) => {
         const ratio = safeValues.length > 1 ? index / (safeValues.length - 1) : 0;
-        return `${colorToCss(mapValueToHueRange(value, LAYER_NORM_PARAM_RANGE_OPTIONS))} ${(ratio * 100).toFixed(4)}%`;
+        return `${colorToCss(mapValueToHueRange(value, LAYER_NORM_PARAM_ACTIVE_COLOR_OPTIONS))} ${(ratio * 100).toFixed(4)}%`;
     });
     if (stops.length === 1) {
         return `linear-gradient(${direction}, ${stops[0].replace(' 0.0000%', ' 0%')}, ${stops[0].replace(' 0.0000%', ' 100%')})`;
@@ -504,7 +497,8 @@ function createLayerNormVectorNode({
     captionLabelScale = INPUT_CAPTION_LABEL_SCALE,
     visualStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     stripStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
-    disableEdgeOrnament = false
+    disableEdgeOrnament = false,
+    cornerRadius = LAYER_NORM_VECTOR_CORNER_RADIUS
 } = {}) {
     return createVectorStripMatrixNode({
         role,
@@ -527,7 +521,7 @@ function createLayerNormVectorNode({
             rowGap: BASE_VECTOR_ROW_GAP,
             paddingX: BASE_VECTOR_PADDING_X,
             paddingY: BASE_VECTOR_PADDING_Y,
-            cornerRadius: 10,
+            cornerRadius,
             bandCount: Math.max(12, measureCols),
             hoverScaleY: 1.12,
             hoverGlowBlur: 10,
@@ -775,6 +769,7 @@ export function buildLayerNormDetailSceneModel({
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL + 5 : BASE_VECTOR_ROW_HEIGHT + 6,
         captionLabelScale: PARAM_SYMBOL_CAPTION_LABEL_SCALE,
+        cornerRadius: LAYER_NORM_PARAM_CORNER_RADIUS,
         visualStyleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
         stripStyleKey: 'layer-norm-scale'
     });
@@ -824,6 +819,7 @@ export function buildLayerNormDetailSceneModel({
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: isSmallScreen ? BASE_VECTOR_ROW_HEIGHT_SMALL + 5 : BASE_VECTOR_ROW_HEIGHT + 6,
         captionLabelScale: PARAM_SYMBOL_CAPTION_LABEL_SCALE,
+        cornerRadius: LAYER_NORM_PARAM_CORNER_RADIUS,
         visualStyleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
         stripStyleKey: 'layer-norm-shift'
     });
