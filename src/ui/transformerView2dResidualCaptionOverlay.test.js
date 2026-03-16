@@ -186,6 +186,14 @@ function buildMhsaFixtures({
         node.role === 'projection-output'
         && String(node.metadata?.kind || '').toLowerCase() === 'v'
     )) || null;
+    const kOutputCopyNode = nodes.find((node) => (
+        node.role === 'projection-output-copy'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const vOutputCopyNode = nodes.find((node) => (
+        node.role === 'projection-output-copy'
+        && String(node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
     const outputNode = kOutputNode;
     const projectionStackNode = nodes.find((node) => node.role === 'projection-stack') || null;
     const qStageNode = nodes.find((node) => (
@@ -248,6 +256,8 @@ function buildMhsaFixtures({
         biasNode,
         kOutputNode,
         vOutputNode,
+        kOutputCopyNode,
+        vOutputCopyNode,
         outputNode,
         projectionStackNode,
         qStageNode,
@@ -540,7 +550,7 @@ function queryCaptionItem(nodeId = '') {
 }
 
 describe('transformerView2dResidualCaptionOverlay', () => {
-    it('adds faded K/V cache branches only during KV-cache prefill', () => {
+    it('adds faded K/V cache branches during KV-cache prefill and decode', () => {
         const prefillFixtures = buildMhsaFixtures({
             kvCacheState: {
                 kvCacheModeEnabled: true,
@@ -550,7 +560,9 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         const decodeFixtures = buildMhsaFixtures({
             kvCacheState: {
                 kvCacheModeEnabled: true,
-                kvCachePrefillActive: false
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
             }
         });
         const disabledFixtures = buildMhsaFixtures();
@@ -568,9 +580,32 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(prefillFixtures.vCacheConnectorNode?.target?.anchor).toBe('left');
             expect(prefillFixtures.kCacheConnectorNode?.metadata?.sourceAnchorMode).toBe('caption-bottom');
             expect(prefillFixtures.vCacheConnectorNode?.metadata?.sourceAnchorMode).toBe('caption-bottom');
+            expect(prefillFixtures.kCacheNode?.metadata?.kvCachePhase).toBe('prefill');
+            expect(prefillFixtures.vCacheNode?.metadata?.kvCachePhase).toBe('prefill');
 
-            expect(decodeFixtures.kCacheNode).toBeNull();
-            expect(decodeFixtures.vCacheNode).toBeNull();
+            expect(decodeFixtures.kCacheNode).toBeTruthy();
+            expect(decodeFixtures.vCacheNode).toBeTruthy();
+            expect(decodeFixtures.kCacheConnectorNode).toBeTruthy();
+            expect(decodeFixtures.vCacheConnectorNode).toBeTruthy();
+            expect(decodeFixtures.kCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
+            expect(decodeFixtures.vCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
+            expect(decodeFixtures.kCacheNode?.metadata?.kvCachePhase).toBe('decode');
+            expect(decodeFixtures.vCacheNode?.metadata?.kvCachePhase).toBe('decode');
+            expect(decodeFixtures.kCacheNode?.rowItems).toHaveLength(1);
+            expect(decodeFixtures.vCacheNode?.rowItems).toHaveLength(1);
+            expect(decodeFixtures.kCacheConnectorNode?.source?.nodeId).toBe(decodeFixtures.kCacheNode?.id);
+            expect(decodeFixtures.vCacheConnectorNode?.source?.nodeId).toBe(decodeFixtures.vCacheNode?.id);
+            expect(decodeFixtures.kOutputCopyNode).toBeTruthy();
+            expect(decodeFixtures.vOutputCopyNode).toBeTruthy();
+            expect(decodeFixtures.kCacheConnectorNode?.target?.nodeId).toBe(decodeFixtures.kOutputCopyNode?.id);
+            expect(decodeFixtures.vCacheConnectorNode?.target?.nodeId).toBe(decodeFixtures.vOutputCopyNode?.id);
+            expect(decodeFixtures.kCacheConnectorNode?.source?.anchor).toBe('bottom');
+            expect(decodeFixtures.vCacheConnectorNode?.source?.anchor).toBe('bottom');
+            expect(decodeFixtures.kCacheConnectorNode?.target?.anchor).toBe('top');
+            expect(decodeFixtures.vCacheConnectorNode?.target?.anchor).toBe('top');
+            expect(decodeFixtures.kCacheConnectorNode?.metadata?.sourceAnchorMode).toBeUndefined();
+            expect(decodeFixtures.vCacheConnectorNode?.metadata?.sourceAnchorMode).toBeUndefined();
+
             expect(disabledFixtures.kCacheNode).toBeNull();
             expect(disabledFixtures.vCacheNode).toBeNull();
         } finally {

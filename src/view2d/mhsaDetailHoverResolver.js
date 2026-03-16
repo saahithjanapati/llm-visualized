@@ -381,11 +381,15 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
     const columnSelections = [];
     const descriptors = [];
     const extraNodeIds = [];
+    const extraConnectorIds = [];
+    const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', safeKind);
+    const cacheNodeId = findProjectionNodeIdByKind(index, 'projection-cache', safeKind);
 
     if (safeKind === 'q') {
         const includeAttentionScorePath = (
             role === 'attention-query-source'
             || role === 'projection-output'
+            || role === 'projection-output-copy'
             || role === 'x-ln-copy'
         );
         descriptors.push(includeAttentionScorePath ? 'queryScorePath' : 'queryStage');
@@ -419,12 +423,22 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
     if (role === 'x-ln-copy') {
         rowSelections.push(...buildProjectionSourceMirrorRowSelections(index, rowIndex));
     }
+    if (role === 'projection-output' || role === 'projection-output-copy') {
+        appendUnique(extraNodeIds, projectionOutputCopyNodeId);
+        appendUnique(extraNodeIds, cacheNodeId);
+        appendUnique(extraConnectorIds, findNodeIdByRole(index, `connector-${safeKind}-cache`));
+        appendUnique(extraConnectorIds, findNodeIdByRole(index, `connector-${safeKind}-cache-copy`));
+    } else if (role === 'projection-cache') {
+        appendUnique(extraNodeIds, projectionOutputCopyNodeId);
+        appendUnique(extraConnectorIds, findNodeIdByRole(index, `connector-${safeKind}-cache-copy`));
+    }
 
     const result = buildPathFocusResult(index, {
         label: `${resolveProjectionLabel(safeKind)} row`,
         info: createTokenInfo(rowHit.rowItem),
         descriptors,
         extraNodeIds,
+        extraConnectorIds,
         dimNodeIds,
         rowSelections,
         columnSelections
@@ -437,7 +451,11 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
             info
         };
     }
-    if (role === 'projection-output' || role === 'attention-query-source') {
+    if (
+        role === 'projection-output'
+        || role === 'projection-output-copy'
+        || role === 'attention-query-source'
+    ) {
         return {
             ...result,
             label: `${resolveProjectionLabel(safeKind)} Vector`,
@@ -454,7 +472,9 @@ function buildProjectionCacheRowResult(index = null, node = null, kind = '', row
     if (!Number.isFinite(rowIndex)) return null;
 
     const projectionOutputNodeId = index?.projectionOutputIdsByKind?.[safeKind] || '';
+    const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', safeKind);
     const cacheConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache`);
+    const cacheCopyConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-copy`);
 
     return buildFocusResult({
         label: `Cached ${resolveProjectionLabel(safeKind)} Vector`,
@@ -463,9 +483,10 @@ function buildProjectionCacheRowResult(index = null, node = null, kind = '', row
         }),
         activeNodeIds: [
             projectionOutputNodeId,
+            projectionOutputCopyNodeId,
             node.id
         ],
-        activeConnectorIds: [cacheConnectorNodeId],
+        activeConnectorIds: [cacheConnectorNodeId, cacheCopyConnectorNodeId],
         rowSelections: [
             {
                 nodeId: projectionOutputNodeId,
@@ -485,7 +506,9 @@ function buildProjectionCacheStageResult(index = null, node = null, kind = '', o
     if (!index || !node?.id || !safeKind) return null;
 
     const projectionOutputNodeId = index?.projectionOutputIdsByKind?.[safeKind] || '';
+    const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', safeKind);
     const cacheConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache`);
+    const cacheCopyConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-copy`);
     const representativeRowItem = Array.isArray(node.rowItems) && node.rowItems.length
         ? node.rowItems[0]
         : null;
@@ -497,9 +520,10 @@ function buildProjectionCacheStageResult(index = null, node = null, kind = '', o
         }),
         activeNodeIds: [
             projectionOutputNodeId,
+            projectionOutputCopyNodeId,
             node.id
         ],
-        activeConnectorIds: [cacheConnectorNodeId],
+        activeConnectorIds: [cacheConnectorNodeId, cacheCopyConnectorNodeId],
         includeFocusState: options?.includeFocusState !== false
     });
 }

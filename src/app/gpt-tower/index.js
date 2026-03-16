@@ -257,7 +257,9 @@ initConveyorSkipButton(pipeline);
 initSkipToEndButton(pipeline);
 initSkipLayerButton(pipeline);
 initSkipMenu(pipeline);
-initSettingsModal(pipeline);
+initSettingsModal(pipeline, {
+    initialKvCacheModeEnabled: initialGenerationRoute.kvCacheModeEnabled
+});
 
 const followModeBtn = document.getElementById('followModeBtn');
 const followModeControls = initFollowModeControls({

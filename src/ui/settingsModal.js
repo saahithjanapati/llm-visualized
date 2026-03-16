@@ -7,6 +7,10 @@ import {
 } from '../utils/constants.js';
 import { getPreference, setPreference } from '../utils/preferences.js';
 import { appState } from '../state/appState.js';
+import {
+    KV_CACHE_MODE_STATE_SYNC_EVENT,
+    dispatchKvCacheModeChanged
+} from '../state/kvCacheModeEvents.js';
 import { ENVIRONMENT_MAP_OPTIONS } from '../utils/environmentMaps.js';
 import { initPerfOverlay } from './perfOverlay.js';
 import { createModalReopenGuard } from './modalReopenGuard.js';
@@ -53,7 +57,9 @@ function formatPlaybackSpeed(value) {
 }
 
 // Wires up the settings modal controls.
-export function initSettingsModal(pipeline) {
+export function initSettingsModal(pipeline, {
+    initialKvCacheModeEnabled = false
+} = {}) {
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsOverlay = document.getElementById('settingsOverlay');
     const settingsClose = document.getElementById('settingsClose');
@@ -109,9 +115,9 @@ export function initSettingsModal(pipeline) {
     appState.devMode = getPreference('devMode', false);
     appState.showPerfOverlay = getPreference('showPerfOverlay', false);
     appState.showPromptTokenStrip = getPreference(PROMPT_TOKEN_STRIP_PREF_KEY, true);
-    // Always start with KV cache mode disabled. This avoids sticky persisted
-    // state unexpectedly enabling decode-mode behavior on page load.
-    appState.kvCacheModeEnabled = false;
+    // Do not restore sticky persisted KV mode. Only an explicit route should
+    // be able to start the app with KV cache enabled.
+    appState.kvCacheModeEnabled = !!initialKvCacheModeEnabled;
     setPreference('kvCacheModeEnabled', false);
     pipeline?.setAutoCameraFollow?.(appState.autoCameraFollow, { immediate: true });
     pipeline?.engine?.setCameraDebugEnabled?.(appState.showCameraDebug);
@@ -235,6 +241,12 @@ export function initSettingsModal(pipeline) {
         const hint = document.getElementById('kvCacheStatusHint');
         if (!hint) return;
         hint.hidden = !enabled;
+    };
+
+    const syncKvCacheModeUi = (enabled) => {
+        const kvCacheModeToggle = document.getElementById('toggleKvCacheMode');
+        if (kvCacheModeToggle) kvCacheModeToggle.checked = !!enabled;
+        updateKvCacheStatusHint(enabled);
     };
 
     const initInlinePercentEditor = ({
@@ -490,16 +502,20 @@ export function initSettingsModal(pipeline) {
         const nextEnabled = !!kvCacheModeToggle.checked;
         appState.kvCacheModeEnabled = nextEnabled;
         setPreference('kvCacheModeEnabled', nextEnabled);
-        updateKvCacheStatusHint(nextEnabled);
-        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-            window.dispatchEvent(new CustomEvent('kvCacheModeChanged', {
-                detail: {
-                    enabled: nextEnabled,
-                    previousEnabled: prevEnabled
-                }
-            }));
-        }
+        syncKvCacheModeUi(nextEnabled);
+        dispatchKvCacheModeChanged({
+            enabled: nextEnabled,
+            previousEnabled: prevEnabled
+        });
     });
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener(KV_CACHE_MODE_STATE_SYNC_EVENT, (event) => {
+            const nextEnabled = !!event?.detail?.enabled;
+            appState.kvCacheModeEnabled = nextEnabled;
+            syncKvCacheModeUi(nextEnabled);
+        });
+    }
 
     const initialBrightness = getPreference(BRIGHTNESS_PREF_KEY, BRIGHTNESS_DEFAULT);
     applyBrightness(initialBrightness, { persist: false });
@@ -545,5 +561,5 @@ export function initSettingsModal(pipeline) {
         setFollowInspectorEnabled(true);
     }
 
-    updateKvCacheStatusHint(appState.kvCacheModeEnabled);
+    syncKvCacheModeUi(appState.kvCacheModeEnabled);
 }

@@ -103,11 +103,18 @@ import {
     getDescriptionPlainText,
     setDescriptionContent
 } from './selectionPanelCopyUtils.js';
+import { createSelectionPanelHistoryNavigation } from './selectionPanelHistoryNavigationUtils.js';
 import {
     formatAttentionSubtitleTokenPart,
     formatTokenLabelForPreview,
     normalizeAttentionValuePart
 } from './selectionPanelFormatUtils.js';
+import {
+    isTransformerView2dSelectionSurface,
+    normalizeSelectionPanelSurface,
+    resolveSelectionPanelSurface,
+    SELECTION_PANEL_SURFACES
+} from './selectionPanelNavigationSurfaceUtils.js';
 import {
     renderSelectionVectorSamplingData,
     resolveSelectionVectorSamplingData
@@ -3895,8 +3902,6 @@ export class SelectionPanel {
         this._lastSelectionLabel = '';
         this._historyEntries = [];
         this._historyIndex = -1;
-        this._historyBackBtn = null;
-        this._historyForwardBtn = null;
         this._createHistoryNavigationControls();
 
         this._animate = this._animate.bind(this);
@@ -5688,45 +5693,45 @@ export class SelectionPanel {
         const titleGroup = header?.querySelector('.detail-title-group');
         if (!header || !titleGroup) return;
 
-        const nav = document.createElement('div');
-        nav.className = 'detail-history-nav';
-        nav.setAttribute('aria-label', 'Detail navigation history');
+        const historyNavigation = createSelectionPanelHistoryNavigation(document);
+        if (!historyNavigation?.nav) return;
 
-        const backBtn = document.createElement('button');
-        backBtn.type = 'button';
-        backBtn.className = 'detail-history-btn detail-history-btn--back';
-        backBtn.dataset.detailAction = PANEL_ACTION_HISTORY_BACK;
-        backBtn.textContent = '\u2039';
-        backBtn.setAttribute('aria-label', 'Previous detail page');
-
-        const forwardBtn = document.createElement('button');
-        forwardBtn.type = 'button';
-        forwardBtn.className = 'detail-history-btn detail-history-btn--forward';
-        forwardBtn.dataset.detailAction = PANEL_ACTION_HISTORY_FORWARD;
-        forwardBtn.textContent = '\u203a';
-        forwardBtn.setAttribute('aria-label', 'Next detail page');
-
-        nav.append(backBtn, forwardBtn);
-        header.insertBefore(nav, titleGroup);
-        this._historyBackBtn = backBtn;
-        this._historyForwardBtn = forwardBtn;
+        header.insertBefore(historyNavigation.nav, titleGroup);
         this._updateHistoryNavigationControls();
     }
 
-    _buildHistoryEntry(type, selection = null) {
+    _buildHistoryEntry(type, selection = null, {
+        selectionSurface = null
+    } = {}) {
         if (!selection || !selection.label) return null;
         const label = normalizeSelectionLabel(selection.label, selection);
         const keyBase = buildSelectionPreviewKey(label, selection);
+        const resolvedSelectionSurface = type === 'transformer-view2d'
+            ? SELECTION_PANEL_SURFACES.TRANSFORMER_VIEW2D
+            : resolveSelectionPanelSurface({
+                selectionSurface,
+                transformerView2dDetailOpen: this._transformerView2dDetailOpen
+            });
         return {
             type,
             selection,
             label,
-            key: `${type}:${keyBase}`
+            selectionSurface: resolvedSelectionSurface,
+            key: `${resolvedSelectionSurface}:${type}:${keyBase}`
         };
     }
 
     _historyEntriesEqual(a, b) {
         return !!a && !!b && a.type === b.type && a.key === b.key;
+    }
+
+    _getHistoryNavigationButtons(action = '') {
+        if (!this.panel || typeof this.panel.querySelectorAll !== 'function') return [];
+        const normalizedAction = String(action || '').trim();
+        if (!normalizedAction) return [];
+        return Array.from(
+            this.panel.querySelectorAll(`[data-detail-action="${normalizedAction}"]`)
+        );
     }
 
     _pushHistoryEntry(entry) {
@@ -5760,20 +5765,33 @@ export class SelectionPanel {
     _updateHistoryNavigationControls() {
         const hasBack = this._historyIndex > 0;
         const hasForward = this._historyIndex >= 0 && this._historyIndex < this._historyEntries.length - 1;
-        if (this._historyBackBtn) {
-            this._historyBackBtn.disabled = !hasBack;
-            this._historyBackBtn.dataset.disabled = hasBack ? 'false' : 'true';
-        }
-        if (this._historyForwardBtn) {
-            this._historyForwardBtn.disabled = !hasForward;
-            this._historyForwardBtn.dataset.disabled = hasForward ? 'false' : 'true';
-        }
+        this._getHistoryNavigationButtons(PANEL_ACTION_HISTORY_BACK).forEach((button) => {
+            button.disabled = !hasBack;
+            button.dataset.disabled = hasBack ? 'false' : 'true';
+        });
+        this._getHistoryNavigationButtons(PANEL_ACTION_HISTORY_FORWARD).forEach((button) => {
+            button.disabled = !hasForward;
+            button.dataset.disabled = hasForward ? 'false' : 'true';
+        });
+    }
+
+    _buildHistorySelectionOptions(entry = null) {
+        const selectionSurface = normalizeSelectionPanelSurface(
+            entry?.selectionSurface,
+            SELECTION_PANEL_SURFACES.PANEL
+        );
+        return {
+            fromHistory: true,
+            selectionSurface,
+            preserveTransformerView2d: selectionSurface === SELECTION_PANEL_SURFACES.TRANSFORMER_VIEW2D
+        };
     }
 
     _applyHistoryEntry(entry) {
         if (!entry || !entry.selection) return false;
+        const historySelectionOptions = this._buildHistorySelectionOptions(entry);
         if (entry.type === 'gelu') {
-            this.showSelection(entry.selection, { fromHistory: true });
+            this.showSelection(entry.selection, historySelectionOptions);
             this._openGeluDetailPreview({
                 fromHistory: true,
                 sourceSelection: entry.selection
@@ -5781,7 +5799,7 @@ export class SelectionPanel {
             return true;
         }
         if (entry.type === 'softmax') {
-            this.showSelection(entry.selection, { fromHistory: true });
+            this.showSelection(entry.selection, historySelectionOptions);
             this._openSoftmaxDetailPreview({
                 fromHistory: true,
                 sourceSelection: entry.selection
@@ -5789,7 +5807,7 @@ export class SelectionPanel {
             return true;
         }
         if (entry.type === 'transformer-view2d') {
-            this.showSelection(entry.selection, { fromHistory: true });
+            this.showSelection(entry.selection, historySelectionOptions);
             this._openTransformerView2dPreview({
                 fromHistory: true,
                 sourceSelection: entry.selection
@@ -5797,7 +5815,7 @@ export class SelectionPanel {
             return true;
         }
         if (entry.type === 'selection') {
-            this.showSelection(entry.selection, { fromHistory: true });
+            this.showSelection(entry.selection, historySelectionOptions);
             return true;
         }
         return false;
@@ -15344,8 +15362,14 @@ export class SelectionPanel {
         if (!this.isReady || !selection || !selection.label) return;
         const fromHistory = options?.fromHistory === true;
         const scrollPanelToTop = options?.scrollPanelToTop === true;
-        const preserveTransformerView2d = options?.preserveTransformerView2d === true
-            && this._transformerView2dDetailOpen;
+        const selectionSurface = resolveSelectionPanelSurface({
+            selectionSurface: options?.selectionSurface,
+            preserveTransformerView2d: options?.preserveTransformerView2d === true,
+            transformerView2dDetailOpen: this._transformerView2dDetailOpen
+        });
+        const preserveTransformerView2d = isTransformerView2dSelectionSurface({
+            selectionSurface
+        }) && this._transformerView2dDetailOpen;
 
         this._closeSoftmaxDetailPreview({ restoreSelection: false, restartLoop: false });
         this._closeGeluDetailPreview({ restoreSelection: false, restartLoop: false });
@@ -15790,7 +15814,9 @@ export class SelectionPanel {
         this._scheduleSelectionEquationFit();
         this._scheduleDimensionLabelFit();
         if (!fromHistory) {
-            const entry = this._buildHistoryEntry('selection', selection);
+            const entry = this._buildHistoryEntry('selection', selection, {
+                selectionSurface
+            });
             this._pushHistoryEntry(entry);
         } else {
             this._updateHistoryNavigationControls();

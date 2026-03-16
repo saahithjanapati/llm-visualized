@@ -44,6 +44,7 @@ import {
 } from '../view2d/transformerView2dRoute.js';
 import { View2dViewportController, resolveViewportFitTransform } from '../view2d/runtime/View2dViewportController.js';
 import { createHoverLabelOverlay } from './hoverLabelOverlay.js';
+import { createSelectionPanelHistoryNavigation } from './selectionPanelHistoryNavigationUtils.js';
 import { createTransformerView2dResidualCaptionOverlay } from './transformerView2dResidualCaptionOverlay.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 import { ATTENTION_VALUE_PLACEHOLDER } from './selectionPanelConstants.js';
@@ -453,11 +454,19 @@ export function createTransformerView2dDetailView(panelEl, {
     const tokenStrip = root.querySelector('.detail-transformer-view2d-token-strip');
     const tokenStripTokens = root.querySelector('[data-transformer-view2d-role="token-strip-tokens"]');
     const selectionSidebar = root.querySelector('.detail-transformer-view2d-selection-sidebar');
+    const selectionSidebarHeader = root.querySelector('.detail-transformer-view2d-selection-sidebar-header');
     const selectionSidebarBody = root.querySelector('[data-transformer-view2d-role="selection-sidebar-body"]');
     const selectionSidebarTitle = root.querySelector('[data-transformer-view2d-role="selection-sidebar-title"]');
     const selectionSidebarSubtitle = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle"]');
     const selectionSidebarSubtitleSecondary = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle-secondary"]');
     const selectionSidebarSubtitleTertiary = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle-tertiary"]');
+    const selectionSidebarHistoryNavigation = createSelectionPanelHistoryNavigation(document);
+    if (selectionSidebarHeader && selectionSidebarHistoryNavigation?.nav) {
+        selectionSidebarHeader.insertBefore(
+            selectionSidebarHistoryNavigation.nav,
+            selectionSidebarHeader.firstChild || null
+        );
+    }
     const tokenHoverSync = createTransformerView2dTokenHoverSync({
         container: tokenStripTokens
     });

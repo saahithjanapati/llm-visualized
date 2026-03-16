@@ -8,6 +8,10 @@ import {
 } from '../../utils/trailConstants.js';
 import { refreshTrailDisplayScales } from '../../utils/trailUtils.js';
 import { appState } from '../../state/appState.js';
+import {
+    KV_CACHE_MODE_CHANGED_EVENT,
+    dispatchKvCacheModeStateSync
+} from '../../state/kvCacheModeEvents.js';
 import { getIncompleteUtf8TokenDisplay } from '../../utils/tokenEncodingNotes.js';
 import { resolveLogitEntryText } from '../../utils/logitTokenText.js';
 import { addEmbeddingAndTokenChips } from './tokenChips.js';
@@ -648,13 +652,14 @@ export function initGenerationController({
         laneCount,
         baseLaneCount: generationBaseLaneCount,
         maxLaneCount,
+        kvCacheModeEnabled: kvModeEnabled,
         historyMode
     });
-    const resolveLaneCountFromCurrentUrl = () => resolveGenerationRoute(window.location, {
+    const resolveRouteStateFromCurrentUrl = () => resolveGenerationRoute(window.location, {
         defaultLaneCount: generationBaseLaneCount,
         baseLaneCount: generationBaseLaneCount,
         maxLaneCount
-    }).laneCount;
+    });
 
     const resolveKvSessionBase = (laneCountValue) => {
         const initialBase = kvPrefillBaseLaneCount;
@@ -679,6 +684,41 @@ export function initGenerationController({
         });
         appState.kvCachePassIndex = passMode.passIndex;
         appState.kvCachePrefillActive = passMode.kvCachePrefillActive;
+    };
+
+    const applyKvModeEnabled = (nextEnabled, {
+        syncUi = false
+    } = {}) => {
+        const prevEnabled = kvModeEnabled;
+        const next = !!nextEnabled;
+        const isEnablingKv = next && !prevEnabled;
+        const isDisablingKv = !next && prevEnabled;
+
+        kvModeEnabled = next;
+        appState.kvCacheModeEnabled = next;
+        if (isEnablingKv) {
+            // In KV mode, the prompt/base token window is the prefill pass. If
+            // KV is enabled later, rebuilding the current larger token window
+            // still resolves correctly as decode against that base.
+            kvSessionBaseLaneCount = kvPrefillBaseLaneCount;
+        } else if (isDisablingKv) {
+            kvSessionBaseLaneCount = null;
+        } else if (next && !(Number.isFinite(kvSessionBaseLaneCount) && kvSessionBaseLaneCount > 0)) {
+            // Guard against event ordering that skips the transition branch.
+            kvSessionBaseLaneCount = kvPrefillBaseLaneCount;
+        }
+
+        syncKvCachePassState(currentLaneCount);
+        if (syncUi) {
+            dispatchKvCacheModeStateSync(next);
+        }
+
+        return {
+            prevEnabled,
+            nextEnabled: next,
+            isEnablingKv,
+            isDisablingKv
+        };
     };
 
     const resolvePassPlan = (laneCountValue) => {
@@ -1054,26 +1094,9 @@ export function initGenerationController({
 
     const handleKvCacheModeChanged = (event) => {
         const detail = event && event.detail ? event.detail : null;
-        const nextEnabled = !!(detail && detail.enabled);
-        const prevEnabled = (detail && typeof detail.previousEnabled === 'boolean')
-            ? detail.previousEnabled
-            : kvModeEnabled;
-        const isEnablingKv = nextEnabled && !prevEnabled;
-        const isDisablingKv = !nextEnabled && prevEnabled;
-        kvModeEnabled = nextEnabled;
-        appState.kvCacheModeEnabled = nextEnabled;
-        if (isEnablingKv) {
-            // In KV mode, the prompt/base token window is the prefill pass. If
-            // KV is enabled later, rebuilding the current larger token window
-            // still resolves correctly as decode against that base.
-            kvSessionBaseLaneCount = kvPrefillBaseLaneCount;
-        } else if (isDisablingKv) {
-            kvSessionBaseLaneCount = null;
-        } else if (nextEnabled && !(Number.isFinite(kvSessionBaseLaneCount) && kvSessionBaseLaneCount > 0)) {
-            // Guard against event ordering that skips the transition branch.
-            kvSessionBaseLaneCount = kvPrefillBaseLaneCount;
-        }
-        syncKvCachePassState(currentLaneCount);
+        const {
+            isEnablingKv
+        } = applyKvModeEnabled(detail && detail.enabled);
         pipeline?.dispatchEvent?.(new Event('progress'));
         if (isEnablingKv) {
             // Always restart immediately when enabling so the active pass is
@@ -1082,17 +1105,26 @@ export function initGenerationController({
         } else if (!passComplete) {
             rebuildPass({ laneCount: currentLaneCount, resetPipeline: true });
         } else {
+            syncCurrentRoute({
+                laneCount: currentLaneCount,
+                historyMode: 'replace'
+            });
             updateOverlay();
         }
     };
 
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-        window.addEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
+        window.addEventListener(KV_CACHE_MODE_CHANGED_EVENT, handleKvCacheModeChanged);
     }
 
     const syncFromUrl = ({ historyMode = 'replace' } = {}) => {
-        const targetLaneCount = resolveLaneCountFromCurrentUrl();
-        if (targetLaneCount === currentLaneCount) {
+        const routeState = resolveRouteStateFromCurrentUrl();
+        const targetLaneCount = routeState.laneCount;
+        const targetKvModeEnabled = !!routeState.kvCacheModeEnabled;
+        const laneCountChanged = targetLaneCount !== currentLaneCount;
+        const kvModeChanged = targetKvModeEnabled !== kvModeEnabled;
+
+        if (!laneCountChanged && !kvModeChanged) {
             syncCurrentRoute({
                 laneCount: currentLaneCount,
                 historyMode
@@ -1100,6 +1132,9 @@ export function initGenerationController({
             return false;
         }
         if (forwardPassJumpPending) return false;
+        if (kvModeChanged) {
+            applyKvModeEnabled(targetKvModeEnabled, { syncUi: true });
+        }
         rebuildPass({
             laneCount: targetLaneCount,
             resetPipeline: true,
@@ -1123,9 +1158,10 @@ export function initGenerationController({
         window.addEventListener('popstate', handleRoutePopState);
     }
 
+    const initialPassPlan = resolvePassPlan(currentLaneCount);
     rebuildPass({
         laneCount: currentLaneCount,
-        passState: initialPassState,
+        passState: initialPassPlan.kvCacheDecodeActive ? null : initialPassState,
         resetPipeline: kvModeEnabled
     });
 
@@ -1157,7 +1193,7 @@ export function initGenerationController({
             syncFromUrl,
             dispose: () => {
                 if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
-                    window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
+                    window.removeEventListener(KV_CACHE_MODE_CHANGED_EVENT, handleKvCacheModeChanged);
                     if (window.__llmVisualizedGenerationRoutePopstateListener === handleRoutePopState) {
                         delete window.__llmVisualizedGenerationRoutePopstateListener;
                     }
@@ -1397,7 +1433,7 @@ export function initGenerationController({
         syncFromUrl,
         dispose: () => {
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
-                window.removeEventListener('kvCacheModeChanged', handleKvCacheModeChanged);
+                window.removeEventListener(KV_CACHE_MODE_CHANGED_EVENT, handleKvCacheModeChanged);
                 if (window.__llmVisualizedGenerationRoutePopstateListener === handleRoutePopState) {
                     delete window.__llmVisualizedGenerationRoutePopstateListener;
                 }

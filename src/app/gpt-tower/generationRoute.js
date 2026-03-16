@@ -1,5 +1,7 @@
 const GENERATION_ROUTE_PARAM_TOKEN = 'token';
 const GENERATION_ROUTE_PARAM_GENERATION = 'generation';
+const GENERATION_ROUTE_PARAM_KV_CACHE = 'kvCache';
+const GENERATION_ROUTE_PARAM_KV_CACHE_LEGACY = 'kv';
 
 function resolveUrlLike(urlLike = null) {
     let candidate = urlLike;
@@ -57,6 +59,35 @@ function readRouteIndex(searchParams, key, {
     return floored;
 }
 
+function readRouteBoolean(searchParams, ...keys) {
+    if (!searchParams) return null;
+    for (const key of keys) {
+        if (!searchParams.has(key)) continue;
+        const normalized = String(searchParams.get(key) || '').trim().toLowerCase();
+        if (!normalized.length) return true;
+        if (
+            normalized === '1'
+            || normalized === 'true'
+            || normalized === 'yes'
+            || normalized === 'on'
+            || normalized === 'enabled'
+        ) {
+            return true;
+        }
+        if (
+            normalized === '0'
+            || normalized === 'false'
+            || normalized === 'no'
+            || normalized === 'off'
+            || normalized === 'disabled'
+        ) {
+            return false;
+        }
+        return true;
+    }
+    return null;
+}
+
 export function resolveGenerationRoute(urlLike = null, {
     defaultLaneCount = 1,
     baseLaneCount = defaultLaneCount,
@@ -73,6 +104,7 @@ export function resolveGenerationRoute(urlLike = null, {
             laneCount: safeDefaultLaneCount,
             token: safeDefaultLaneCount,
             generation: Math.max(0, safeDefaultLaneCount - safeBaseLaneCount),
+            kvCacheModeEnabled: false,
             hasExplicitRoute: false
         };
     }
@@ -82,6 +114,11 @@ export function resolveGenerationRoute(urlLike = null, {
         max: maxLaneCount
     });
     const generation = readRouteIndex(url.searchParams, GENERATION_ROUTE_PARAM_GENERATION, { min: 0 });
+    const kvCacheModeEnabled = readRouteBoolean(
+        url.searchParams,
+        GENERATION_ROUTE_PARAM_KV_CACHE,
+        GENERATION_ROUTE_PARAM_KV_CACHE_LEGACY
+    ) === true;
 
     let laneCount = safeDefaultLaneCount;
     let hasExplicitRoute = false;
@@ -102,6 +139,7 @@ export function resolveGenerationRoute(urlLike = null, {
         laneCount: safeLaneCount,
         token: safeLaneCount,
         generation: Math.max(0, safeLaneCount - safeBaseLaneCount),
+        kvCacheModeEnabled,
         hasExplicitRoute
     };
 }
@@ -110,6 +148,7 @@ export function syncGenerationRoute({
     laneCount = 1,
     baseLaneCount = 1,
     maxLaneCount = null,
+    kvCacheModeEnabled = false,
     historyMode = 'replace'
 } = {}) {
     if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return false;
@@ -130,6 +169,12 @@ export function syncGenerationRoute({
     } else {
         nextUrl.searchParams.set(GENERATION_ROUTE_PARAM_TOKEN, String(safeLaneCount));
         nextUrl.searchParams.set(GENERATION_ROUTE_PARAM_GENERATION, String(generation));
+    }
+    nextUrl.searchParams.delete(GENERATION_ROUTE_PARAM_KV_CACHE_LEGACY);
+    if (kvCacheModeEnabled) {
+        nextUrl.searchParams.set(GENERATION_ROUTE_PARAM_KV_CACHE, '1');
+    } else {
+        nextUrl.searchParams.delete(GENERATION_ROUTE_PARAM_KV_CACHE);
     }
 
     const nextHref = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;

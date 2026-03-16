@@ -2222,6 +2222,9 @@ export function buildTransformerSceneModel({
         kvCacheState
     });
     const tokenRefs = resolveVisibleTokenRefs(activationSource, sceneTokenIndices, sceneTokenLabels);
+    const mhsaHeadDetailTokenRefs = normalizedKvCacheState.kvCacheDecodeActive
+        ? resolveVisibleTokenRefs(activationSource, tokenIndices, tokenLabels)
+        : tokenRefs;
     const resolvedTokens = visualTokens || resolveView2dVisualTokens();
     const redirectedConcatDetailTarget = normalizeConcatDetailTarget(concatDetailTarget);
     const requestedOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(outputProjectionDetailTarget)
@@ -2262,8 +2265,8 @@ export function buildTransformerSceneModel({
             activationSource,
             layerIndex: resolvedHeadDetailTarget.layerIndex,
             headIndex: resolvedHeadDetailTarget.headIndex,
-            tokenIndices: tokenRefs.map((tokenRef) => tokenRef.tokenIndex),
-            tokenLabels: tokenRefs.map((tokenRef) => tokenRef.tokenLabel),
+            tokenIndices: mhsaHeadDetailTokenRefs.map((tokenRef) => tokenRef.tokenIndex),
+            tokenLabels: mhsaHeadDetailTokenRefs.map((tokenRef) => tokenRef.tokenLabel),
             isSmallScreen,
             visualTokens: resolvedTokens,
             kvCacheState: normalizedKvCacheState

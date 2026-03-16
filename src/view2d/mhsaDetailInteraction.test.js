@@ -242,8 +242,16 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
     const softmaxLabelNode = nodes.find((node) => node.role === 'attention-softmax-label') || null;
     const softmaxOpenNode = nodes.find((node) => node.role === 'attention-softmax-open') || null;
     const softmaxCloseNode = nodes.find((node) => node.role === 'attention-softmax-close') || null;
+    const findDecodeConcatNode = (role, kind) => nodes.find((node) => (
+        node.role === role
+        && String(node.metadata?.kind || node.semantic?.branchKey || '').toLowerCase() === kind
+    )) || null;
     const keyProjectionOutputNode = nodes.find((node) => (
         node.role === 'projection-output'
+        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
+    const keyProjectionOutputCopyNode = nodes.find((node) => (
+        node.role === 'projection-output-copy'
         && String(node.metadata?.kind || '').toLowerCase() === 'k'
     )) || null;
     const keyCacheNode = nodes.find((node) => (
@@ -254,6 +262,22 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         node.role === 'projection-cache'
         && String(node.semantic?.branchKey || '').toLowerCase() === 'v'
     )) || null;
+    const valueProjectionOutputCopyNode = nodes.find((node) => (
+        node.role === 'projection-output-copy'
+        && String(node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
+    const keyCacheConcatLabelNode = findDecodeConcatNode('projection-cache-concat-label', 'k');
+    const keyCacheConcatOpenNode = findDecodeConcatNode('projection-cache-concat-open', 'k');
+    const keyCacheConcatSeparatorNode = findDecodeConcatNode('projection-cache-concat-separator', 'k');
+    const keyCacheConcatCloseNode = findDecodeConcatNode('projection-cache-concat-close', 'k');
+    const keyCacheConcatEqualsNode = findDecodeConcatNode('projection-cache-concat-equals', 'k');
+    const keyCacheConcatResultNode = findDecodeConcatNode('projection-cache-concat-result', 'k');
+    const valueCacheConcatLabelNode = findDecodeConcatNode('projection-cache-concat-label', 'v');
+    const valueCacheConcatOpenNode = findDecodeConcatNode('projection-cache-concat-open', 'v');
+    const valueCacheConcatSeparatorNode = findDecodeConcatNode('projection-cache-concat-separator', 'v');
+    const valueCacheConcatCloseNode = findDecodeConcatNode('projection-cache-concat-close', 'v');
+    const valueCacheConcatEqualsNode = findDecodeConcatNode('projection-cache-concat-equals', 'v');
+    const valueCacheConcatResultNode = findDecodeConcatNode('projection-cache-concat-result', 'v');
     const qktEquationNode = nodes.find((node) => node.role === 'attention-qkt-equation') || null;
     const connectorKNode = nodes.find((node) => node.role === 'connector-k') || null;
     const connectorQNode = nodes.find((node) => node.role === 'connector-q') || null;
@@ -262,6 +286,8 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
     const connectorVNode = nodes.find((node) => node.role === 'connector-v') || null;
     const connectorKCacheNode = nodes.find((node) => node.role === 'connector-k-cache') || null;
     const connectorVCacheNode = nodes.find((node) => node.role === 'connector-v-cache') || null;
+    const connectorKCacheCopyNode = nodes.find((node) => node.role === 'connector-k-cache-copy') || null;
+    const connectorVCacheCopyNode = nodes.find((node) => node.role === 'connector-v-cache-copy') || null;
     const connectorXlnQNode = nodes.find((node) => node.role === 'connector-xln-q') || null;
     const connectorXlnKNode = nodes.find((node) => node.role === 'connector-xln-k') || null;
     const connectorXlnVNode = nodes.find((node) => node.role === 'connector-xln-v') || null;
@@ -309,8 +335,22 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         softmaxOpenNode,
         softmaxCloseNode,
         keyProjectionOutputNode,
+        keyProjectionOutputCopyNode,
         keyCacheNode,
         valueCacheNode,
+        valueProjectionOutputCopyNode,
+        keyCacheConcatLabelNode,
+        keyCacheConcatOpenNode,
+        keyCacheConcatSeparatorNode,
+        keyCacheConcatCloseNode,
+        keyCacheConcatEqualsNode,
+        keyCacheConcatResultNode,
+        valueCacheConcatLabelNode,
+        valueCacheConcatOpenNode,
+        valueCacheConcatSeparatorNode,
+        valueCacheConcatCloseNode,
+        valueCacheConcatEqualsNode,
+        valueCacheConcatResultNode,
         qktEquationNode,
         connectorQNode,
         connectorKNode,
@@ -319,6 +359,8 @@ function buildSceneFixtures(tokenCount = TOKEN_LABELS.length, {
         connectorVNode,
         connectorKCacheNode,
         connectorVCacheNode,
+        connectorKCacheCopyNode,
+        connectorVCacheCopyNode,
         connectorXlnQNode,
         connectorXlnKNode,
         connectorXlnVNode,
@@ -1373,6 +1415,253 @@ describe('MHSA detail transpose view', () => {
             nodeId: valueCacheNode?.id,
             rowIndex: 0
         });
+    });
+
+    it('stacks decode K/V caches above the copied live rows inside concat equations', () => {
+        const {
+            scene,
+            layout,
+            keyProjectionOutputNode,
+            valueProjectionOutputNode,
+            transposeNode,
+            keyProjectionOutputCopyNode,
+            valueProjectionOutputCopyNode,
+            keyCacheNode,
+            valueCacheNode,
+            keyCacheConcatLabelNode,
+            keyCacheConcatOpenNode,
+            keyCacheConcatSeparatorNode,
+            keyCacheConcatCloseNode,
+            keyCacheConcatEqualsNode,
+            keyCacheConcatResultNode,
+            valueCacheConcatLabelNode,
+            valueCacheConcatOpenNode,
+            valueCacheConcatSeparatorNode,
+            valueCacheConcatCloseNode,
+            valueCacheConcatEqualsNode,
+            valueCacheConcatResultNode,
+            connectorKCacheNode,
+            connectorVCacheNode,
+            connectorKCacheCopyNode,
+            connectorVCacheCopyNode
+        } = buildSceneFixtures(4, {
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
+            }
+        });
+        const nonDecodeScene = buildMhsaSceneModel({
+            previewData: createPreviewData(4),
+            layerIndex: 2,
+            headIndex: 1
+        });
+        const nonDecodeLayout = buildSceneLayout(nonDecodeScene);
+        const decodeProjectionStackNode = flattenSceneNodes(scene).find((node) => node.role === 'projection-stack') || null;
+        const nonDecodeProjectionStackNode = flattenSceneNodes(nonDecodeScene).find((node) => node.role === 'projection-stack') || null;
+        const nonDecodeTransposeNode = flattenSceneNodes(nonDecodeScene).find((node) => (
+            node.role === 'attention-key-transpose'
+        )) || null;
+
+        const keyOutputEntry = layout?.registry?.getNodeEntry(keyProjectionOutputNode?.id || '');
+        const valueOutputEntry = layout?.registry?.getNodeEntry(valueProjectionOutputNode?.id || '');
+        const decodeTransposeEntry = layout?.registry?.getNodeEntry(transposeNode?.id || '');
+        const nonDecodeTransposeEntry = nonDecodeLayout?.registry?.getNodeEntry(nonDecodeTransposeNode?.id || '');
+        const keyOutputCopyEntry = layout?.registry?.getNodeEntry(keyProjectionOutputCopyNode?.id || '');
+        const valueOutputCopyEntry = layout?.registry?.getNodeEntry(valueProjectionOutputCopyNode?.id || '');
+        const keyCacheEntry = layout?.registry?.getNodeEntry(keyCacheNode?.id || '');
+        const valueCacheEntry = layout?.registry?.getNodeEntry(valueCacheNode?.id || '');
+        const keyConcatLabelEntry = layout?.registry?.getNodeEntry(keyCacheConcatLabelNode?.id || '');
+        const keyConcatOpenEntry = layout?.registry?.getNodeEntry(keyCacheConcatOpenNode?.id || '');
+        const keyConcatSeparatorEntry = layout?.registry?.getNodeEntry(keyCacheConcatSeparatorNode?.id || '');
+        const keyConcatCloseEntry = layout?.registry?.getNodeEntry(keyCacheConcatCloseNode?.id || '');
+        const keyConcatEqualsEntry = layout?.registry?.getNodeEntry(keyCacheConcatEqualsNode?.id || '');
+        const keyConcatResultEntry = layout?.registry?.getNodeEntry(keyCacheConcatResultNode?.id || '');
+        const valueConcatLabelEntry = layout?.registry?.getNodeEntry(valueCacheConcatLabelNode?.id || '');
+        const valueConcatOpenEntry = layout?.registry?.getNodeEntry(valueCacheConcatOpenNode?.id || '');
+        const valueConcatSeparatorEntry = layout?.registry?.getNodeEntry(valueCacheConcatSeparatorNode?.id || '');
+        const valueConcatCloseEntry = layout?.registry?.getNodeEntry(valueCacheConcatCloseNode?.id || '');
+        const valueConcatEqualsEntry = layout?.registry?.getNodeEntry(valueCacheConcatEqualsNode?.id || '');
+        const valueConcatResultEntry = layout?.registry?.getNodeEntry(valueCacheConcatResultNode?.id || '');
+        const keyConnectorEntry = layout?.registry?.getConnectorEntry(connectorKCacheNode?.id || '');
+        const valueConnectorEntry = layout?.registry?.getConnectorEntry(connectorVCacheNode?.id || '');
+        const keyCopyConnectorEntry = layout?.registry?.getConnectorEntry(connectorKCacheCopyNode?.id || '');
+        const valueCopyConnectorEntry = layout?.registry?.getConnectorEntry(connectorVCacheCopyNode?.id || '');
+        const keyConnectorLastPoint = keyConnectorEntry?.pathPoints?.[
+            Math.max(0, (keyConnectorEntry?.pathPoints?.length || 1) - 1)
+        ];
+        const valueConnectorLastPoint = valueConnectorEntry?.pathPoints?.[
+            Math.max(0, (valueConnectorEntry?.pathPoints?.length || 1) - 1)
+        ];
+
+        expect(keyProjectionOutputNode?.dimensions?.rows).toBe(1);
+        expect(valueProjectionOutputNode?.dimensions?.rows).toBe(1);
+        expect(keyProjectionOutputNode?.rowItems).toHaveLength(1);
+        expect(valueProjectionOutputNode?.rowItems).toHaveLength(1);
+        expect(keyProjectionOutputCopyNode?.dimensions?.rows).toBe(1);
+        expect(valueProjectionOutputCopyNode?.dimensions?.rows).toBe(1);
+        expect(keyProjectionOutputCopyNode?.rowItems).toHaveLength(1);
+        expect(valueProjectionOutputCopyNode?.rowItems).toHaveLength(1);
+        expect(keyProjectionOutputCopyNode?.rowItems?.[0]?.semantic?.tokenIndex)
+            .toBe(keyProjectionOutputNode?.rowItems?.[0]?.semantic?.tokenIndex);
+        expect(valueProjectionOutputCopyNode?.rowItems?.[0]?.semantic?.tokenIndex)
+            .toBe(valueProjectionOutputNode?.rowItems?.[0]?.semantic?.tokenIndex);
+        expect(Number(decodeProjectionStackNode?.metadata?.gapOverride) || 0)
+            .toBeGreaterThan(Number(nonDecodeProjectionStackNode?.metadata?.gapOverride) || 0);
+        expect(
+            (decodeTransposeEntry?.contentBounds?.y || 0) - (keyOutputEntry?.contentBounds?.y || 0)
+        ).toBeLessThan(
+            ((nonDecodeTransposeEntry?.contentBounds?.y || 0) - (
+                nonDecodeLayout?.registry?.getNodeEntry(
+                    flattenSceneNodes(nonDecodeScene).find((node) => (
+                        node.role === 'projection-output'
+                        && String(node.metadata?.kind || '').toLowerCase() === 'k'
+                    ))?.id || ''
+                )?.contentBounds?.y || 0
+            ))
+        );
+
+        expect(keyCacheNode?.dimensions?.rows).toBe(3);
+        expect(valueCacheNode?.dimensions?.rows).toBe(3);
+        expect(keyCacheNode?.rowItems).toHaveLength(3);
+        expect(valueCacheNode?.rowItems).toHaveLength(3);
+        expect(keyCacheConcatLabelNode?.text).toBe('concat');
+        expect(valueCacheConcatLabelNode?.text).toBe('concat');
+        expect(keyCacheConcatResultNode?.text).toBe('K');
+        expect(valueCacheConcatResultNode?.text).toBe('V');
+        expect(keyCacheConcatOpenNode?.text).toBe('(');
+        expect(keyCacheConcatCloseNode?.text).toBe(')');
+        expect(keyCacheConcatSeparatorNode?.text).toBe(',');
+        expect(keyCacheConcatEqualsNode?.text).toBe('=');
+        expect(valueCacheConcatOpenNode?.text).toBe('(');
+        expect(valueCacheConcatCloseNode?.text).toBe(')');
+        expect(valueCacheConcatSeparatorNode?.text).toBe(',');
+        expect(valueCacheConcatEqualsNode?.text).toBe('=');
+
+        expect(keyOutputCopyEntry?.contentBounds?.x).toBeGreaterThan(
+            (keyOutputEntry?.contentBounds?.x || 0) + (keyOutputEntry?.contentBounds?.width || 0)
+        );
+        expect(valueOutputCopyEntry?.contentBounds?.x).toBeGreaterThan(
+            (valueOutputEntry?.contentBounds?.x || 0) + (valueOutputEntry?.contentBounds?.width || 0)
+        );
+        expect(Math.abs(
+            (keyCacheEntry?.contentBounds?.x || 0) - (keyOutputCopyEntry?.contentBounds?.x || 0)
+        )).toBeLessThanOrEqual(12);
+        expect(Math.abs(
+            (valueCacheEntry?.contentBounds?.x || 0) - (valueOutputCopyEntry?.contentBounds?.x || 0)
+        )).toBeLessThanOrEqual(12);
+        expect(
+            (keyCacheEntry?.contentBounds?.y || 0) + (keyCacheEntry?.contentBounds?.height || 0)
+        ).toBeLessThan(keyOutputCopyEntry?.contentBounds?.y || 0);
+        expect(
+            (valueCacheEntry?.contentBounds?.y || 0) + (valueCacheEntry?.contentBounds?.height || 0)
+        ).toBeLessThan(valueOutputCopyEntry?.contentBounds?.y || 0);
+
+        expect(keyConcatLabelEntry?.contentBounds?.x).toBeGreaterThan(
+            (keyOutputEntry?.contentBounds?.x || 0) + (keyOutputEntry?.contentBounds?.width || 0)
+        );
+        expect(keyConcatOpenEntry?.contentBounds?.x).toBeGreaterThan(
+            (keyConcatLabelEntry?.contentBounds?.x || 0) + (keyConcatLabelEntry?.contentBounds?.width || 0)
+        );
+        expect(keyConcatSeparatorEntry?.contentBounds?.x).toBeGreaterThan(
+            (keyCacheEntry?.contentBounds?.x || 0) + (keyCacheEntry?.contentBounds?.width || 0)
+        );
+        expect(keyConcatCloseEntry?.contentBounds?.x).toBeGreaterThan(
+            (keyConcatSeparatorEntry?.contentBounds?.x || 0) + (keyConcatSeparatorEntry?.contentBounds?.width || 0)
+        );
+        expect(keyConcatEqualsEntry?.contentBounds?.x).toBeGreaterThan(
+            (keyConcatCloseEntry?.contentBounds?.x || 0) + (keyConcatCloseEntry?.contentBounds?.width || 0)
+        );
+        expect(keyConcatResultEntry?.contentBounds?.x).toBeGreaterThan(
+            (keyConcatEqualsEntry?.contentBounds?.x || 0) + (keyConcatEqualsEntry?.contentBounds?.width || 0)
+        );
+        expect(valueConcatLabelEntry?.contentBounds?.x).toBeGreaterThan(
+            (valueOutputEntry?.contentBounds?.x || 0) + (valueOutputEntry?.contentBounds?.width || 0)
+        );
+        expect(valueConcatOpenEntry?.contentBounds?.x).toBeGreaterThan(
+            (valueConcatLabelEntry?.contentBounds?.x || 0) + (valueConcatLabelEntry?.contentBounds?.width || 0)
+        );
+        expect(valueConcatSeparatorEntry?.contentBounds?.x).toBeGreaterThan(
+            (valueCacheEntry?.contentBounds?.x || 0) + (valueCacheEntry?.contentBounds?.width || 0)
+        );
+        expect(valueConcatCloseEntry?.contentBounds?.x).toBeGreaterThan(
+            (valueConcatSeparatorEntry?.contentBounds?.x || 0) + (valueConcatSeparatorEntry?.contentBounds?.width || 0)
+        );
+        expect(valueConcatEqualsEntry?.contentBounds?.x).toBeGreaterThan(
+            (valueConcatCloseEntry?.contentBounds?.x || 0) + (valueConcatCloseEntry?.contentBounds?.width || 0)
+        );
+        expect(valueConcatResultEntry?.contentBounds?.x).toBeGreaterThan(
+            (valueConcatEqualsEntry?.contentBounds?.x || 0) + (valueConcatEqualsEntry?.contentBounds?.width || 0)
+        );
+
+        expect(keyConnectorEntry?.pathPoints?.length || 0).toBeGreaterThan(1);
+        expect(keyConnectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(
+            keyCacheEntry?.anchors?.bottom?.x || 0,
+            4
+        );
+        expect(keyConnectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            (keyCacheEntry?.anchors?.bottom?.y || 0) + 6,
+            4
+        );
+        expect(keyConnectorLastPoint?.x).toBeCloseTo(
+            keyOutputCopyEntry?.anchors?.top?.x || 0,
+            4
+        );
+        expect(keyConnectorLastPoint?.y).toBeGreaterThan(
+            keyConnectorEntry?.pathPoints?.[0]?.y || 0
+        );
+        expect(keyConnectorLastPoint?.y).toBeCloseTo(
+            (keyOutputCopyEntry?.anchors?.top?.y || 0) - 6,
+            4
+        );
+        expect(keyCopyConnectorEntry?.pathPoints).toHaveLength(2);
+        expect(keyCopyConnectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(
+            (keyOutputEntry?.anchors?.right?.x || 0) + 6,
+            4
+        );
+        expect(keyCopyConnectorEntry?.pathPoints?.[1]?.x).toBeCloseTo(
+            (keyOutputCopyEntry?.anchors?.left?.x || 0) - 6,
+            4
+        );
+        expect(keyCopyConnectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            keyCopyConnectorEntry?.pathPoints?.[1]?.y || 0,
+            4
+        );
+
+        expect(valueConnectorEntry?.pathPoints?.length || 0).toBeGreaterThan(1);
+        expect(valueConnectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(
+            valueCacheEntry?.anchors?.bottom?.x || 0,
+            4
+        );
+        expect(valueConnectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            (valueCacheEntry?.anchors?.bottom?.y || 0) + 6,
+            4
+        );
+        expect(valueConnectorLastPoint?.x).toBeCloseTo(
+            valueOutputCopyEntry?.anchors?.top?.x || 0,
+            4
+        );
+        expect(valueConnectorLastPoint?.y).toBeGreaterThan(
+            valueConnectorEntry?.pathPoints?.[0]?.y || 0
+        );
+        expect(valueConnectorLastPoint?.y).toBeCloseTo(
+            (valueOutputCopyEntry?.anchors?.top?.y || 0) - 6,
+            4
+        );
+        expect(valueCopyConnectorEntry?.pathPoints).toHaveLength(2);
+        expect(valueCopyConnectorEntry?.pathPoints?.[0]?.x).toBeCloseTo(
+            (valueOutputEntry?.anchors?.right?.x || 0) + 6,
+            4
+        );
+        expect(valueCopyConnectorEntry?.pathPoints?.[1]?.x).toBeCloseTo(
+            (valueOutputCopyEntry?.anchors?.left?.x || 0) - 6,
+            4
+        );
+        expect(valueCopyConnectorEntry?.pathPoints?.[0]?.y).toBeCloseTo(
+            valueCopyConnectorEntry?.pathPoints?.[1]?.y || 0,
+            4
+        );
     });
 
     it('maps head-output hover rows to the Attention Weighted Sum tooltip payload', () => {

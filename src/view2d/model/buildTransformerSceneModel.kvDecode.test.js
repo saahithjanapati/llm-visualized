@@ -234,4 +234,73 @@ describe('buildTransformerSceneModel KV-cache decode window', () => {
         expect(layerNormOutputNode?.rowItems).toHaveLength(1);
         expect(layerNormOutputNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
     });
+
+    it('keeps the full token window for the MHSA head-detail scene during decode so cache rows can render', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource(),
+            tokenIndices: [3, 4, 5, 6],
+            tokenLabels: ['Token D', 'Token E', 'Token F', 'Token G'],
+            layerCount: 1,
+            headDetailTarget: {
+                layerIndex: 0,
+                headIndex: 0
+            },
+            kvCacheState: createDecodeKvState()
+        });
+
+        const detailScene = scene?.metadata?.mhsaHeadDetailScene;
+        const detailNodes = flattenSceneNodes(detailScene);
+        const keyOutputNode = detailNodes.find((node) => (
+            node?.role === 'projection-output'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'k'
+        )) || null;
+        const valueOutputNode = detailNodes.find((node) => (
+            node?.role === 'projection-output'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        )) || null;
+        const keyCacheNode = detailNodes.find((node) => (
+            node?.role === 'projection-cache'
+            && String(node?.semantic?.branchKey || '').toLowerCase() === 'k'
+        )) || null;
+        const valueCacheNode = detailNodes.find((node) => (
+            node?.role === 'projection-cache'
+            && String(node?.semantic?.branchKey || '').toLowerCase() === 'v'
+        )) || null;
+        const keyOutputCopyNode = detailNodes.find((node) => (
+            node?.role === 'projection-output-copy'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'k'
+        )) || null;
+        const valueOutputCopyNode = detailNodes.find((node) => (
+            node?.role === 'projection-output-copy'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        )) || null;
+
+        expect(detailScene).toBeTruthy();
+        expect(detailScene?.metadata?.kvCacheState).toMatchObject({
+            kvCacheModeEnabled: true,
+            kvCachePrefillActive: false,
+            kvCacheDecodeActive: true,
+            kvCachePassIndex: 1
+        });
+
+        expect(keyOutputNode?.dimensions?.rows).toBe(1);
+        expect(valueOutputNode?.dimensions?.rows).toBe(1);
+        expect(keyOutputNode?.rowItems).toHaveLength(1);
+        expect(valueOutputNode?.rowItems).toHaveLength(1);
+        expect(keyOutputNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
+        expect(valueOutputNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
+        expect(keyOutputCopyNode?.dimensions?.rows).toBe(1);
+        expect(valueOutputCopyNode?.dimensions?.rows).toBe(1);
+        expect(keyOutputCopyNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
+        expect(valueOutputCopyNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
+
+        expect(keyCacheNode?.dimensions?.rows).toBe(3);
+        expect(valueCacheNode?.dimensions?.rows).toBe(3);
+        expect(keyCacheNode?.rowItems).toHaveLength(3);
+        expect(valueCacheNode?.rowItems).toHaveLength(3);
+        expect(keyCacheNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
+        expect(keyCacheNode?.rowItems?.[2]?.semantic?.tokenIndex).toBe(5);
+        expect(valueCacheNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
+        expect(valueCacheNode?.rowItems?.[2]?.semantic?.tokenIndex).toBe(5);
+    });
 });

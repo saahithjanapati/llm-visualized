@@ -2844,7 +2844,7 @@ body.detail-panel-resizing * {
 body.mhsa-fullscreen-active #topControls,
 body.mhsa-fullscreen-active #promptTokenStrip,
 body.mhsa-fullscreen-active #hudPanel,
-body.mhsa-fullscreen-active .detail-history-nav,
+body.mhsa-fullscreen-active #detailPanel > .detail-header .detail-history-nav,
 body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: none !important;
 }
@@ -4800,6 +4800,9 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     gap: 8px;
     padding: 10px 12px 8px;
 }
+.detail-transformer-view2d-selection-sidebar-header .detail-history-nav {
+    flex: 0 0 auto;
+}
 .detail-transformer-view2d-selection-sidebar-copy {
     display: grid;
     gap: 2px;
@@ -5170,8 +5173,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     box-shadow: none;
     pointer-events: none;
 }
-#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-history-nav,
-#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-title-group {
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open > .detail-header .detail-history-nav,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open > .detail-header .detail-title-group {
     display: none;
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-header-actions {

@@ -68,6 +68,29 @@ describe('selectionPanelTransformerView2dTouchFallback', () => {
         cleanup();
     });
 
+    it('activates shared history buttons in the selection sidebar on touch pointerdown', () => {
+        document.body.innerHTML = `
+            <section class="detail-transformer-view2d">
+                <aside class="detail-transformer-view2d-selection-sidebar">
+                    <div class="detail-history-nav">
+                        <button type="button" class="detail-history-btn detail-history-btn--back">‹</button>
+                    </div>
+                </aside>
+            </section>
+        `;
+        const root = document.querySelector('.detail-transformer-view2d');
+        const button = document.querySelector('.detail-history-btn--back');
+        const onClick = vi.fn();
+        button.addEventListener('click', onClick);
+
+        const cleanup = initTransformerView2dTouchActionFallback(root);
+        button.dispatchEvent(createTouchPointerEvent('pointerdown'));
+
+        expect(onClick).toHaveBeenCalledTimes(1);
+
+        cleanup();
+    });
+
     it('ignores non-2D-action buttons inside the view', () => {
         document.body.innerHTML = `
             <section class="detail-transformer-view2d">
