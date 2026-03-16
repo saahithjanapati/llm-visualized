@@ -1324,6 +1324,16 @@ function resolveAttentionHeadSubscript(selectionInfo) {
     return Number.isFinite(headIndex) ? String(headIndex + 1) : null;
 }
 
+function shouldSuppressResidualVectorEquations(lower = '', stageLower = '') {
+    if (String(stageLower || '').startsWith('layer.incoming')) {
+        return true;
+    }
+    return isPostLayerNormResidualSelection({
+        label: lower,
+        stage: stageLower
+    });
+}
+
 function buildSelectionEquationEntries(label, selectionInfo = null) {
     const lower = String(label || '').toLowerCase();
     const stageLower = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
@@ -1413,6 +1423,10 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
         return phase === 'decode'
             ? buildEquationEntries([kvAppendEq, kvReuseEq], [1])
             : buildEquationEntries([kvWriteEq, kvAppendEq, kvReuseEq], [0, 1]);
+    }
+
+    if (shouldSuppressResidualVectorEquations(lower, stageLower)) {
+        return [];
     }
 
     if (stageLower.startsWith('embedding.token')) {

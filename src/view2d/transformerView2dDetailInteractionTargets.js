@@ -16,7 +16,20 @@ const DETAIL_INTERACTION_ROW_ROLES = new Set([
     'attention-value-post',
     'attention-head-output',
     'projection-source-xln',
-    'head-output-matrix'
+    'head-output-matrix',
+    'concat-output-copy-matrix',
+    'concat-output-matrix',
+    'layer-norm-input',
+    'layer-norm-normalized',
+    'layer-norm-normalized-copy',
+    'layer-norm-scaled',
+    'layer-norm-scaled-copy',
+    'layer-norm-output',
+    'mlp-up-output',
+    'mlp-up-output-copy',
+    'mlp-activation-output',
+    'mlp-activation-output-copy',
+    'mlp-down-output'
 ]);
 
 const DETAIL_INTERACTION_COLUMN_ROLES = new Set([

@@ -322,6 +322,57 @@ function applySceneNodeAnchorAlignments(scene = null, registry = null) {
     });
 }
 
+function normalizeBranchKey(value = '') {
+    return String(value || '').trim().toLowerCase();
+}
+
+function alignMhsaDecodeKvCacheSourceBranches(scene = null, registry = null) {
+    const isDecodeKvMhsaScene = String(scene?.metadata?.visualContract || '').trim().toLowerCase() === MHSA_DETAIL_VISUAL_CONTRACT
+        && scene?.metadata?.kvCacheState?.kvCacheDecodeActive === true;
+    if (!isDecodeKvMhsaScene || !scene?.nodes || !registry) return;
+
+    const sourceBranchNodeIds = new Map();
+    const sourceAnchorXs = new Map();
+    walkNodeTree(scene.nodes, (node) => {
+        if (!node || typeof node !== 'object') return;
+        const branchKey = normalizeBranchKey(
+            node?.semantic?.branchKey
+            || node?.semantic?.cacheKind
+            || node?.metadata?.branchKey
+            || node?.metadata?.cacheKind
+            || node?.metadata?.kind
+        );
+        if (branchKey !== 'k' && branchKey !== 'v') return;
+
+        if (node.role === 'projection-cache-source-branch') {
+            sourceBranchNodeIds.set(branchKey, node.id);
+            return;
+        }
+        if (node.role !== 'projection-cache-source') return;
+
+        const sourceEntry = registry.getNodeEntry(node.id);
+        const sourceX = sourceEntry?.anchors?.[VIEW2D_ANCHOR_SIDES.RIGHT]?.x;
+        if (Number.isFinite(sourceX)) {
+            sourceAnchorXs.set(branchKey, sourceX);
+        }
+    });
+
+    const keySourceX = sourceAnchorXs.get('k');
+    const valueSourceX = sourceAnchorXs.get('v');
+    if (!Number.isFinite(keySourceX) || !Number.isFinite(valueSourceX)) return;
+
+    const sharedSourceX = (keySourceX + valueSourceX) * 0.5;
+    [
+        ['k', keySourceX],
+        ['v', valueSourceX]
+    ].forEach(([branchKey, currentSourceX]) => {
+        const sourceBranchNodeId = sourceBranchNodeIds.get(branchKey);
+        const translateX = sharedSourceX - currentSourceX;
+        if (!sourceBranchNodeId || !Number.isFinite(translateX) || Math.abs(translateX) < 0.5) return;
+        registry.translateNodeSubtree(sourceBranchNodeId, translateX, 0);
+    });
+}
+
 function measureLeafNode(node, config) {
     const captionLines = resolveView2dCaptionLines(node);
     const captionPosition = resolveView2dCaptionPosition(node);
@@ -500,12 +551,20 @@ function measureLeafNode(node, config) {
         const operatorScale = Number.isFinite(node.metadata?.fontScale) && node.metadata.fontScale > 0
             ? Number(node.metadata.fontScale)
             : 1;
+        const operatorScaleX = Number.isFinite(node.metadata?.operatorScaleX) && node.metadata.operatorScaleX > 0
+            ? Number(node.metadata.operatorScaleX)
+            : 1;
+        const operatorScaleY = Number.isFinite(node.metadata?.operatorScaleY) && node.metadata.operatorScaleY > 0
+            ? Number(node.metadata.operatorScaleY)
+            : 1;
         const operatorFontSize = config.component.operatorFontSize * operatorScale;
         const rawWidth = measureTextWidth(node.text || '', operatorFontSize);
-        contentWidth = rawWidth + (config.component.operatorSidePadding * 2);
-        contentHeight = operatorFontSize * 1.45;
+        contentWidth = (rawWidth * operatorScaleX) + (config.component.operatorSidePadding * 2);
+        contentHeight = (operatorFontSize * 1.45) * operatorScaleY;
         layoutData = {
-            fontSize: operatorFontSize
+            fontSize: operatorFontSize,
+            scaleX: operatorScaleX,
+            scaleY: operatorScaleY
         };
     }
 
@@ -1045,6 +1104,7 @@ export function buildSceneLayout(scene, {
     });
 
     applySceneNodeAnchorAlignments(scene, registry);
+    alignMhsaDecodeKvCacheSourceBranches(scene, registry);
     registry.setSceneBounds(unionBounds([
         registry.getSceneBounds(),
         ...registry.getNodeEntries().map((entry) => entry.bounds)

@@ -36,9 +36,58 @@ describe('transformerView2dTargets', () => {
                 layerIndex: 2,
                 stage: 'ln1',
                 role: 'module'
+            },
+            detailSemanticTargets: [{
+                componentKind: 'layer-norm',
+                layerIndex: 2,
+                stage: 'ln1.param.scale',
+                role: 'layer-norm-scale'
+            }],
+            detailFocusLabel: 'LayerNorm 1 Scale'
+        });
+        expect(context?.transitionMode || '').toBe('staged-detail');
+    });
+
+    it('maps token selections onto the overview chip target that exists in the 2D scene', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Token: Gamma',
+            info: {
+                tokenIndex: 2,
+                positionIndex: 3,
+                activationData: {
+                    stage: 'embedding.token',
+                    tokenIndex: 2,
+                    positionIndex: 3
+                }
+            }
+        }, 'Token: Gamma');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'input-token-chip-group',
+                tokenIndex: 2,
+                positionIndex: 3
             }
         });
-        expect(context?.transitionMode || '').toBe('');
+        expect(context?.transitionMode || '').toBe('staged-focus');
+    });
+
+    it('maps vocabulary embedding selections to the overview embedding card instead of a synthetic stage', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Vocabulary Embedding Matrix',
+            info: {}
+        }, 'Vocabulary Embedding Matrix');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'module'
+            },
+            focusLabel: 'Token embeddings'
+        });
     });
 
     it('uses the staged head-detail opening flow for attention head targets', () => {
@@ -159,8 +208,78 @@ describe('transformerView2dTargets', () => {
                 stage: 'attn-out',
                 role: 'projection-weight'
             },
+            detailSemanticTargets: [{
+                componentKind: 'output-projection',
+                layerIndex: 4,
+                stage: 'attn-out',
+                role: 'concat-output-copy-matrix'
+            }],
+            detailFocusLabel: 'Concatenate Heads',
             focusLabel: 'Layer 5 Output Projection'
         });
+        expect(context?.transitionMode || '').toBe('staged-detail');
+    });
+
+    it('maps output-projection bias selections to a staged detail open with bias highlighting', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Output Projection Bias Vector',
+            info: {
+                layerIndex: 4,
+                activationData: {
+                    stage: 'attention.output_projection.bias',
+                    layerIndex: 4
+                }
+            }
+        }, 'Output Projection Bias Vector');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'output-projection',
+                layerIndex: 4,
+                stage: 'attn-out',
+                role: 'projection-weight'
+            },
+            detailSemanticTargets: [{
+                componentKind: 'output-projection',
+                layerIndex: 4,
+                stage: 'attn-out',
+                role: 'projection-bias'
+            }],
+            detailFocusLabel: 'Output Projection Bias Vector'
+        });
+        expect(context?.transitionMode || '').toBe('staged-detail');
+    });
+
+    it('maps MLP output selections to the overview module and detail-row highlight target', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'MLP Down Projection',
+            info: {
+                layerIndex: 4,
+                tokenIndex: 1,
+                activationData: {
+                    stage: 'mlp.down',
+                    layerIndex: 4,
+                    tokenIndex: 1
+                }
+            }
+        }, 'MLP Down Projection');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 4,
+                stage: 'mlp',
+                role: 'module'
+            },
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 4,
+                stage: 'mlp-down',
+                role: 'mlp-down-output'
+            }],
+            detailFocusLabel: 'MLP Down Projection'
+        });
+        expect(context?.transitionMode || '').toBe('staged-detail');
     });
 
     it('formats the top-left stage header for layer stages', () => {
@@ -448,6 +567,36 @@ describe('transformerView2dTargets', () => {
                     label: 'Multilayer Perceptron',
                     stage: 'mlp',
                     layerIndex: 5,
+                    suppressTokenChip: true
+                }
+            }
+        });
+    });
+
+    it('exposes hover context for overview layer norm modules with the module label', () => {
+        const payload = buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'module-title',
+                semantic: {
+                    componentKind: 'layer-norm',
+                    layerIndex: 5,
+                    stage: 'ln2',
+                    role: 'module-title'
+                }
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'LayerNorm 2',
+            info: {
+                layerIndex: 5,
+                layerNormKind: 'ln2',
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'LayerNorm 2',
+                    stage: 'ln2',
+                    layerIndex: 5,
+                    layerNormKind: 'ln2',
                     suppressTokenChip: true
                 }
             }

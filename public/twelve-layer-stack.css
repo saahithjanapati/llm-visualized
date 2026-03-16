@@ -5004,6 +5004,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     opacity: 0.45;
     cursor: default;
 }
+.detail-transformer-view2d-action[data-fit-visible="false"] {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-2px);
+}
 .detail-transformer-view2d-action--back {
     pointer-events: auto;
     border-color: rgba(255,255,255,0.18);
@@ -5121,10 +5126,13 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     align-items: center;
     justify-content: center;
     opacity: 1;
-    transform: translate3d(-50%, -50%, 0);
+    transform: translate3d(-50%, -50%, 0) scale(
+        var(--detail-transformer-view2d-dom-text-scale-x, 1),
+        var(--detail-transformer-view2d-dom-text-scale-y, 1)
+    );
     transform-origin: center;
     transition: opacity 140ms ease;
-    will-change: left, top, opacity;
+    will-change: left, top, opacity, transform;
     color: rgba(244, 247, 252, 0.96);
     font-size: var(--detail-transformer-view2d-dom-text-size, 12px);
     line-height: 1;
@@ -5133,6 +5141,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .detail-transformer-view2d-dom-text[data-node-kind="operator"] {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-weight: 600;
+}
+.detail-transformer-view2d-dom-text[data-node-kind="operator"][data-node-role="projection-cache-concat-open"],
+.detail-transformer-view2d-dom-text[data-node-kind="operator"][data-node-role="projection-cache-concat-close"] {
+    font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+    font-weight: 400;
 }
 .detail-transformer-view2d-dom-text[data-node-kind="operator"][data-operator-key="plus"] {
     font-size: calc(var(--detail-transformer-view2d-dom-text-size, 12px) * 0.92);

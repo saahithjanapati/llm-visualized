@@ -51,9 +51,15 @@ function createCaptionMetadata({
     scaleWithNode = false,
     labelScale = null,
     dimensionsScale = null,
+    uniformLabelScale = null,
+    uniformDimensionsScale = null,
     preferStandardSizing = false,
     labelMinScreenFontPx = null,
-    dimensionsMinScreenFontPx = null
+    dimensionsMinScreenFontPx = null,
+    labelMaxScreenFontPx = null,
+    dimensionsMaxScreenFontPx = null,
+    labelFixedScreenFontPx = null,
+    dimensionsFixedScreenFontPx = null
 } = {}) {
     const caption = {};
     const safePosition = String(position || '').trim().toLowerCase();
@@ -90,6 +96,12 @@ function createCaptionMetadata({
     if (Number.isFinite(dimensionsScale) && dimensionsScale > 0) {
         caption.dimensionsScale = Number(dimensionsScale);
     }
+    if (Number.isFinite(uniformLabelScale) && uniformLabelScale > 0) {
+        caption.uniformLabelScale = Number(uniformLabelScale);
+    }
+    if (Number.isFinite(uniformDimensionsScale) && uniformDimensionsScale > 0) {
+        caption.uniformDimensionsScale = Number(uniformDimensionsScale);
+    }
     if (preferStandardSizing === true) {
         caption.preferStandardSizing = true;
     }
@@ -98,6 +110,18 @@ function createCaptionMetadata({
     }
     if (Number.isFinite(dimensionsMinScreenFontPx) && dimensionsMinScreenFontPx > 0) {
         caption.dimensionsMinScreenFontPx = Number(dimensionsMinScreenFontPx);
+    }
+    if (Number.isFinite(labelMaxScreenFontPx) && labelMaxScreenFontPx > 0) {
+        caption.labelMaxScreenFontPx = Number(labelMaxScreenFontPx);
+    }
+    if (Number.isFinite(dimensionsMaxScreenFontPx) && dimensionsMaxScreenFontPx > 0) {
+        caption.dimensionsMaxScreenFontPx = Number(dimensionsMaxScreenFontPx);
+    }
+    if (Number.isFinite(labelFixedScreenFontPx) && labelFixedScreenFontPx > 0) {
+        caption.labelFixedScreenFontPx = Number(labelFixedScreenFontPx);
+    }
+    if (Number.isFinite(dimensionsFixedScreenFontPx) && dimensionsFixedScreenFontPx > 0) {
+        caption.dimensionsFixedScreenFontPx = Number(dimensionsFixedScreenFontPx);
     }
     return Object.keys(caption).length ? { caption } : null;
 }
@@ -156,9 +180,15 @@ export function createVectorStripMatrixNode({
     captionScaleWithNode = false,
     captionLabelScale = null,
     captionDimensionsScale = null,
+    captionUniformLabelScale = null,
+    captionUniformDimensionsScale = null,
     captionPreferStandardSizing = false,
     captionLabelMinScreenFontPx = null,
     captionDimensionsMinScreenFontPx = null,
+    captionLabelMaxScreenFontPx = null,
+    captionDimensionsMaxScreenFontPx = null,
+    captionLabelFixedScreenFontPx = null,
+    captionDimensionsFixedScreenFontPx = null,
     visualStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     stripStyleVariant = VIEW2D_VECTOR_STRIP_STYLE_VARIANTS.STANDARD,
     stripMetadata = null,
@@ -202,9 +232,15 @@ export function createVectorStripMatrixNode({
                 scaleWithNode: captionScaleWithNode,
                 labelScale: captionLabelScale,
                 dimensionsScale: captionDimensionsScale,
+                uniformLabelScale: captionUniformLabelScale,
+                uniformDimensionsScale: captionUniformDimensionsScale,
                 preferStandardSizing: captionPreferStandardSizing,
                 labelMinScreenFontPx: captionLabelMinScreenFontPx,
-                dimensionsMinScreenFontPx: captionDimensionsMinScreenFontPx
+                dimensionsMinScreenFontPx: captionDimensionsMinScreenFontPx,
+                labelMaxScreenFontPx: captionLabelMaxScreenFontPx,
+                dimensionsMaxScreenFontPx: captionDimensionsMaxScreenFontPx,
+                labelFixedScreenFontPx: captionLabelFixedScreenFontPx,
+                dimensionsFixedScreenFontPx: captionDimensionsFixedScreenFontPx
             }),
             createView2dVectorStripMetadata({
                 compactWidth: resolvedCompactWidth,
@@ -244,8 +280,14 @@ export function createTransposeVectorStripMatrixNode({
     captionScaleWithNode = false,
     captionLabelScale = null,
     captionDimensionsScale = null,
+    captionUniformLabelScale = null,
+    captionUniformDimensionsScale = null,
     captionLabelMinScreenFontPx = null,
     captionDimensionsMinScreenFontPx = null,
+    captionLabelMaxScreenFontPx = null,
+    captionDimensionsMaxScreenFontPx = null,
+    captionLabelFixedScreenFontPx = null,
+    captionDimensionsFixedScreenFontPx = null,
     visualStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     stripStyleVariant = VIEW2D_VECTOR_STRIP_STYLE_VARIANTS.STANDARD,
     stripMetadata = null,
@@ -299,8 +341,14 @@ export function createTransposeVectorStripMatrixNode({
                 scaleWithNode: captionScaleWithNode,
                 labelScale: captionLabelScale,
                 dimensionsScale: captionDimensionsScale,
+                uniformLabelScale: captionUniformLabelScale,
+                uniformDimensionsScale: captionUniformDimensionsScale,
                 labelMinScreenFontPx: captionLabelMinScreenFontPx,
-                dimensionsMinScreenFontPx: captionDimensionsMinScreenFontPx
+                dimensionsMinScreenFontPx: captionDimensionsMinScreenFontPx,
+                labelMaxScreenFontPx: captionLabelMaxScreenFontPx,
+                dimensionsMaxScreenFontPx: captionDimensionsMaxScreenFontPx,
+                labelFixedScreenFontPx: captionLabelFixedScreenFontPx,
+                dimensionsFixedScreenFontPx: captionDimensionsFixedScreenFontPx
             }),
             createView2dTransposeStripMetadata({
                 colWidth: resolvedColWidth,

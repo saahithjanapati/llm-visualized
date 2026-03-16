@@ -262,9 +262,17 @@ describe('buildTransformerSceneModel KV-cache decode window', () => {
             node?.role === 'projection-cache'
             && String(node?.semantic?.branchKey || '').toLowerCase() === 'k'
         )) || null;
+        const keyCacheSourceNode = detailNodes.find((node) => (
+            node?.role === 'projection-cache-source'
+            && String(node?.semantic?.branchKey || node?.metadata?.kind || '').toLowerCase() === 'k'
+        )) || null;
         const valueCacheNode = detailNodes.find((node) => (
             node?.role === 'projection-cache'
             && String(node?.semantic?.branchKey || '').toLowerCase() === 'v'
+        )) || null;
+        const valueCacheSourceNode = detailNodes.find((node) => (
+            node?.role === 'projection-cache-source'
+            && String(node?.semantic?.branchKey || node?.metadata?.kind || '').toLowerCase() === 'v'
         )) || null;
         const keyOutputCopyNode = detailNodes.find((node) => (
             node?.role === 'projection-output-copy'
@@ -273,6 +281,14 @@ describe('buildTransformerSceneModel KV-cache decode window', () => {
         const valueOutputCopyNode = detailNodes.find((node) => (
             node?.role === 'projection-output-copy'
             && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        )) || null;
+        const keyConcatResultNode = detailNodes.find((node) => (
+            node?.role === 'projection-cache-concat-result'
+            && String(node?.metadata?.kind || node?.semantic?.branchKey || '').toLowerCase() === 'k'
+        )) || null;
+        const valueConcatResultNode = detailNodes.find((node) => (
+            node?.role === 'projection-cache-concat-result'
+            && String(node?.metadata?.kind || node?.semantic?.branchKey || '').toLowerCase() === 'v'
         )) || null;
 
         expect(detailScene).toBeTruthy();
@@ -298,9 +314,29 @@ describe('buildTransformerSceneModel KV-cache decode window', () => {
         expect(valueCacheNode?.dimensions?.rows).toBe(3);
         expect(keyCacheNode?.rowItems).toHaveLength(3);
         expect(valueCacheNode?.rowItems).toHaveLength(3);
+        expect(keyCacheSourceNode?.dimensions?.rows).toBe(3);
+        expect(valueCacheSourceNode?.dimensions?.rows).toBe(3);
+        expect(keyCacheSourceNode?.rowItems).toHaveLength(3);
+        expect(valueCacheSourceNode?.rowItems).toHaveLength(3);
         expect(keyCacheNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
         expect(keyCacheNode?.rowItems?.[2]?.semantic?.tokenIndex).toBe(5);
         expect(valueCacheNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
         expect(valueCacheNode?.rowItems?.[2]?.semantic?.tokenIndex).toBe(5);
+        expect(keyCacheSourceNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
+        expect(keyCacheSourceNode?.rowItems?.[2]?.semantic?.tokenIndex).toBe(5);
+        expect(valueCacheSourceNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
+        expect(valueCacheSourceNode?.rowItems?.[2]?.semantic?.tokenIndex).toBe(5);
+        expect(keyConcatResultNode?.dimensions?.rows).toBe(4);
+        expect(valueConcatResultNode?.dimensions?.rows).toBe(4);
+        expect(keyConcatResultNode?.rowItems).toHaveLength(4);
+        expect(valueConcatResultNode?.rowItems).toHaveLength(4);
+        expect(keyConcatResultNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
+        expect(keyConcatResultNode?.rowItems?.[3]?.semantic?.tokenIndex).toBe(6);
+        expect(valueConcatResultNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(3);
+        expect(valueConcatResultNode?.rowItems?.[3]?.semantic?.tokenIndex).toBe(6);
+        expect(keyConcatResultNode?.rowItems?.[2]?.semantic?.concatResultPart).toBe('cache');
+        expect(keyConcatResultNode?.rowItems?.[3]?.semantic?.concatResultPart).toBe('live');
+        expect(valueConcatResultNode?.rowItems?.[2]?.semantic?.concatResultPart).toBe('cache');
+        expect(valueConcatResultNode?.rowItems?.[3]?.semantic?.concatResultPart).toBe('live');
     });
 });

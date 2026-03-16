@@ -71,6 +71,7 @@ import {
 } from './selectionPanelTransformerView2dTokenHoverUtils.js';
 import {
     resolveTransformerView2dOverviewMinScale,
+    shouldShowTransformerView2dFitSceneAction,
     TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT
 } from './selectionPanelTransformerView2dViewportUtils.js';
 import {
@@ -131,6 +132,8 @@ const VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
 const VIEW2D_STAGED_FOCUS_OVERVIEW_HOLD_MS = 280;
 const VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS = 1120;
 const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_HOLD_MS = 300;
+const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS =
+    TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS;
 const VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO = 0.97;
 const VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO = 0.95;
 
@@ -582,6 +585,8 @@ export function createTransformerView2dDetailView(panelEl, {
         stagedFocusRafId: null,
         stagedHeadDetailTransition: null,
         stagedHeadDetailRafId: null,
+        stagedDetailTransition: null,
+        stagedDetailRafId: null,
         overviewSelectionArmSignature: ''
     };
     let selectionSidebarCloseTimerId = null;
@@ -834,6 +839,13 @@ export function createTransformerView2dDetailView(panelEl, {
             && shouldKeepTransformerView2dHeadDetailFitView(state.detailSemanticTargets);
     }
 
+    function shouldKeepSceneBackedDetailFitView() {
+        return hasSceneBackedDetailTarget()
+            && !state.headDetailTarget
+            && Array.isArray(state.detailSemanticTargets)
+            && state.detailSemanticTargets.length > 0;
+    }
+
     function setDetailTargets({
         headDetailTarget = null,
         concatDetailTarget = null,
@@ -894,6 +906,14 @@ export function createTransformerView2dDetailView(panelEl, {
             state.stagedHeadDetailRafId = null;
         }
         state.stagedHeadDetailTransition = null;
+    }
+
+    function clearStagedDetailTransition() {
+        if (state.stagedDetailRafId !== null) {
+            cancelAnimationFrame(state.stagedDetailRafId);
+            state.stagedDetailRafId = null;
+        }
+        state.stagedDetailTransition = null;
     }
 
     function resolveHeadDetailFocusLabel() {
@@ -961,6 +981,38 @@ export function createTransformerView2dDetailView(panelEl, {
             onReady(now, activeTransition);
         };
         state.stagedHeadDetailRafId = requestAnimationFrame(tick);
+        return true;
+    }
+
+    function scheduleStagedDetailPhase(delayMs = 0, onReady = null) {
+        if (typeof onReady !== 'function' || !state.stagedDetailTransition || !state.visible) {
+            return false;
+        }
+        if (state.stagedDetailRafId !== null) {
+            cancelAnimationFrame(state.stagedDetailRafId);
+            state.stagedDetailRafId = null;
+        }
+        const safeDelayMs = Math.max(0, Math.floor(Number(delayMs) || 0));
+        const tick = (now) => {
+            state.stagedDetailRafId = null;
+            const activeTransition = state.stagedDetailTransition;
+            if (!activeTransition || !state.visible) return;
+            const phaseStartTime = Number.isFinite(activeTransition.phaseStartTime)
+                ? activeTransition.phaseStartTime
+                : now;
+            if (!Number.isFinite(activeTransition.phaseStartTime)) {
+                state.stagedDetailTransition = {
+                    ...activeTransition,
+                    phaseStartTime
+                };
+            }
+            if ((now - phaseStartTime) < safeDelayMs) {
+                state.stagedDetailRafId = requestAnimationFrame(tick);
+                return;
+            }
+            onReady(now, activeTransition);
+        };
+        state.stagedDetailRafId = requestAnimationFrame(tick);
         return true;
     }
 
@@ -1230,6 +1282,79 @@ export function createTransformerView2dDetailView(panelEl, {
                     return;
                 }
                 clearStagedHeadDetailTransition();
+            });
+        });
+    }
+
+    function openStagedSceneDetailTarget(detailTargets = null) {
+        const resolvedTargets = detailTargets && typeof detailTargets === 'object'
+            ? detailTargets
+            : {};
+        if (resolvedTargets.outputProjectionDetailTarget) {
+            return openOutputProjectionDetail(resolvedTargets.outputProjectionDetailTarget, {
+                animate: true
+            });
+        }
+        if (resolvedTargets.mlpDetailTarget) {
+            return openMlpDetail(resolvedTargets.mlpDetailTarget, {
+                animate: true
+            });
+        }
+        if (resolvedTargets.layerNormDetailTarget) {
+            return openLayerNormDetail(resolvedTargets.layerNormDetailTarget, {
+                animate: true
+            });
+        }
+        if (resolvedTargets.concatDetailTarget) {
+            return openConcatDetail(resolvedTargets.concatDetailTarget, {
+                animate: true
+            });
+        }
+        return false;
+    }
+
+    function maybeStartStagedDetailTransition() {
+        const transition = state.stagedDetailTransition;
+        if (
+            !transition
+            || transition.phase !== 'overview-hold'
+            || !state.visible
+        ) {
+            return false;
+        }
+        return scheduleStagedDetailPhase(VIEW2D_STAGED_FOCUS_OVERVIEW_HOLD_MS, (now, activeTransition) => {
+            const latestTransition = state.stagedDetailTransition;
+            if (
+                !latestTransition
+                || latestTransition.phase !== 'overview-hold'
+                || !state.visible
+            ) {
+                return;
+            }
+            state.stagedDetailTransition = {
+                ...activeTransition,
+                phase: 'overview-to-focus',
+                phaseStartTime: now
+            };
+            const didFocus = focusSelection({
+                animate: true,
+                durationMs: VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS
+            });
+            if (!didFocus) {
+                clearStagedDetailTransition();
+                return;
+            }
+            scheduleStagedDetailPhase(VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS, () => {
+                const latestStage = state.stagedDetailTransition;
+                if (
+                    !latestStage
+                    || latestStage.phase !== 'overview-to-focus'
+                    || !state.visible
+                ) {
+                    return;
+                }
+                openStagedSceneDetailTarget(latestStage.detailTargets);
+                clearStagedDetailTransition();
             });
         });
     }
@@ -2003,6 +2128,50 @@ export function createTransformerView2dDetailView(panelEl, {
         }
     }
 
+    function resolveFitSceneActionState() {
+        if (state.headDetailDepthActive && hasSceneBackedDetailTarget()) {
+            return {
+                controllerState: detailViewportController.getState(),
+                fitBounds: resolveHeadDetailSceneBounds(),
+                padding: VIEW2D_HEAD_DETAIL_VIEWPORT_PADDING,
+                minScale: VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE,
+                maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+            };
+        }
+
+        return {
+            controllerState: viewportController.getState(),
+            fitBounds: state.layout?.sceneBounds || null,
+            padding: VIEW2D_DETAIL_VIEWPORT_PADDING,
+            minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+        };
+    }
+
+    function syncFitSceneActionVisibility() {
+        if (!fitBtn) return;
+
+        const shouldShowFitAction = !!(
+            state.visible
+            && state.scene
+            && state.layout
+            && shouldShowTransformerView2dFitSceneAction(resolveFitSceneActionState())
+        );
+        const nextVisibility = shouldShowFitAction ? 'true' : 'false';
+
+        if (fitBtn.dataset.fitVisible !== nextVisibility) {
+            fitBtn.dataset.fitVisible = nextVisibility;
+        }
+
+        fitBtn.disabled = !shouldShowFitAction;
+        fitBtn.setAttribute('aria-hidden', shouldShowFitAction ? 'false' : 'true');
+        if (shouldShowFitAction) {
+            fitBtn.removeAttribute('tabindex');
+        } else {
+            fitBtn.tabIndex = -1;
+        }
+    }
+
     function computeHeadDetailFocusScale() {
         if (!hasActiveDetailTarget() || !state.layout?.registry) return null;
         const bounds = resolveSelectionFocusBounds();
@@ -2216,7 +2385,7 @@ export function createTransformerView2dDetailView(panelEl, {
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ outputProjectionDetailTarget: resolvedTarget });
-        return commitSceneSelection({ animate, nextDepthActive: false });
+        return commitSceneSelection({ animate, nextDepthActive: true });
     }
 
     function openMlpDetail(mlpDetailTarget = null, { animate = true } = {}) {
@@ -2226,7 +2395,7 @@ export function createTransformerView2dDetailView(panelEl, {
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ mlpDetailTarget: resolvedTarget });
-        return commitSceneSelection({ animate, nextDepthActive: false });
+        return commitSceneSelection({ animate, nextDepthActive: true });
     }
 
     function openLayerNormDetail(layerNormDetailTarget = null, { animate = true } = {}) {
@@ -2236,13 +2405,14 @@ export function createTransformerView2dDetailView(panelEl, {
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         setDetailTargets({ layerNormDetailTarget: resolvedTarget });
-        return commitSceneSelection({ animate, nextDepthActive: false });
+        return commitSceneSelection({ animate, nextDepthActive: true });
     }
 
     function returnToGraphOverview({ animate = true } = {}) {
         stopAnimation();
         clearStagedFocusTransition();
         clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
         clearPinnedDetailSceneFocus({ scheduleRender: false });
@@ -2263,6 +2433,7 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function updateReadouts() {
         syncHeadDetailChrome();
+        syncFitSceneActionVisibility();
         const stageHeader = resolveTransformerView2dStageHeader(state.semanticTarget);
         if (stageLayerReadout) {
             setNodeText(stageLayerReadout, stageHeader.layerLabel);
@@ -2347,10 +2518,12 @@ export function createTransformerView2dDetailView(panelEl, {
         detailViewportController.setSceneBounds(headDetailSceneBounds);
         updateHeadDetailDepthState();
         const hoverRenderFastPath = shouldUseOverviewHoverRenderFastPath();
+        const viewportAnimationActive = !!(viewportController.animation || detailViewportController.animation);
+        const useFastRenderPath = state.isInteracting || hoverRenderFastPath || viewportAnimationActive;
         const didRender = renderer.render({
             width,
             height,
-            dprCap: (state.isInteracting || hoverRenderFastPath)
+            dprCap: useFastRenderPath
                 ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
                 : VIEW2D_PREVIEW_DPR_CAP_IDLE,
             viewportTransform: viewportController.getViewportTransform('detail-transformer-view2d'),
@@ -2359,7 +2532,7 @@ export function createTransformerView2dDetailView(panelEl, {
                     ? detailViewportController.getViewportTransform('detail-transformer-view2d-head-detail')
                     : null
             ),
-            interacting: state.isInteracting || hoverRenderFastPath,
+            interacting: useFastRenderPath,
             headDetailDepthActive: state.headDetailDepthActive,
             interactionState: {
                 hoveredRow: state.hoveredResidualRow,
@@ -2386,7 +2559,7 @@ export function createTransformerView2dDetailView(panelEl, {
             canvas,
             projectBounds: (bounds) => renderer.resolveScreenBounds(bounds),
             visible: state.visible,
-            enabled: true,
+            enabled: !viewportAnimationActive,
             focusState: activeSceneFocusState
         });
         syncDetailFrame();
@@ -2498,6 +2671,12 @@ export function createTransformerView2dDetailView(panelEl, {
             return true;
         }
 
+        if (shouldKeepSceneBackedDetailFitView()) {
+            state.focusLabel = state.detailFocusLabel || resolveActiveFocusLabel(state);
+            updateReadouts();
+            return fitScene({ animate });
+        }
+
         if (!state.layout?.registry || !state.semanticTarget) {
             return fitScene({ animate });
         }
@@ -2579,6 +2758,12 @@ export function createTransformerView2dDetailView(panelEl, {
     function onSceneNodeClick(entry = null) {
         resetOverviewSelectionArm();
         clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
+        setDetailFocusTarget({
+            detailSemanticTargets: [],
+            detailFocusLabel: ''
+        });
+        state.pendingDetailInteractionTargets = [];
         if (isMhsaHeadOverviewEntry(entry)) {
             return openHeadDetail({
                 layerIndex: entry.semantic.layerIndex,
@@ -2724,6 +2909,7 @@ export function createTransformerView2dDetailView(panelEl, {
         if (!controlKey) return;
 
         clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
         state.keyboardMotion.activeKeys.add(controlKey);
         if (!event.repeat) {
             applyKeyboardMotion(VIEW2D_KEYBOARD_INITIAL_STEP_MS);
@@ -2942,6 +3128,7 @@ export function createTransformerView2dDetailView(panelEl, {
     function onPointerDown(event) {
         if (!state.visible || (Number.isFinite(event?.button) && event.button !== 0)) return;
         clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
         focusCanvasSurface();
         if (event?.pointerType === 'touch') {
             trackTouchPointer(event);
@@ -3000,6 +3187,7 @@ export function createTransformerView2dDetailView(panelEl, {
     function onWheel(event) {
         if (!state.visible) return;
         clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
         focusCanvasSurface();
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
@@ -3112,11 +3300,13 @@ export function createTransformerView2dDetailView(panelEl, {
     });
     fitBtn?.addEventListener('click', () => {
         clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
         fitScene({ animate: true });
         focusCanvasSurface();
     });
     backToGraphBtn?.addEventListener('click', () => {
         clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
         returnToGraphOverview({ animate: true });
         focusCanvasSurface();
     });
@@ -3177,6 +3367,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 tokenHoverSync.clear({ emit: true });
                 clearStagedFocusTransition();
                 clearStagedHeadDetailTransition();
+                clearStagedDetailTransition();
                 cancelScheduledHoverUpdate();
                 clearPinnedDetailSceneFocus({ scheduleRender: false });
                 clearCanvasHover({ scheduleRender: false, force: true });
@@ -3212,6 +3403,7 @@ export function createTransformerView2dDetailView(panelEl, {
         } = {}) {
             clearStagedFocusTransition();
             clearStagedHeadDetailTransition();
+            clearStagedDetailTransition();
             state.isSmallScreen = !!isSmallScreen;
             setSelectionSidebarVisible(false, { immediate: true });
             state.activationSource = activationSource;
@@ -3242,13 +3434,27 @@ export function createTransformerView2dDetailView(panelEl, {
                 normalizedTransitionMode === 'staged-head-detail'
                 && !!resolvedDetailTargets.headDetailTarget
             );
+            const shouldStageSceneDetailEntry = (
+                normalizedTransitionMode === 'staged-detail'
+                && !resolvedDetailTargets.headDetailTarget
+                && !!(
+                    resolvedDetailTargets.concatDetailTarget
+                    || resolvedDetailTargets.outputProjectionDetailTarget
+                    || resolvedDetailTargets.mlpDetailTarget
+                    || resolvedDetailTargets.layerNormDetailTarget
+                )
+            );
             state.baseSemanticTarget = shouldStageHeadDetailEntry
                 ? null
                 : deriveBaseSemanticTarget(semanticTarget);
             state.baseFocusLabel = shouldStageHeadDetailEntry
                 ? TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL
                 : (String(focusLabel || '').trim() || describeTransformerView2dTarget(state.baseSemanticTarget));
-            setDetailTargets(shouldStageHeadDetailEntry ? {} : resolvedDetailTargets);
+            setDetailTargets(
+                shouldStageHeadDetailEntry || shouldStageSceneDetailEntry
+                    ? {}
+                    : resolvedDetailTargets
+            );
             setDetailFocusTarget({
                 detailSemanticTargets: normalizedDetailSemanticTargets,
                 detailFocusLabel
@@ -3259,6 +3465,12 @@ export function createTransformerView2dDetailView(panelEl, {
             if (shouldStageHeadDetailEntry) {
                 state.stagedHeadDetailTransition = {
                     headDetailTarget: resolvedDetailTargets.headDetailTarget,
+                    phase: 'overview-hold',
+                    phaseStartTime: null
+                };
+            } else if (shouldStageSceneDetailEntry) {
+                state.stagedDetailTransition = {
+                    detailTargets: resolvedDetailTargets,
                     phase: 'overview-hold',
                     phaseStartTime: null
                 };
@@ -3293,6 +3505,9 @@ export function createTransformerView2dDetailView(panelEl, {
             if (shouldStageHeadDetailEntry) {
                 maybeStartStagedHeadDetailTransition();
             }
+            if (shouldStageSceneDetailEntry) {
+                maybeStartStagedDetailTransition();
+            }
             focusCanvasSurface();
             return didRender;
         },
@@ -3324,6 +3539,7 @@ export function createTransformerView2dDetailView(panelEl, {
             if (shouldAutoFrameViewport(width, height)) {
                 const shouldOpenFromOverview = (
                     state.stagedFocusTransition?.phase === 'overview-hold'
+                    || state.stagedDetailTransition?.phase === 'overview-hold'
                     || state.stagedHeadDetailTransition?.phase === 'overview-hold'
                 );
                 if (shouldOpenFromOverview) {

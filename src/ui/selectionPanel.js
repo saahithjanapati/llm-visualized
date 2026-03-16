@@ -8963,16 +8963,14 @@ export class SelectionPanel {
         return true;
     }
 
-    _syncTransformerView2dSelectionSidebarHeader() {
-        const detailView = this._transformerView2dDetailView;
-        if (!detailView?.setSelectionSidebarHeaderContent) return;
+    _buildTransformerView2dSelectionSidebarHeaderContent() {
         const buildClassName = (baseClass, sourceEl, fallbackClass) => {
             const sourceClass = typeof sourceEl?.className === 'string'
                 ? sourceEl.className.trim()
                 : '';
             return [baseClass, sourceClass || fallbackClass].filter(Boolean).join(' ');
         };
-        detailView.setSelectionSidebarHeaderContent({
+        return {
             titleHtml: this.title?.innerHTML || '',
             titleClassName: buildClassName(
                 'detail-transformer-view2d-selection-sidebar-title',
@@ -8997,7 +8995,15 @@ export class SelectionPanel {
                 this.subtitleTertiary,
                 'detail-subtitle'
             )
-        });
+        };
+    }
+
+    _syncTransformerView2dSelectionSidebarHeader(headerContent = null) {
+        const detailView = this._transformerView2dDetailView;
+        if (!detailView?.setSelectionSidebarHeaderContent) return;
+        detailView.setSelectionSidebarHeaderContent(
+            headerContent || this._buildTransformerView2dSelectionSidebarHeaderContent()
+        );
     }
 
     _showTransformerView2dSelectionSidebar({ scrollToTop = true } = {}) {
@@ -9087,6 +9093,9 @@ export class SelectionPanel {
                 ? { detailInteractionTargets: resolvedDetailInteractionTargets }
                 : {})
         };
+        const selectionSidebarHeaderContent = resolvedSelection
+            ? this._buildTransformerView2dSelectionSidebarHeaderContent()
+            : null;
 
         this._closeTransformerView2dSelectionSidebar({
             restoreSections: true,
@@ -9126,8 +9135,25 @@ export class SelectionPanel {
             transitionMode: hydratedView2dContext.transitionMode,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
         });
+        if (resolvedSelection) {
+            this._showTransformerView2dSelectionSidebar({ scrollToTop: true });
+            if (selectionSidebarHeaderContent) {
+                this._transformerView2dDetailView?.setSelectionSidebarHeaderContent?.(
+                    selectionSidebarHeaderContent
+                );
+            }
+        }
+        const shouldKeepSelectionPreviewLoop = !!(
+            resolvedSelection
+            && this.currentPreview
+            && this._transformerView2dDetailView?.isSelectionSidebarVisible?.() === true
+        );
         this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
-        this._stopLoop();
+        if (shouldKeepSelectionPreviewLoop) {
+            this._startLoop();
+        } else {
+            this._stopLoop();
+        }
         this._setAttentionVisibility(false);
         this._setPanelTokenHoverEntry(null, { emit: true });
         if (syncRoute) {

@@ -17,6 +17,10 @@ const DEFAULT_TOKEN_LABELS = ['Token A', 'Token B'];
 const MHSA_UNIFORM_MIN_SCREEN_HEIGHT_PX = 28;
 const ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX = 14;
 const BIAS_LABEL_MIN_SCREEN_FONT_PX = 13;
+const MHSA_STANDARD_LABEL_MIN_SCREEN_FONT_PX = 14.5;
+const MHSA_STANDARD_LABEL_MAX_SCREEN_FONT_PX = 15.25;
+const MHSA_STANDARD_DIMENSIONS_MIN_SCREEN_FONT_PX = 11.75;
+const MHSA_STANDARD_DIMENSIONS_MAX_SCREEN_FONT_PX = 12.5;
 function createVectorValues(seed = 0) {
     return Array.from({ length: D_HEAD }, (_, index) => Number((seed + (index * 0.01)).toFixed(4)));
 }
@@ -222,11 +226,21 @@ function buildMhsaFixtures({
         node.role === 'projection-cache'
         && String(node.semantic?.branchKey || '').toLowerCase() === 'k'
     )) || null;
+    const kCacheSourceNode = nodes.find((node) => (
+        node.role === 'projection-cache-source'
+        && String(node.semantic?.branchKey || node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
     const vCacheNode = nodes.find((node) => (
         node.role === 'projection-cache'
         && String(node.semantic?.branchKey || '').toLowerCase() === 'v'
     )) || null;
+    const vCacheSourceNode = nodes.find((node) => (
+        node.role === 'projection-cache-source'
+        && String(node.semantic?.branchKey || node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
+    const kCacheSourceConnectorNode = nodes.find((node) => node.role === 'connector-k-cache-source') || null;
     const kCacheConnectorNode = nodes.find((node) => node.role === 'connector-k-cache') || null;
+    const vCacheSourceConnectorNode = nodes.find((node) => node.role === 'connector-v-cache-source') || null;
     const vCacheConnectorNode = nodes.find((node) => node.role === 'connector-v-cache') || null;
 
     const parent = document.createElement('div');
@@ -274,8 +288,12 @@ function buildMhsaFixtures({
         softmaxLabelNode,
         scaleNode,
         kCacheNode,
+        kCacheSourceNode,
         vCacheNode,
+        vCacheSourceNode,
+        kCacheSourceConnectorNode,
         kCacheConnectorNode,
+        vCacheSourceConnectorNode,
         vCacheConnectorNode,
         canvas,
         overlay,
@@ -550,7 +568,7 @@ function queryCaptionItem(nodeId = '') {
 }
 
 describe('transformerView2dResidualCaptionOverlay', () => {
-    it('adds faded K/V cache branches during KV-cache prefill and decode', () => {
+    it('keeps K/V cache branches active during KV-cache prefill and decode', () => {
         const prefillFixtures = buildMhsaFixtures({
             kvCacheState: {
                 kvCacheModeEnabled: true,
@@ -572,8 +590,8 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(prefillFixtures.vCacheNode).toBeTruthy();
             expect(prefillFixtures.kCacheConnectorNode).toBeTruthy();
             expect(prefillFixtures.vCacheConnectorNode).toBeTruthy();
-            expect(prefillFixtures.kCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
-            expect(prefillFixtures.vCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
+            expect(prefillFixtures.kCacheNode?.visual?.opacity ?? 1).toBeCloseTo(1, 3);
+            expect(prefillFixtures.vCacheNode?.visual?.opacity ?? 1).toBeCloseTo(1, 3);
             expect(prefillFixtures.kCacheNode?.label?.tex).toContain('\\mathrm{cache}');
             expect(prefillFixtures.vCacheNode?.label?.tex).toContain('\\mathrm{cache}');
             expect(prefillFixtures.kCacheConnectorNode?.target?.anchor).toBe('left');
@@ -585,26 +603,34 @@ describe('transformerView2dResidualCaptionOverlay', () => {
 
             expect(decodeFixtures.kCacheNode).toBeTruthy();
             expect(decodeFixtures.vCacheNode).toBeTruthy();
-            expect(decodeFixtures.kCacheConnectorNode).toBeTruthy();
-            expect(decodeFixtures.vCacheConnectorNode).toBeTruthy();
-            expect(decodeFixtures.kCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
-            expect(decodeFixtures.vCacheNode?.visual?.opacity).toBeCloseTo(0.4, 3);
+            expect(decodeFixtures.kCacheSourceNode).toBeTruthy();
+            expect(decodeFixtures.vCacheSourceNode).toBeTruthy();
+            expect(decodeFixtures.kCacheSourceConnectorNode).toBeTruthy();
+            expect(decodeFixtures.vCacheSourceConnectorNode).toBeTruthy();
+            expect(decodeFixtures.kCacheConnectorNode).toBeNull();
+            expect(decodeFixtures.vCacheConnectorNode).toBeNull();
+            expect(decodeFixtures.kCacheNode?.visual?.opacity ?? 1).toBeCloseTo(1, 3);
+            expect(decodeFixtures.vCacheNode?.visual?.opacity ?? 1).toBeCloseTo(1, 3);
+            expect(decodeFixtures.kCacheSourceNode?.visual?.opacity ?? 1).toBeCloseTo(1, 3);
+            expect(decodeFixtures.vCacheSourceNode?.visual?.opacity ?? 1).toBeCloseTo(1, 3);
             expect(decodeFixtures.kCacheNode?.metadata?.kvCachePhase).toBe('decode');
             expect(decodeFixtures.vCacheNode?.metadata?.kvCachePhase).toBe('decode');
+            expect(decodeFixtures.kCacheSourceNode?.metadata?.kvCachePhase).toBe('decode');
+            expect(decodeFixtures.vCacheSourceNode?.metadata?.kvCachePhase).toBe('decode');
             expect(decodeFixtures.kCacheNode?.rowItems).toHaveLength(1);
             expect(decodeFixtures.vCacheNode?.rowItems).toHaveLength(1);
-            expect(decodeFixtures.kCacheConnectorNode?.source?.nodeId).toBe(decodeFixtures.kCacheNode?.id);
-            expect(decodeFixtures.vCacheConnectorNode?.source?.nodeId).toBe(decodeFixtures.vCacheNode?.id);
+            expect(decodeFixtures.kCacheSourceNode?.rowItems).toHaveLength(1);
+            expect(decodeFixtures.vCacheSourceNode?.rowItems).toHaveLength(1);
+            expect(decodeFixtures.kCacheSourceConnectorNode?.source?.nodeId).toBe(decodeFixtures.kCacheSourceNode?.id);
+            expect(decodeFixtures.vCacheSourceConnectorNode?.source?.nodeId).toBe(decodeFixtures.vCacheSourceNode?.id);
+            expect(decodeFixtures.kCacheSourceConnectorNode?.target?.nodeId).toBe(decodeFixtures.kCacheNode?.id);
+            expect(decodeFixtures.vCacheSourceConnectorNode?.target?.nodeId).toBe(decodeFixtures.vCacheNode?.id);
+            expect(decodeFixtures.kCacheSourceConnectorNode?.source?.anchor).toBe('right');
+            expect(decodeFixtures.vCacheSourceConnectorNode?.source?.anchor).toBe('right');
+            expect(decodeFixtures.kCacheSourceConnectorNode?.target?.anchor).toBe('top');
+            expect(decodeFixtures.vCacheSourceConnectorNode?.target?.anchor).toBe('top');
             expect(decodeFixtures.kOutputCopyNode).toBeTruthy();
             expect(decodeFixtures.vOutputCopyNode).toBeTruthy();
-            expect(decodeFixtures.kCacheConnectorNode?.target?.nodeId).toBe(decodeFixtures.kOutputCopyNode?.id);
-            expect(decodeFixtures.vCacheConnectorNode?.target?.nodeId).toBe(decodeFixtures.vOutputCopyNode?.id);
-            expect(decodeFixtures.kCacheConnectorNode?.source?.anchor).toBe('bottom');
-            expect(decodeFixtures.vCacheConnectorNode?.source?.anchor).toBe('bottom');
-            expect(decodeFixtures.kCacheConnectorNode?.target?.anchor).toBe('top');
-            expect(decodeFixtures.vCacheConnectorNode?.target?.anchor).toBe('top');
-            expect(decodeFixtures.kCacheConnectorNode?.metadata?.sourceAnchorMode).toBeUndefined();
-            expect(decodeFixtures.vCacheConnectorNode?.metadata?.sourceAnchorMode).toBeUndefined();
 
             expect(disabledFixtures.kCacheNode).toBeNull();
             expect(disabledFixtures.vCacheNode).toBeNull();
@@ -615,7 +641,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
-    it('applies cache-node opacity to prefill cache captions', () => {
+    it('keeps prefill cache captions fully visible', () => {
         const fixtures = buildMhsaFixtures({
             kvCacheState: {
                 kvCacheModeEnabled: true,
@@ -645,7 +671,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
 
             const cacheItem = queryCaptionItem(cacheNode?.id || '');
             expect(cacheItem?.hidden).toBe(false);
-            expect(Number.parseFloat(cacheItem?.style.opacity || '0')).toBeCloseTo(0.4, 3);
+            expect(Number.parseFloat(cacheItem?.style.opacity || '0')).toBeCloseTo(1, 3);
         } finally {
             fixtures.cleanup();
         }
@@ -780,7 +806,7 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
-    it('scales MHSA matrix captions with zoom levels', () => {
+    it('keeps MHSA vector-strip captions in a tighter size band while still letting them scale with zoom', () => {
         const fixtures = buildMhsaFixtures();
         const {
             scene,
@@ -855,8 +881,235 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(zoomedOutWeightDimensionsSize).toBeGreaterThan(0);
             expect(zoomedInOutputLabelSize).toBeGreaterThan(zoomedOutOutputLabelSize);
             expect(zoomedInOutputDimensionsSize).toBeGreaterThan(zoomedOutOutputDimensionsSize);
+            expect(zoomedInOutputLabelSize).toBeLessThanOrEqual(MHSA_STANDARD_LABEL_MAX_SCREEN_FONT_PX);
+            expect(zoomedInOutputDimensionsSize).toBeLessThanOrEqual(MHSA_STANDARD_DIMENSIONS_MAX_SCREEN_FONT_PX);
             expect(zoomedInWeightLabelSize).toBeGreaterThan(zoomedOutWeightLabelSize);
             expect(zoomedInWeightDimensionsSize).toBeGreaterThan(zoomedOutWeightDimensionsSize);
+            expect(zoomedInWeightLabelSize - zoomedOutWeightLabelSize)
+                .toBeGreaterThan(zoomedInOutputLabelSize - zoomedOutOutputLabelSize);
+            expect(zoomedInWeightDimensionsSize - zoomedOutWeightDimensionsSize)
+                .toBeGreaterThan(zoomedInOutputDimensionsSize - zoomedOutOutputDimensionsSize);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps decode-mode cache and vector captions visible and aligned for matching peers', () => {
+        const fixtures = buildMhsaFixtures({
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
+            }
+        });
+        const {
+            scene,
+            layout,
+            xLnNode,
+            kOutputNode,
+            vOutputNode,
+            kOutputCopyNode,
+            vOutputCopyNode,
+            queryNode,
+            transposeNode,
+            preScoreNode,
+            valuePostNode,
+            headOutputNode,
+            kCacheNode,
+            kCacheSourceNode,
+            vCacheNode,
+            vCacheSourceNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const contentBounds = layout.contentBounds || { x: 0, y: 0, width: 1, height: 1 };
+            const fitScale = Math.min(
+                (canvas.clientWidth - 160) / Math.max(1, Number(contentBounds.width) || 1),
+                (canvas.clientHeight - 160) / Math.max(1, Number(contentBounds.height) || 1)
+            );
+            const centeredProjectBounds = (scale) => {
+                const offsetX = ((canvas.clientWidth - ((Number(contentBounds.width) || 0) * scale)) / 2)
+                    - ((Number(contentBounds.x) || 0) * scale);
+                const offsetY = ((canvas.clientHeight - ((Number(contentBounds.height) || 0) * scale)) / 2)
+                    - ((Number(contentBounds.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: centeredProjectBounds(fitScale * 0.94),
+                visible: true,
+                enabled: true
+            });
+
+            const captionNodes = [
+                xLnNode,
+                kOutputNode,
+                vOutputNode,
+                queryNode,
+                transposeNode,
+                preScoreNode,
+                valuePostNode,
+                headOutputNode,
+                kCacheSourceNode,
+                vCacheSourceNode
+            ].filter(Boolean);
+            const captionSizes = captionNodes.map((node) => {
+                const captionItem = queryCaptionItem(node.id);
+                return {
+                    nodeId: node.id,
+                    labelSize: Number.parseFloat(
+                        captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+                    ),
+                    dimensionsSize: Number.parseFloat(
+                        captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+                    )
+                };
+            });
+            const labelSizes = captionSizes.map(({ labelSize }) => labelSize);
+            const dimensionsSizes = captionSizes.map(({ dimensionsSize }) => dimensionsSize);
+
+            labelSizes.forEach((labelSize) => {
+                expect(labelSize).toBeGreaterThan(0);
+            });
+            dimensionsSizes.forEach((dimensionsSize) => {
+                expect(dimensionsSize).toBeGreaterThan(0);
+            });
+            const captionSizeByNodeId = new Map(captionSizes.map((entry) => [entry.nodeId, entry]));
+            expect(Math.abs(
+                (captionSizeByNodeId.get(kOutputNode?.id || '')?.labelSize || 0)
+                - (captionSizeByNodeId.get(vOutputNode?.id || '')?.labelSize || 0)
+            )).toBeLessThan(0.1);
+            expect(Math.abs(
+                (captionSizeByNodeId.get(kOutputNode?.id || '')?.labelSize || 0)
+                - (captionSizeByNodeId.get(kCacheSourceNode?.id || '')?.labelSize || 0)
+            )).toBeLessThan(0.35);
+            expect(Math.abs(
+                (captionSizeByNodeId.get(vOutputNode?.id || '')?.labelSize || 0)
+                - (captionSizeByNodeId.get(vCacheSourceNode?.id || '')?.labelSize || 0)
+            )).toBeLessThan(0.35);
+            const kCacheSourceLabelSize = captionSizeByNodeId.get(kCacheSourceNode?.id || '')?.labelSize || 0;
+            const vCacheSourceLabelSize = captionSizeByNodeId.get(vCacheSourceNode?.id || '')?.labelSize || 0;
+            expect(vCacheSourceLabelSize).toBeGreaterThan(kCacheSourceLabelSize);
+            expect(queryCaptionItem(kOutputCopyNode?.id || '')).toBeNull();
+            expect(queryCaptionItem(vOutputCopyNode?.id || '')).toBeNull();
+            expect(queryCaptionItem(kCacheNode?.id || '')).toBeNull();
+            expect(queryCaptionItem(vCacheNode?.id || '')).toBeNull();
+            const baselineKCacheLabelSize = captionSizeByNodeId.get(kCacheSourceNode?.id || '')?.labelSize || 0;
+            const baselineKCacheDimensionsSize = captionSizeByNodeId.get(kCacheSourceNode?.id || '')?.dimensionsSize || 0;
+
+            const kCacheEntry = layout.registry.getNodeEntry(kCacheSourceNode?.id || '');
+            const zoomedInScale = fitScale * 2.2;
+            const targetX = canvas.clientWidth / 2;
+            const targetY = canvas.clientHeight / 2;
+            const kCacheBounds = kCacheEntry?.contentBounds || kCacheEntry?.bounds || { x: 0, y: 0, width: 0, height: 0 };
+            const cacheCenterX = (Number(kCacheBounds.x) || 0) + ((Number(kCacheBounds.width) || 0) / 2);
+            const cacheCenterY = (Number(kCacheBounds.y) || 0) + ((Number(kCacheBounds.height) || 0) / 2);
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: (bounds) => ({
+                    x: (bounds.x * zoomedInScale) + (targetX - (cacheCenterX * zoomedInScale)),
+                    y: (bounds.y * zoomedInScale) + (targetY - (cacheCenterY * zoomedInScale)),
+                    width: bounds.width * zoomedInScale,
+                    height: bounds.height * zoomedInScale
+                }),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInKCacheItem = queryCaptionItem(kCacheSourceNode?.id || '');
+            const zoomedInKCacheLabelSize = Number.parseFloat(
+                zoomedInKCacheItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInKCacheDimensionsSize = Number.parseFloat(
+                zoomedInKCacheItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            expect(zoomedInKCacheLabelSize).toBeGreaterThan(baselineKCacheLabelSize || 0);
+            expect(zoomedInKCacheDimensionsSize).toBeGreaterThan(baselineKCacheDimensionsSize || 0);
+            expect(zoomedInKCacheLabelSize).toBeLessThanOrEqual(MHSA_STANDARD_LABEL_MAX_SCREEN_FONT_PX);
+            expect(zoomedInKCacheDimensionsSize).toBeLessThanOrEqual(MHSA_STANDARD_DIMENSIONS_MAX_SCREEN_FONT_PX);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps primary MHSA single-row vector captions scene-relative after the single-row boost', () => {
+        const fixtures = buildMhsaFixtures({
+            tokenLabels: ['Token A']
+        });
+        const {
+            scene,
+            layout,
+            vOutputNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const outputEntry = layout.registry.getNodeEntry(vOutputNode?.id || '');
+            const zoomedOutScale = resolveThresholdScale(outputEntry).scale * 1.15;
+            const zoomedInScale = resolveThresholdScale(outputEntry).scale * 3.2;
+            const targetX = 60;
+            const targetY = 56;
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(outputEntry?.contentBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(outputEntry?.contentBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutLabelSize = Number.parseFloat(
+                queryCaptionItem(vOutputNode?.id || '')?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInLabelSize = Number.parseFloat(
+                queryCaptionItem(vOutputNode?.id || '')?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const labelScaleRatio = zoomedInLabelSize / Math.max(0.0001, zoomedOutLabelSize);
+            const rawViewportScaleRatio = zoomedInScale / zoomedOutScale;
+
+            expect(zoomedOutLabelSize).toBeGreaterThan(0);
+            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(labelScaleRatio).toBeGreaterThan(1.2);
+            expect(labelScaleRatio).toBeLessThanOrEqual(rawViewportScaleRatio * 1.02);
         } finally {
             cleanup();
         }
@@ -1834,11 +2087,9 @@ describe('transformerView2dResidualCaptionOverlay', () => {
                 expect(labelSize).toBeGreaterThan(0);
             });
             zoomedInLabelSizes.forEach((labelSize, index) => {
-                expect(labelSize).toBeGreaterThanOrEqual(zoomedOutLabelSizes[index]);
+                expect(labelSize).toBeGreaterThan(zoomedOutLabelSizes[index]);
+                expect(labelSize).toBeLessThanOrEqual(MHSA_STANDARD_LABEL_MAX_SCREEN_FONT_PX);
             });
-            expect(zoomedOutLabelSizes.some((labelSize) => (
-                labelSize < ATTENTION_MATRIX_LABEL_MIN_SCREEN_FONT_PX
-            ))).toBe(true);
         } finally {
             cleanup();
         }

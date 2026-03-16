@@ -271,6 +271,71 @@ describe('transformerView2dDetailInteractionTargets', () => {
         }]);
     });
 
+    it('maps MLP down-projection selections to row-level detail interaction targets', () => {
+        const targets = resolveTransformerView2dDetailInteractionTargets({
+            label: 'MLP Down Projection',
+            info: {
+                layerIndex: 2,
+                tokenIndex: 1,
+                activationData: {
+                    stage: 'mlp.down',
+                    layerIndex: 2,
+                    tokenIndex: 1
+                }
+            }
+        }, [{
+            componentKind: 'mlp',
+            layerIndex: 2,
+            stage: 'mlp-down',
+            role: 'mlp-down-output'
+        }]);
+
+        expect(targets).toEqual([{
+            kind: 'row',
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 2,
+                stage: 'mlp-down',
+                role: 'mlp-down-output'
+            },
+            tokenIndex: 1,
+            queryTokenIndex: 1
+        }]);
+    });
+
+    it('maps layer-norm product selections to row-level detail interaction targets', () => {
+        const targets = resolveTransformerView2dDetailInteractionTargets({
+            label: 'LayerNorm 1 Product Vector',
+            info: {
+                layerIndex: 2,
+                tokenIndex: 0,
+                activationData: {
+                    stage: 'ln1.product',
+                    layerIndex: 2,
+                    tokenIndex: 0,
+                    layerNormKind: 'ln1'
+                }
+            }
+        }, [{
+            componentKind: 'layer-norm',
+            layerIndex: 2,
+            stage: 'ln1.scale',
+            role: 'layer-norm-scaled'
+        }]);
+
+        expect(targets).toEqual([{
+            kind: 'row',
+            semanticTarget: {
+                componentKind: 'layer-norm',
+                layerIndex: 2,
+                stage: 'ln1.scale',
+                role: 'layer-norm-scaled'
+            },
+            tokenIndex: 0,
+            queryTokenIndex: 0
+        }]);
+    });
+
     it('resolves a query-vector target into the same row-focused hover state as a detail-scene click', () => {
         const { index, queryProjectionOutputNode } = buildMhsaDetailFixtures();
         const hoverState = resolveTransformerView2dDetailInteractionHoverState(index, [{

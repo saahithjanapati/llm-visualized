@@ -45,8 +45,8 @@ const PROJECTION_STACK_DECODE_GAP_BOOST = 96;
 const PROJECTION_STACK_DECODE_GAP_BOOST_SMALL = 72;
 const PROJECTION_SIDECAR_GAP = 84;
 const PROJECTION_SIDECAR_GAP_SMALL = 64;
-const ATTENTION_STAGE_SIDECAR_GAP = -12;
-const ATTENTION_STAGE_SIDECAR_GAP_SMALL = -8;
+const ATTENTION_STAGE_SIDECAR_GAP = 220;
+const ATTENTION_STAGE_SIDECAR_GAP_SMALL = 172;
 const PROJECTION_STAGE_INLINE_GAP = 12;
 const PROJECTION_STAGE_INLINE_GAP_SMALL = 10;
 const PROJECTION_EQUATION_GAP = 12;
@@ -146,12 +146,21 @@ const ATTENTION_STAGE_VERTICAL_LIFT_PER_EXTRA_ROW_SMALL = 5;
 const ATTENTION_STAGE_DECODE_LIFT_BOOST = 96;
 const ATTENTION_STAGE_DECODE_LIFT_BOOST_SMALL = 72;
 const ATTENTION_CONNECTOR_CAPTION_EXIT_GAP = 4;
+const ATTENTION_DECODE_CONNECTOR_CAPTION_EXIT_GAP = 2;
 const ATTENTION_PRE_CONNECTOR_SOURCE_OFFSET_Y = 16;
 const ATTENTION_VALUE_CONNECTOR_SOURCE_OFFSET_Y = 0;
 const ATTENTION_VALUE_CONNECTOR_SOURCE_GAP = 8;
 const ATTENTION_VALUE_CONNECTOR_TARGET_GAP = 8;
+const ATTENTION_DECODE_VALUE_CONNECTOR_SOURCE_GAP = 4;
+const ATTENTION_DECODE_VALUE_CONNECTOR_TARGET_GAP = 4;
 const MHSA_CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
 const MHSA_SYMBOL_CAPTION_LABEL_SCALE = 0.9;
+const MHSA_BOTTOM_VECTOR_CAPTION_LABEL_SCREEN_FONT_PX = 14.5;
+const MHSA_BOTTOM_VECTOR_CAPTION_DIMENSIONS_SCREEN_FONT_PX = 11.75;
+const MHSA_BOTTOM_VECTOR_CAPTION_LABEL_MAX_SCREEN_FONT_PX = 15.25;
+const MHSA_BOTTOM_VECTOR_CAPTION_DIMENSIONS_MAX_SCREEN_FONT_PX = 12.5;
+const MHSA_VALUE_LIVE_CAPTION_LABEL_SCALE = 1.04;
+const MHSA_VALUE_LIVE_CAPTION_LABEL_MIN_SCREEN_FONT_PX = 14.75;
 const MHSA_WEIGHT_CAPTION_LABEL_SCALE_FACTOR = 0.72;
 const MHSA_WEIGHT_CAPTION_LABEL_SCALE_MIN = 1.02;
 const ATTENTION_SOFTMAX_CORE_FLOW_GAP_BOOST_RATIO = 0.15;
@@ -160,13 +169,14 @@ const ATTENTION_LEFT_HAND_SIDE_GAP_BASE = 10;
 const ATTENTION_LEFT_HAND_SIDE_GAP_BASE_SMALL = 8;
 const ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_RATIO = 0.1;
 const ATTENTION_LEFT_HAND_SIDE_GAP_BOOST_MAX = 8;
+const ATTENTION_LEFT_HAND_SIDE_DECODE_LIFT = 12;
+const ATTENTION_LEFT_HAND_SIDE_DECODE_LIFT_SMALL = 10;
 const INCOMING_ARROW_SPACER_WIDTH = 60;
 const INCOMING_ARROW_SPACER_WIDTH_SMALL = 52;
 const OUTGOING_ARROW_SPACER_WIDTH = 44;
 const OUTGOING_ARROW_SPACER_WIDTH_SMALL = 38;
 const EDGE_CONNECTOR_STROKE_WIDTH_SCALE = 0.88;
 const HEAD_OUTPUT_EDGE_SOURCE_GAP = 8;
-const KV_CACHE_BRANCH_OPACITY = 0.4;
 const KV_CACHE_BRANCH_STROKE = 'rgba(255, 255, 255, 0.34)';
 const KV_CACHE_BRANCH_STROKE_WIDTH_SCALE = 0.74;
 const KV_CACHE_BRANCH_LIFT = 68;
@@ -176,21 +186,40 @@ const KV_CACHE_BRANCH_OFFSET_X_SMALL = 74;
 const KV_CACHE_BRANCH_SOURCE_OFFSET_Y = 8;
 const KV_CACHE_DECODE_BRANCH_LEFT_GAP = 28;
 const KV_CACHE_DECODE_BRANCH_LEFT_GAP_SMALL = 22;
-const KV_CACHE_DECODE_BRANCH_TOP_GAP = 22;
-const KV_CACHE_DECODE_BRANCH_TOP_GAP_SMALL = 18;
+const KV_CACHE_DECODE_BRANCH_TOP_GAP = 156;
+const KV_CACHE_DECODE_BRANCH_TOP_GAP_SMALL = 128;
+const KV_CACHE_DECODE_BRANCH_V_EXTRA_TOP_GAP = 10;
+const KV_CACHE_DECODE_BRANCH_V_EXTRA_TOP_GAP_SMALL = 8;
 const KV_CACHE_DECODE_COPY_GAP = 26;
 const KV_CACHE_DECODE_COPY_GAP_SMALL = 20;
+const KV_CACHE_DECODE_ATTENTION_SOURCE_OFFSET_Y_RATIO = -0.25;
 const KV_CACHE_DECODE_CONCAT_STAGE_GAP = 10;
 const KV_CACHE_DECODE_CONCAT_STAGE_GAP_SMALL = 8;
 const KV_CACHE_DECODE_CONCAT_WRAP_GAP = 4;
 const KV_CACHE_DECODE_CONCAT_WRAP_GAP_SMALL = 3;
-const KV_CACHE_DECODE_CONCAT_STACK_GAP = 12;
-const KV_CACHE_DECODE_CONCAT_STACK_GAP_SMALL = 10;
-const KV_CACHE_DECODE_CONCAT_ITEM_GAP = 3;
-const KV_CACHE_DECODE_CONCAT_ITEM_GAP_SMALL = 2;
-const KV_CACHE_DECODE_CONCAT_LABEL_FONT_SCALE = 1.02;
-const KV_CACHE_DECODE_CONCAT_RESULT_FONT_SCALE = 1.08;
-const KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE = 1.24;
+const KV_CACHE_DECODE_CONCAT_STACK_GAP = 24;
+const KV_CACHE_DECODE_CONCAT_STACK_GAP_SMALL = 20;
+const KV_CACHE_DECODE_CONCAT_LIFT = 86;
+const KV_CACHE_DECODE_CONCAT_LIFT_SMALL = 70;
+const KV_CACHE_DECODE_CONCAT_CACHE_ENTRY_LIFT = 2;
+const KV_CACHE_DECODE_CONCAT_CACHE_ENTRY_LIFT_SMALL = 1;
+const KV_CACHE_DECODE_CONCAT_LIVE_ENTRY_LIFT = 13;
+const KV_CACHE_DECODE_CONCAT_LIVE_ENTRY_LIFT_SMALL = 9;
+const KV_CACHE_DECODE_CONCAT_KEY_DROP = 10;
+const KV_CACHE_DECODE_CONCAT_KEY_DROP_SMALL = 8;
+const KV_CACHE_DECODE_CONCAT_LABEL_FONT_SCALE = 1.16;
+const KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE = 1.2;
+const KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_X = 1.18;
+const KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_Y = 3.0;
+const KV_CACHE_DECODE_COPY_TARGET_GAP = 2;
+const KV_CACHE_DECODE_NEXT_PREVIEW_SOURCE_OFFSET_Y_RATIO = 0.25;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X = 28;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X_SMALL = 22;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y = 24;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y_SMALL = 20;
+const KV_CACHE_DECODE_NEXT_PREVIEW_TARGET_GAP = 4;
+const KV_CACHE_NEXT_PREVIEW_OPACITY = 0.4;
+const KV_CACHE_NEXT_PREVIEW_STROKE = 'rgba(255, 255, 255, 0.22)';
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -337,7 +366,11 @@ function createCaptionMetadata({
     dimensionsScale = null,
     preferStandardSizing = false,
     labelMinScreenFontPx = null,
-    dimensionsMinScreenFontPx = null
+    dimensionsMinScreenFontPx = null,
+    labelMaxScreenFontPx = null,
+    dimensionsMaxScreenFontPx = null,
+    labelFixedScreenFontPx = null,
+    dimensionsFixedScreenFontPx = null
 } = {}) {
     const caption = {};
     const safePosition = String(position || '').trim().toLowerCase();
@@ -377,6 +410,18 @@ function createCaptionMetadata({
     if (Number.isFinite(dimensionsMinScreenFontPx) && dimensionsMinScreenFontPx > 0) {
         caption.dimensionsMinScreenFontPx = Number(dimensionsMinScreenFontPx);
     }
+    if (Number.isFinite(labelMaxScreenFontPx) && labelMaxScreenFontPx > 0) {
+        caption.labelMaxScreenFontPx = Number(labelMaxScreenFontPx);
+    }
+    if (Number.isFinite(dimensionsMaxScreenFontPx) && dimensionsMaxScreenFontPx > 0) {
+        caption.dimensionsMaxScreenFontPx = Number(dimensionsMaxScreenFontPx);
+    }
+    if (Number.isFinite(labelFixedScreenFontPx) && labelFixedScreenFontPx > 0) {
+        caption.labelFixedScreenFontPx = Number(labelFixedScreenFontPx);
+    }
+    if (Number.isFinite(dimensionsFixedScreenFontPx) && dimensionsFixedScreenFontPx > 0) {
+        caption.dimensionsFixedScreenFontPx = Number(dimensionsFixedScreenFontPx);
+    }
     return Object.keys(caption).length ? { caption } : null;
 }
 
@@ -385,8 +430,12 @@ function createAttentionMatrixCaptionMetadata(rows = 1, cols = 1, {
     minScreenHeightPx = 28,
     labelScale = null,
     dimensionsScale = null,
-    labelMinScreenFontPx = ATTENTION_MATRIX_CAPTION_LABEL_MIN_SCREEN_FONT_PX,
-    dimensionsMinScreenFontPx = ATTENTION_MATRIX_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX
+    labelMinScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_LABEL_SCREEN_FONT_PX,
+    dimensionsMinScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_DIMENSIONS_SCREEN_FONT_PX,
+    labelMaxScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_LABEL_MAX_SCREEN_FONT_PX,
+    dimensionsMaxScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_DIMENSIONS_MAX_SCREEN_FONT_PX,
+    labelFixedScreenFontPx = null,
+    dimensionsFixedScreenFontPx = null
 } = {}) {
     const dimensionCaption = formatView2dMatrixDimensions(rows, cols);
     return createCaptionMetadata({
@@ -399,8 +448,49 @@ function createAttentionMatrixCaptionMetadata(rows = 1, cols = 1, {
         dimensionsScale,
         preferStandardSizing: true,
         labelMinScreenFontPx,
-        dimensionsMinScreenFontPx
+        dimensionsMinScreenFontPx,
+        labelMaxScreenFontPx,
+        dimensionsMaxScreenFontPx,
+        labelFixedScreenFontPx,
+        dimensionsFixedScreenFontPx
     });
+}
+
+function createMhsaBottomVectorCaptionProps({
+    labelScale = MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+    uniformLabelScale = null,
+    labelMinScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_LABEL_SCREEN_FONT_PX,
+    dimensionsMinScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_DIMENSIONS_SCREEN_FONT_PX,
+    labelMaxScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_LABEL_MAX_SCREEN_FONT_PX,
+    dimensionsMaxScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_DIMENSIONS_MAX_SCREEN_FONT_PX
+} = {}) {
+    // Keep these captions scene-relative so they shrink as the user zooms out.
+    // Fixed screen-space label sizing breaks the canvas scale cues and lets
+    // captions overpower the actual matrices when viewing the broader layout.
+    return {
+        captionPosition: 'bottom',
+        captionPreferStandardSizing: true,
+        captionLabelScale: labelScale,
+        captionUniformLabelScale: uniformLabelScale,
+        captionLabelMinScreenFontPx: labelMinScreenFontPx,
+        captionDimensionsMinScreenFontPx: dimensionsMinScreenFontPx,
+        captionLabelMaxScreenFontPx: labelMaxScreenFontPx,
+        captionDimensionsMaxScreenFontPx: dimensionsMaxScreenFontPx
+    };
+}
+
+function createMhsaValueLiveCaptionProps() {
+    return createMhsaBottomVectorCaptionProps({
+        labelScale: MHSA_VALUE_LIVE_CAPTION_LABEL_SCALE,
+        uniformLabelScale: MHSA_VALUE_LIVE_CAPTION_LABEL_SCALE,
+        labelMinScreenFontPx: MHSA_VALUE_LIVE_CAPTION_LABEL_MIN_SCREEN_FONT_PX
+    });
+}
+
+function createMhsaProjectionVectorCaptionProps(projectionKind = '') {
+    return String(projectionKind || '').trim().toLowerCase() === 'v'
+        ? createMhsaValueLiveCaptionProps()
+        : createMhsaBottomVectorCaptionProps();
 }
 
 function createHiddenSpacer({
@@ -757,6 +847,88 @@ function buildProjectionCacheRowItems(rows = [], baseSemantic = {}, branchKey = 
     });
 }
 
+function buildProjectionConcatResultRowItems({
+    cacheRows = [],
+    liveRows = [],
+    baseSemantic = {},
+    branchKey = ''
+} = {}) {
+    const normalizedCacheRows = Array.isArray(cacheRows)
+        ? cacheRows
+            .map((rowData, rowIndex) => ({
+                rowData: cloneVectorRowForDisplay(rowData, rowIndex),
+                concatResultPart: 'cache'
+            }))
+            .filter((entry) => !!entry.rowData)
+        : [];
+    const normalizedLiveRows = Array.isArray(liveRows)
+        ? liveRows
+            .map((rowData, rowIndex) => ({
+                rowData: cloneVectorRowForDisplay(rowData, normalizedCacheRows.length + rowIndex),
+                concatResultPart: 'live'
+            }))
+            .filter((entry) => !!entry.rowData)
+        : [];
+
+    return [...normalizedCacheRows, ...normalizedLiveRows].map(({ rowData, concatResultPart }) => {
+        const semantic = {
+            componentKind: 'mhsa',
+            layerIndex: baseSemantic?.layerIndex,
+            headIndex: baseSemantic?.headIndex,
+            stage: concatResultPart === 'cache'
+                ? `kv-cache.${branchKey}`
+                : `qkv.${branchKey}`,
+            role: 'projection-cache-concat-result-row',
+            rowIndex: rowData.rowIndex,
+            tokenIndex: rowData.tokenIndex,
+            ...(branchKey ? { branchKey } : {}),
+            cacheKind: branchKey,
+            concatResultPart
+        };
+        return {
+            id: buildSceneNodeId(semantic),
+            index: rowData.rowIndex,
+            label: rowData.tokenLabel || `Token ${rowData.rowIndex + 1}`,
+            semantic,
+            rawValue: Number.isFinite(rowData.rawValue) ? rowData.rawValue : null,
+            rawValues: Array.isArray(rowData.rawValues) ? [...rowData.rawValues] : null,
+            gradientCss: rowData.gradientCss || 'none',
+            title: typeof rowData.title === 'string' ? rowData.title : null
+        };
+    });
+}
+
+function buildProjectionCacheNextRowItems({
+    cacheRows = [],
+    liveRows = [],
+    baseSemantic = {},
+    branchKey = ''
+} = {}) {
+    return buildProjectionConcatResultRowItems({
+        cacheRows,
+        liveRows,
+        baseSemantic,
+        branchKey
+    }).map((rowItem, rowIndex) => {
+        const concatResultPart = String(rowItem?.semantic?.concatResultPart || '').trim().toLowerCase();
+        const semantic = {
+            ...rowItem?.semantic,
+            stage: `kv-cache.${branchKey}.next`,
+            role: 'projection-cache-next-row',
+            rowIndex,
+            cacheKind: branchKey,
+            ...(branchKey ? { branchKey } : {}),
+            concatResultPart: concatResultPart === 'live' ? 'live' : 'cache'
+        };
+        return {
+            ...rowItem,
+            id: buildSceneNodeId(semantic),
+            index: rowIndex,
+            semantic
+        };
+    });
+}
+
 function cloneVectorRowForDisplay(rowData = null, displayRowIndex = 0) {
     if (!rowData || typeof rowData !== 'object') return null;
     return {
@@ -979,8 +1151,7 @@ function buildProjectionSourceNode({
         columnCount: previewData?.columnCount,
         compactWidth: xLnDimensions.compactWidth,
         rowHeight: xLnDimensions.rowHeight,
-        captionPosition: 'bottom',
-        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        ...createMhsaBottomVectorCaptionProps(),
         captionDimensionsTex: dimensionCaption.tex,
         captionDimensionsText: dimensionCaption.text,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
@@ -1048,15 +1219,21 @@ function resolveProjectionCacheBranchMetrics({
 
 function resolveProjectionCacheDecodeBranchMetrics({
     compactWidth = 0,
-    isSmallScreen = false
+    isSmallScreen = false,
+    projectionKind = ''
 } = {}) {
     const safeCompactWidth = Math.max(1, Math.floor(Number(compactWidth) || 0));
+    const safeKind = String(projectionKind || '').trim().toLowerCase();
+    const baseTopGap = isSmallScreen ? KV_CACHE_DECODE_BRANCH_TOP_GAP_SMALL : KV_CACHE_DECODE_BRANCH_TOP_GAP;
+    const extraTopGap = safeKind === 'v'
+        ? (isSmallScreen ? KV_CACHE_DECODE_BRANCH_V_EXTRA_TOP_GAP_SMALL : KV_CACHE_DECODE_BRANCH_V_EXTRA_TOP_GAP)
+        : 0;
     return {
         leftGap: Math.max(
             isSmallScreen ? KV_CACHE_DECODE_BRANCH_LEFT_GAP_SMALL : KV_CACHE_DECODE_BRANCH_LEFT_GAP,
             Math.round(safeCompactWidth * (isSmallScreen ? 0.16 : 0.18))
         ),
-        topGap: isSmallScreen ? KV_CACHE_DECODE_BRANCH_TOP_GAP_SMALL : KV_CACHE_DECODE_BRANCH_TOP_GAP
+        topGap: baseTopGap + extraTopGap
     };
 }
 
@@ -1069,6 +1246,30 @@ function resolveProjectionCacheDecodeCopyGap({
         isSmallScreen ? KV_CACHE_DECODE_COPY_GAP_SMALL : KV_CACHE_DECODE_COPY_GAP,
         Math.round(safeCompactWidth * (isSmallScreen ? 0.2 : 0.24))
     );
+}
+
+function resolveProjectionCacheDecodeConcatLift({
+    rowHeight = 1,
+    isSmallScreen = false,
+    projectionKind = ''
+} = {}) {
+    const safeRowHeight = Math.max(1, Math.floor(Number(rowHeight) || 1));
+    const baseLift = Math.max(
+        isSmallScreen ? KV_CACHE_DECODE_CONCAT_LIFT_SMALL : KV_CACHE_DECODE_CONCAT_LIFT,
+        Math.round(safeRowHeight * (isSmallScreen ? 2.1 : 2.4))
+    );
+    const safeKind = String(projectionKind || '').trim().toLowerCase();
+    if (safeKind !== 'k') return baseLift;
+    return Math.max(
+        0,
+        baseLift - (isSmallScreen ? KV_CACHE_DECODE_CONCAT_KEY_DROP_SMALL : KV_CACHE_DECODE_CONCAT_KEY_DROP)
+    );
+}
+
+function resolveProjectionCacheDecodeConcatStackGap({
+    isSmallScreen = false
+} = {}) {
+    return isSmallScreen ? KV_CACHE_DECODE_CONCAT_STACK_GAP_SMALL : KV_CACHE_DECODE_CONCAT_STACK_GAP;
 }
 
 function resolveProjectionCacheConnectorTargetOffsetY({
@@ -1090,10 +1291,12 @@ function buildProjectionCacheBranch({
     inputNode = null,
     outputNode = null,
     outputDimensions = null,
-    isSmallScreen = false
+    isSmallScreen = false,
+    layoutMetrics = null
 } = {}) {
     if (!outputNode?.id) return null;
     const cacheSourceData = cacheProjectionData || projectionData;
+    const connectorGaps = layoutMetrics?.connectorGaps || {};
     const outputRows = Array.isArray(cacheSourceData?.outputRows) ? cacheSourceData.outputRows : [];
     const cacheRows = branchMode === 'decode'
         ? outputRows.slice(0, -1)
@@ -1115,7 +1318,8 @@ function buildProjectionCacheBranch({
     const decodeBranchMetrics = branchMode === 'decode'
         ? resolveProjectionCacheDecodeBranchMetrics({
             compactWidth: outputDimensions?.compactWidth,
-            isSmallScreen
+            isSmallScreen,
+            projectionKind
         })
         : null;
     const cacheSemantic = buildSemantic(baseSemantic, {
@@ -1131,31 +1335,56 @@ function buildProjectionCacheBranch({
         || ''
     ).trim()
         || projectionKind.toUpperCase();
+    const cacheRowItems = buildProjectionCacheRowItems(cacheRows, baseSemantic, projectionKind);
     const cacheNode = createVectorStripMatrixNode({
         role: 'projection-cache',
         semantic: cacheSemantic,
-        labelTex: `${cacheLabel}_{\\mathrm{cache}}`,
-        labelText: `${cacheLabel}_cache`,
-        rowItems: buildProjectionCacheRowItems(cacheRows, baseSemantic, projectionKind),
+        labelTex: branchMode === 'decode' ? '' : `${cacheLabel}_{\\mathrm{cache}}`,
+        labelText: branchMode === 'decode' ? '' : `${cacheLabel}_cache`,
+        rowItems: cacheRowItems,
         rowCount: cacheRowCount,
         columnCount: cacheSourceData?.outputColumnCount,
         compactWidth: outputDimensions?.compactWidth,
         rowHeight: outputDimensions?.rowHeight,
-        captionPosition: 'bottom',
-        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        ...createMhsaProjectionVectorCaptionProps(projectionKind),
         captionDimensionsTex: outputDimensionCaption.tex,
         captionDimensionsText: outputDimensionCaption.text,
         visualStyleKey: styleKey,
         metadata: {
             kind: projectionKind,
             cacheNode: true,
-            kvCachePhase: branchMode
+            kvCachePhase: branchMode,
+            ...(branchMode === 'decode' ? { caption: null } : {})
         }
     });
-    cacheNode.visual = {
-        ...(cacheNode.visual || {}),
-        opacity: KV_CACHE_BRANCH_OPACITY
-    };
+    const cacheSourceNode = branchMode === 'decode'
+        ? createVectorStripMatrixNode({
+            role: 'projection-cache-source',
+            semantic: buildSemantic(baseSemantic, {
+                stage: `kv-cache.${projectionKind}.source`,
+                role: 'projection-cache-source',
+                branchKey: projectionKind,
+                cacheKind: projectionKind
+            }),
+            labelTex: `${cacheLabel}_{\\mathrm{cache}}`,
+            labelText: `${cacheLabel}_cache`,
+            rowItems: buildProjectionCacheRowItems(cacheRows, baseSemantic, projectionKind),
+            rowCount: cacheRowCount,
+            columnCount: cacheSourceData?.outputColumnCount,
+            compactWidth: outputDimensions?.compactWidth,
+            rowHeight: outputDimensions?.rowHeight,
+            ...createMhsaProjectionVectorCaptionProps(projectionKind),
+            captionDimensionsTex: outputDimensionCaption.tex,
+            captionDimensionsText: outputDimensionCaption.text,
+            visualStyleKey: styleKey,
+            metadata: {
+                kind: projectionKind,
+                cacheNode: true,
+                cacheSourceNode: true,
+                kvCachePhase: branchMode
+            }
+        })
+        : null;
     const liveCopyNode = branchMode === 'decode'
         ? createVectorStripMatrixNode({
             role: 'projection-output-copy',
@@ -1165,15 +1394,14 @@ function buildProjectionCacheBranch({
                 branchKey: projectionKind,
                 cacheKind: projectionKind
             }),
-            labelTex: projectionData?.outputLabelTex,
-            labelText: projectionData?.outputLabelTex,
+            labelTex: '',
+            labelText: '',
             rowItems: buildProjectionOutputRowItems(projectionData?.outputRows, baseSemantic, projectionKind),
             rowCount: projectionData?.outputRowCount,
             columnCount: projectionData?.outputColumnCount,
             compactWidth: outputDimensions?.compactWidth,
             rowHeight: outputDimensions?.rowHeight,
-            captionPosition: 'bottom',
-            captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+            ...createMhsaProjectionVectorCaptionProps(projectionKind),
             captionDimensionsTex: formatView2dMatrixDimensions(
                 projectionData?.outputRowCount,
                 projectionData?.outputColumnCount
@@ -1186,7 +1414,8 @@ function buildProjectionCacheBranch({
             metadata: {
                 kind: projectionKind,
                 cacheCopyNode: true,
-                kvCachePhase: branchMode
+                kvCachePhase: branchMode,
+                caption: null
             }
         })
         : null;
@@ -1198,6 +1427,52 @@ function buildProjectionCacheBranch({
             cacheKind: projectionKind
         })
         : null;
+    const concatCacheEntryNode = branchMode === 'decode' && cacheNode
+        ? createGroupNode({
+            role: 'projection-cache-concat-cache-entry',
+            semantic: buildSemantic(concatSemantic, {
+                role: 'projection-cache-concat-cache-entry'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                offsetY: -(
+                    isSmallScreen
+                        ? KV_CACHE_DECODE_CONCAT_CACHE_ENTRY_LIFT_SMALL
+                        : KV_CACHE_DECODE_CONCAT_CACHE_ENTRY_LIFT
+                )
+            },
+            children: [cacheNode],
+            metadata: {
+                gapOverride: 0,
+                kind: projectionKind,
+                kvCachePhase: branchMode
+            }
+        })
+        : cacheNode;
+    const concatLiveEntryNode = branchMode === 'decode' && liveCopyNode
+        ? createGroupNode({
+            role: 'projection-cache-concat-live-entry',
+            semantic: buildSemantic(concatSemantic, {
+                role: 'projection-cache-concat-live-entry'
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            layout: {
+                offsetY: -(
+                    isSmallScreen
+                        ? KV_CACHE_DECODE_CONCAT_LIVE_ENTRY_LIFT_SMALL
+                        : KV_CACHE_DECODE_CONCAT_LIVE_ENTRY_LIFT
+                )
+            },
+            children: [liveCopyNode],
+            metadata: {
+                gapOverride: 0,
+                kind: projectionKind,
+                kvCachePhase: branchMode
+            }
+        })
+        : liveCopyNode;
     const concatLabelNode = branchMode === 'decode'
         ? createTextNode({
             role: 'projection-cache-concat-label',
@@ -1217,38 +1492,24 @@ function buildProjectionCacheBranch({
             }
         })
         : null;
-    const concatSeparatorNode = branchMode === 'decode'
-        ? createMhsaOperatorNode({
-            role: 'projection-cache-concat-separator',
-            semantic: buildSemantic(concatSemantic, {
-                role: 'projection-cache-concat-separator',
-                operatorKey: 'comma'
-            }),
-            text: ',',
-            visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
-            metadata: {
-                kind: projectionKind,
-                kvCachePhase: branchMode
-            }
-        })
-        : null;
-    const concatCacheEntryNode = branchMode === 'decode'
+    const concatStackGap = branchMode === 'decode'
+        ? resolveProjectionCacheDecodeConcatStackGap({ isSmallScreen })
+        : 0;
+    const concatStackNode = branchMode === 'decode'
         ? createGroupNode({
-            role: 'projection-cache-concat-cache-entry',
+            role: 'projection-cache-concat-stack',
             semantic: buildSemantic(concatSemantic, {
-                role: 'projection-cache-concat-cache-entry'
+                role: 'projection-cache-concat-stack'
             }),
-            direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
-            gapKey: 'inline',
-            align: 'center',
+            direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+            gapKey: 'default',
+            align: 'start',
             children: [
-                cacheNode,
-                ...(concatSeparatorNode ? [concatSeparatorNode] : [])
+                ...(concatCacheEntryNode ? [concatCacheEntryNode] : []),
+                ...(concatLiveEntryNode ? [concatLiveEntryNode] : [])
             ],
             metadata: {
-                gapOverride: isSmallScreen
-                    ? KV_CACHE_DECODE_CONCAT_ITEM_GAP_SMALL
-                    : KV_CACHE_DECODE_CONCAT_ITEM_GAP,
+                gapOverride: concatStackGap,
                 kind: projectionKind,
                 kvCachePhase: branchMode
             }
@@ -1260,17 +1521,13 @@ function buildProjectionCacheBranch({
             semantic: buildSemantic(concatSemantic, {
                 role: 'projection-cache-concat-list'
             }),
-            direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
             gapKey: 'default',
-            align: 'start',
             children: [
-                ...(concatCacheEntryNode ? [concatCacheEntryNode] : []),
-                ...(liveCopyNode ? [liveCopyNode] : [])
+                ...(concatStackNode ? [concatStackNode] : [])
             ],
             metadata: {
-                gapOverride: isSmallScreen
-                    ? KV_CACHE_DECODE_CONCAT_STACK_GAP_SMALL
-                    : KV_CACHE_DECODE_CONCAT_STACK_GAP,
+                gapOverride: 0,
                 kind: projectionKind,
                 kvCachePhase: branchMode
             }
@@ -1297,7 +1554,9 @@ function buildProjectionCacheBranch({
                     metadata: {
                         kind: projectionKind,
                         kvCachePhase: branchMode,
-                        fontScale: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE
+                        fontScale: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE,
+                        operatorScaleX: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_X,
+                        operatorScaleY: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_Y
                     }
                 }),
                 ...(concatListNode ? [concatListNode] : []),
@@ -1312,7 +1571,9 @@ function buildProjectionCacheBranch({
                     metadata: {
                         kind: projectionKind,
                         kvCachePhase: branchMode,
-                        fontScale: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE
+                        fontScale: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE,
+                        operatorScaleX: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_X,
+                        operatorScaleY: KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_Y
                     }
                 })
             ],
@@ -1325,25 +1586,173 @@ function buildProjectionCacheBranch({
             }
         })
         : null;
+    const concatResultRowItems = branchMode === 'decode'
+        ? buildProjectionConcatResultRowItems({
+            cacheRows,
+            liveRows: projectionData?.outputRows,
+            baseSemantic,
+            branchKey: projectionKind
+        })
+        : [];
     const concatResultNode = branchMode === 'decode'
-        ? createTextNode({
+        ? createVectorStripMatrixNode({
             role: 'projection-cache-concat-result',
             semantic: buildSemantic(concatSemantic, {
                 role: 'projection-cache-concat-result'
             }),
-            tex: cacheLabel,
-            text: cacheLabel,
-            presentation: VIEW2D_TEXT_PRESENTATIONS.LABEL,
-            visual: { styleKey: VIEW2D_STYLE_KEYS.LABEL },
+            labelTex: cacheLabel,
+            labelText: cacheLabel,
+            rowItems: concatResultRowItems,
+            rowCount: concatResultRowItems.length,
+            columnCount: cacheSourceData?.outputColumnCount,
+            compactWidth: outputDimensions?.compactWidth,
+            rowHeight: outputDimensions?.rowHeight,
+            ...createMhsaBottomVectorCaptionProps(),
+            captionDimensionsTex: formatView2dMatrixDimensions(
+                concatResultRowItems.length,
+                cacheSourceData?.outputColumnCount
+            ).tex,
+            captionDimensionsText: formatView2dMatrixDimensions(
+                concatResultRowItems.length,
+                cacheSourceData?.outputColumnCount
+            ).text,
+            visualStyleKey: styleKey,
             metadata: {
                 kind: projectionKind,
                 kvCachePhase: branchMode,
-                renderMode: 'dom-katex',
-                minScreenHeightPx: 0,
-                fontScale: KV_CACHE_DECODE_CONCAT_RESULT_FONT_SCALE
+                cacheConcatResultNode: true
             }
         })
         : null;
+    const nextCacheRowItems = branchMode === 'decode'
+        ? buildProjectionCacheNextRowItems({
+            cacheRows,
+            liveRows: projectionData?.outputRows,
+            baseSemantic,
+            branchKey: projectionKind
+        })
+        : [];
+    const nextCachePreviewNode = branchMode === 'decode'
+        ? createVectorStripMatrixNode({
+            role: 'projection-cache-next',
+            semantic: buildSemantic(baseSemantic, {
+                stage: `kv-cache.${projectionKind}.next`,
+                role: 'projection-cache-next',
+                branchKey: projectionKind,
+                cacheKind: projectionKind
+            }),
+            labelTex: `${cacheLabel}_{\\mathrm{cache,next}}`,
+            labelText: `${cacheLabel}_cache_next`,
+            rowItems: nextCacheRowItems,
+            rowCount: nextCacheRowItems.length,
+            columnCount: cacheSourceData?.outputColumnCount,
+            compactWidth: outputDimensions?.compactWidth,
+            rowHeight: outputDimensions?.rowHeight,
+            ...createMhsaProjectionVectorCaptionProps(projectionKind),
+            captionDimensionsTex: formatView2dMatrixDimensions(
+                nextCacheRowItems.length,
+                cacheSourceData?.outputColumnCount
+            ).tex,
+            captionDimensionsText: formatView2dMatrixDimensions(
+                nextCacheRowItems.length,
+                cacheSourceData?.outputColumnCount
+            ).text,
+            visualStyleKey: styleKey,
+            metadata: {
+                kind: projectionKind,
+                kvCachePhase: branchMode,
+                nextCachePreviewNode: true
+            }
+        })
+        : null;
+    const nextCachePreviewBranchNode = branchMode === 'decode' && nextCachePreviewNode?.id && concatResultNode?.id
+        ? createGroupNode({
+            role: 'projection-cache-next-branch',
+            semantic: buildSemantic(baseSemantic, {
+                stage: `kv-cache.${projectionKind}.next`,
+                role: 'projection-cache-next-branch',
+                branchKey: projectionKind,
+                cacheKind: projectionKind
+            }),
+            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+            gapKey: 'default',
+            children: [
+                createGroupNode({
+                    role: 'projection-cache-next-x-anchor',
+                    semantic: buildSemantic(baseSemantic, {
+                        stage: `kv-cache.${projectionKind}.next`,
+                        role: 'projection-cache-next-x-anchor',
+                        branchKey: projectionKind,
+                        cacheKind: projectionKind
+                    }),
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    gapKey: 'default',
+                    layout: {
+                        anchorAlign: {
+                            axis: 'x',
+                            selfNodeId: nextCachePreviewNode.id,
+                            targetNodeId: concatResultNode.id,
+                            selfAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                            targetAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                            offset: isSmallScreen
+                                ? KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X_SMALL
+                                : KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X
+                        }
+                    },
+                    children: [
+                        createGroupNode({
+                            role: 'projection-cache-next-y-anchor',
+                            semantic: buildSemantic(baseSemantic, {
+                                stage: `kv-cache.${projectionKind}.next`,
+                                role: 'projection-cache-next-y-anchor',
+                                branchKey: projectionKind,
+                                cacheKind: projectionKind
+                            }),
+                            direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                            gapKey: 'default',
+                            layout: {
+                                anchorAlign: {
+                                    axis: 'y',
+                                    selfNodeId: nextCachePreviewNode.id,
+                                    targetNodeId: concatResultNode.id,
+                                    selfAnchor: VIEW2D_ANCHOR_SIDES.TOP,
+                                    targetAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+                                    offset: isSmallScreen
+                                        ? KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y_SMALL
+                                        : KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y
+                                }
+                            },
+                            children: [nextCachePreviewNode],
+                            metadata: {
+                                gapOverride: 0,
+                                kind: projectionKind,
+                                kvCachePhase: branchMode,
+                                nextCachePreviewNode: true
+                            }
+                        })
+                    ],
+                    metadata: {
+                        gapOverride: 0,
+                        kind: projectionKind,
+                        kvCachePhase: branchMode,
+                        nextCachePreviewNode: true
+                    }
+                })
+            ],
+            metadata: {
+                gapOverride: 0,
+                kind: projectionKind,
+                kvCachePhase: branchMode,
+                nextCachePreviewNode: true
+            }
+        })
+        : null;
+    if (nextCachePreviewNode) {
+        nextCachePreviewNode.visual = {
+            ...(nextCachePreviewNode.visual || {}),
+            opacity: KV_CACHE_NEXT_PREVIEW_OPACITY
+        };
+    }
     const concatEquationNode = branchMode === 'decode'
         ? createGroupNode({
             role: 'projection-cache-concat-equation',
@@ -1405,6 +1814,67 @@ function buildProjectionCacheBranch({
                 }
             },
             children: [
+                ...(cacheSourceNode?.id
+                    ? [createGroupNode({
+                        role: 'projection-cache-source-branch',
+                        semantic: buildSemantic(baseSemantic, {
+                            stage: `kv-cache.${projectionKind}.source`,
+                            role: 'projection-cache-source-branch',
+                            branchKey: projectionKind,
+                            cacheKind: projectionKind
+                        }),
+                        direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                        gapKey: 'default',
+                        layout: {
+                            anchorAlign: {
+                                axis: 'x',
+                                selfNodeId: cacheSourceNode.id,
+                                targetNodeId: outputNode.id,
+                                selfAnchor: VIEW2D_ANCHOR_SIDES.RIGHT,
+                                targetAnchor: VIEW2D_ANCHOR_SIDES.LEFT,
+                                offset: -(decodeBranchMetrics?.leftGap || 0)
+                            }
+                        },
+                        children: [
+                            createGroupNode({
+                                role: 'projection-cache-source-y-anchor',
+                                semantic: buildSemantic(baseSemantic, {
+                                    stage: `kv-cache.${projectionKind}.source`,
+                                    role: 'projection-cache-source-y-anchor',
+                                    branchKey: projectionKind,
+                                    cacheKind: projectionKind
+                                }),
+                                direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                                gapKey: 'default',
+                                layout: {
+                                    anchorAlign: {
+                                        axis: 'y',
+                                        selfNodeId: cacheSourceNode.id,
+                                        targetNodeId: outputNode.id,
+                                        selfAnchor: VIEW2D_ANCHOR_SIDES.BOTTOM,
+                                        targetAnchor: VIEW2D_ANCHOR_SIDES.TOP,
+                                        offset: -(decodeBranchMetrics?.topGap || 0)
+                                    }
+                                },
+                                children: [cacheSourceNode],
+                                metadata: {
+                                    gapOverride: 0,
+                                    kind: projectionKind,
+                                    cacheNode: true,
+                                    cacheSourceNode: true,
+                                    kvCachePhase: branchMode
+                                }
+                            })
+                        ],
+                        metadata: {
+                            gapOverride: 0,
+                            kind: projectionKind,
+                            cacheNode: true,
+                            cacheSourceNode: true,
+                            kvCachePhase: branchMode
+                        }
+                    })]
+                    : []),
                 createGroupNode({
                     role: 'projection-cache-concat-y-anchor',
                     semantic: buildSemantic(baseSemantic, {
@@ -1422,7 +1892,11 @@ function buildProjectionCacheBranch({
                             targetNodeId: outputNode.id,
                             selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
                             targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
-                            offset: 0
+                            offset: -resolveProjectionCacheDecodeConcatLift({
+                                rowHeight: outputDimensions?.rowHeight,
+                                isSmallScreen,
+                                projectionKind
+                            })
                         }
                     },
                     children: concatEquationNode ? [concatEquationNode] : [],
@@ -1432,7 +1906,8 @@ function buildProjectionCacheBranch({
                         cacheNode: true,
                         kvCachePhase: branchMode
                     }
-                })
+                }),
+                ...(nextCachePreviewBranchNode ? [nextCachePreviewBranchNode] : [])
             ],
             metadata: {
                 gapOverride: 0,
@@ -1498,19 +1973,18 @@ function buildProjectionCacheBranch({
                 kvCachePhase: branchMode
             }
         });
-
-    const connectorNode = branchMode === 'decode'
+    const sourceConnectorNode = branchMode === 'decode' && cacheSourceNode?.id
         ? createConnectorNode({
-            role: `connector-${projectionKind}-cache`,
+            role: `connector-${projectionKind}-cache-source`,
             semantic: buildSemantic(baseSemantic, {
-                stage: `connector-${projectionKind}-cache`,
-                role: 'connector-kv-cache',
+                stage: `connector-${projectionKind}-cache-source`,
+                role: 'connector-kv-cache-source',
                 branchKey: projectionKind,
                 cacheKind: projectionKind
             }),
-            source: createAnchorRef(cacheNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
-            target: createAnchorRef(liveCopyNode?.id || outputNode.id, VIEW2D_ANCHOR_SIDES.TOP),
-            route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
+            source: createAnchorRef(cacheSourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+            target: createAnchorRef(cacheNode.id, VIEW2D_ANCHOR_SIDES.TOP),
+            route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
             gap: 0,
             sourceGap: 6,
             targetGap: 6,
@@ -1524,6 +1998,10 @@ function buildProjectionCacheBranch({
                 kvCachePhase: branchMode
             }
         })
+        : null;
+
+    const connectorNode = branchMode === 'decode'
+        ? null
         : createConnectorNode({
             role: `connector-${projectionKind}-cache`,
             semantic: buildSemantic(baseSemantic, {
@@ -1560,11 +2038,11 @@ function buildProjectionCacheBranch({
                 cacheKind: projectionKind
             }),
             source: createAnchorRef(outputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
-            target: createAnchorRef(liveCopyNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
-            route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+            target: createAnchorRef(liveCopyNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
+            route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
             gap: 0,
             sourceGap: 6,
-            targetGap: 6,
+            targetGap: KV_CACHE_DECODE_COPY_TARGET_GAP,
             visual: {
                 styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
                 stroke: KV_CACHE_BRANCH_STROKE
@@ -1572,16 +2050,52 @@ function buildProjectionCacheBranch({
             metadata: {
                 preserveColor: true,
                 strokeWidthScale: KV_CACHE_BRANCH_STROKE_WIDTH_SCALE,
+                targetAnchorMode: 'caption-bottom',
                 kvCachePhase: branchMode
+            }
+        })
+        : null;
+    const nextPreviewConnectorNode = branchMode === 'decode' && nextCachePreviewNode?.id
+        ? createConnectorNode({
+            role: `connector-${projectionKind}-cache-next`,
+            semantic: buildSemantic(baseSemantic, {
+                stage: `connector-${projectionKind}-cache-next`,
+                role: 'connector-kv-cache-next',
+                branchKey: projectionKind,
+                cacheKind: projectionKind
+            }),
+            source: createAnchorRef(concatResultNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+            target: createAnchorRef(nextCachePreviewNode.id, VIEW2D_ANCHOR_SIDES.TOP),
+            route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
+            gap: 0,
+            sourceGap: projectionKind === 'v'
+                ? ATTENTION_DECODE_VALUE_CONNECTOR_SOURCE_GAP
+                : Math.max(0, Math.floor(Number(connectorGaps.transpose) || 0)),
+            targetGap: KV_CACHE_DECODE_NEXT_PREVIEW_TARGET_GAP,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                stroke: KV_CACHE_NEXT_PREVIEW_STROKE
+            },
+            metadata: {
+                preserveColor: true,
+                sourceAnchorOffsetYRatio: KV_CACHE_DECODE_NEXT_PREVIEW_SOURCE_OFFSET_Y_RATIO,
+                strokeWidthScale: KV_CACHE_BRANCH_STROKE_WIDTH_SCALE,
+                kvCachePhase: branchMode,
+                nextCachePreviewConnector: true
             }
         })
         : null;
 
     return {
         cacheNode,
+        cacheSourceNode,
+        cacheConcatResultNode: concatResultNode,
+        nextCachePreviewNode,
         cacheOverlayNode: cacheWrapperNode,
+        cacheSourceConnectorNode: sourceConnectorNode,
         cacheConnectorNode: connectorNode,
-        cacheCopyConnectorNode: copyConnectorNode
+        cacheCopyConnectorNode: copyConnectorNode,
+        nextCachePreviewConnectorNode: nextPreviewConnectorNode
     };
 }
 
@@ -1637,8 +2151,7 @@ function buildProjectionStageNode({
         rowCount: previewData.rowCount,
         compactWidth: xLnDimensions.compactWidth,
         rowHeight: xLnDimensions.rowHeight,
-        captionPosition: 'bottom',
-        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        ...createMhsaBottomVectorCaptionProps(),
         captionDimensionsTex: inputDimensionCaption.tex,
         captionDimensionsText: inputDimensionCaption.text,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL
@@ -1721,8 +2234,7 @@ function buildProjectionStageNode({
         columnCount: projectionData.outputColumnCount,
         compactWidth: projectionOutputDimensions.compactWidth,
         rowHeight: projectionOutputDimensions.rowHeight,
-        captionPosition: 'bottom',
-        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        ...createMhsaBottomVectorCaptionProps(),
         captionDimensionsTex: outputDimensionCaption.tex,
         captionDimensionsText: outputDimensionCaption.text,
         visualStyleKey: styleKey,
@@ -1800,16 +2312,22 @@ function buildProjectionStageNode({
             inputNode: xInputNode,
             outputNode,
             outputDimensions: projectionOutputDimensions,
-            isSmallScreen
+            isSmallScreen,
+            layoutMetrics
         })
         : null;
 
     return {
         stageNode,
         cacheNode: cacheBranch?.cacheNode || null,
+        cacheSourceNode: cacheBranch?.cacheSourceNode || null,
+        cacheConcatResultNode: cacheBranch?.cacheConcatResultNode || null,
+        nextCachePreviewNode: cacheBranch?.nextCachePreviewNode || null,
         cacheOverlayNode: cacheBranch?.cacheOverlayNode || null,
+        cacheSourceConnectorNode: cacheBranch?.cacheSourceConnectorNode || null,
         cacheConnectorNode: cacheBranch?.cacheConnectorNode || null,
-        cacheCopyConnectorNode: cacheBranch?.cacheCopyConnectorNode || null
+        cacheCopyConnectorNode: cacheBranch?.cacheCopyConnectorNode || null,
+        nextCachePreviewConnectorNode: cacheBranch?.nextCachePreviewConnectorNode || null
     };
 }
 
@@ -1818,6 +2336,10 @@ function buildAttentionStageNode({
     scoreStage,
     queryStageIndex,
     valueStageIndex,
+    kvCacheDecodeActive = false,
+    valueOperandRowItems = null,
+    valueOperandRowCount = null,
+    valueOperandColumnCount = null,
     extraRows = null,
     isSmallScreen = false,
     layoutMetrics = null,
@@ -1852,6 +2374,17 @@ function buildAttentionStageNode({
         scoreStage.transposeRowCount,
         scoreStage.transposeColumnCount
     );
+    const resolvedValueOperandRowItems = Array.isArray(valueOperandRowItems) && valueOperandRowItems.length
+        ? valueOperandRowItems
+        : buildGradientRowItems(scoreStage.valueRows, buildSemantic(attentionSemantic, {
+            stage: 'attention-value-post'
+        }), 'attention-value-post-row');
+    const resolvedValueOperandRowCount = Number.isFinite(valueOperandRowCount)
+        ? Math.max(0, Math.floor(valueOperandRowCount))
+        : resolvedValueOperandRowItems.length;
+    const resolvedValueOperandColumnCount = Number.isFinite(valueOperandColumnCount)
+        ? Math.max(0, Math.floor(valueOperandColumnCount))
+        : Math.max(0, Math.floor(Number(scoreStage.valueColumnCount) || 0));
 
     const querySourceNode = createVectorStripMatrixNode({
         role: 'attention-query-source',
@@ -1863,8 +2396,7 @@ function buildAttentionStageNode({
         columnCount: scoreStage.queryColumnCount,
         compactWidth: attentionQueryCompactWidth,
         rowHeight: attentionQueryRowHeight,
-        captionPosition: 'bottom',
-        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        ...createMhsaBottomVectorCaptionProps(),
         captionDimensionsTex: queryDimensionCaption.tex,
         captionDimensionsText: queryDimensionCaption.text,
         visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_Q,
@@ -1891,8 +2423,7 @@ function buildAttentionStageNode({
         paddingX: transposeStripLayout.paddingX,
         paddingY: transposeStripLayout.paddingY,
         cornerRadius: ATTENTION_TRANSPOSE_CORNER_RADIUS,
-        captionPosition: 'bottom',
-        captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+        ...createMhsaBottomVectorCaptionProps(),
         captionDimensionsTex: transposeDimensionCaption.tex,
         captionDimensionsText: transposeDimensionCaption.text,
         visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_K
@@ -2035,8 +2566,7 @@ function buildAttentionStageNode({
             columnCount: scoreStage.headOutputColumnCount,
             compactWidth: attentionVectorDimensions.compactWidth,
             rowHeight: attentionVectorDimensions.rowHeight,
-            captionPosition: 'bottom',
-            captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+            ...createMhsaBottomVectorCaptionProps(),
             visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT,
             metadata: {
                 disableEdgeOrnament: true
@@ -2100,15 +2630,14 @@ function buildAttentionStageNode({
                             semantic: buildSemantic(attentionSemantic, { role: 'attention-value-post', stage: 'head-output' }),
                             labelTex: scoreStage.valueLabelTex,
                             labelText: scoreStage.valueLabelTex,
-                            rowItems: buildGradientRowItems(scoreStage.valueRows, buildSemantic(attentionSemantic, {
-                                stage: 'attention-value-post'
-                            }), 'attention-value-post-row'),
-                            rowCount: scoreStage.valueRowCount,
-                            columnCount: scoreStage.valueColumnCount,
+                            rowItems: resolvedValueOperandRowItems,
+                            rowCount: resolvedValueOperandRowCount,
+                            columnCount: resolvedValueOperandColumnCount,
                             compactWidth: attentionVectorDimensions.compactWidth,
                             rowHeight: attentionVectorDimensions.rowHeight,
-                            captionPosition: 'bottom',
-                            captionLabelScale: MHSA_SYMBOL_CAPTION_LABEL_SCALE,
+                            ...(kvCacheDecodeActive
+                                ? createMhsaValueLiveCaptionProps()
+                                : createMhsaBottomVectorCaptionProps()),
                             visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_V,
                             metadata: {
                                 stageIndex: valueStageIndex
@@ -2407,6 +2936,20 @@ function buildAttentionStageNode({
             qktEquationNode,
             divisorClusterNode
         ],
+        layout: kvCacheDecodeActive
+            ? {
+                anchorAlign: {
+                    axis: 'y',
+                    selfNodeId: qktEquationNode.id,
+                    targetNodeId: preScoreNode.id,
+                    selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                    targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                    offset: isSmallScreen
+                        ? -ATTENTION_LEFT_HAND_SIDE_DECODE_LIFT_SMALL
+                        : -ATTENTION_LEFT_HAND_SIDE_DECODE_LIFT
+                }
+            }
+            : undefined,
         metadata: {
             gapOverride: resolveAttentionLeftHandSideGap(layoutMetrics, isSmallScreen)
         }
@@ -2553,13 +3096,22 @@ function buildEdgeConnectorNodes({
 function buildConnectorNodes({
     baseSemantic,
     layoutMetrics,
+    projectionStageEntries = [],
     projectionNodes,
     attentionNode,
-    isSmallScreen = false
+    isSmallScreen = false,
+    kvCacheDecodeActive = false
 }) {
     const connectorGaps = layoutMetrics?.connectorGaps || {};
-    const findProjectionOutput = (kind) => projectionNodes.find((stageNode) => stageNode?.metadata?.kind === kind)
+    const findProjectionOutput = (kind) => (
+        projectionStageEntries.find((entry) => entry?.stageNode?.metadata?.kind === kind)?.stageNode
+        || projectionNodes.find((stageNode) => stageNode?.metadata?.kind === kind)
+    )
         ?.children?.[2]?.children?.[4] || null;
+    const findProjectionConcatResult = (kind) => projectionStageEntries.find((entry) => (
+        entry?.cacheConcatResultNode
+        && entry?.stageNode?.metadata?.kind === kind
+    ))?.cacheConcatResultNode || null;
     const findAttentionNode = (role) => {
         const queue = Array.isArray(attentionNode?.children) ? [...attentionNode.children] : [];
         while (queue.length) {
@@ -2576,6 +3128,8 @@ function buildConnectorNodes({
     const qOutputNode = findProjectionOutput('q');
     const kOutputNode = findProjectionOutput('k');
     const vOutputNode = findProjectionOutput('v');
+    const kConcatResultNode = findProjectionConcatResult('k');
+    const vConcatResultNode = findProjectionConcatResult('v');
     const querySourceNode = findAttentionNode('attention-query-source');
     const transposeNode = findAttentionNode('attention-key-transpose');
     const preScoreNode = findAttentionNode('attention-pre-score');
@@ -2583,6 +3137,12 @@ function buildConnectorNodes({
     const postNode = findAttentionNode('attention-post');
     const postCopyNode = findAttentionNode('attention-post-copy');
     const valuePostNode = findAttentionNode('attention-value-post');
+    const keyAttentionSourceNode = kvCacheDecodeActive
+        ? (kConcatResultNode || kOutputNode)
+        : kOutputNode;
+    const valueAttentionSourceNode = kvCacheDecodeActive
+        ? (vConcatResultNode || vOutputNode)
+        : vOutputNode;
 
     return [
         qOutputNode && querySourceNode
@@ -2603,15 +3163,17 @@ function buildConnectorNodes({
                 }
             })
             : null,
-        kOutputNode && transposeNode
+        keyAttentionSourceNode && transposeNode
             ? createConnectorNode({
                 role: 'connector-k',
                 semantic: buildSemantic(baseSemantic, { stage: 'connector-k', role: 'connector-k' }),
-                source: createAnchorRef(kOutputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+                source: createAnchorRef(keyAttentionSourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
                 target: createAnchorRef(transposeNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
                 route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                 gap: connectorGaps.transpose,
-                targetGap: ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
+                targetGap: kvCacheDecodeActive
+                    ? ATTENTION_DECODE_CONNECTOR_CAPTION_EXIT_GAP
+                    : ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,
                 gapKey: 'transpose',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
@@ -2619,6 +3181,9 @@ function buildConnectorNodes({
                 },
                 metadata: {
                     preserveColor: true,
+                    ...(kvCacheDecodeActive
+                        ? { sourceAnchorOffsetYRatio: KV_CACHE_DECODE_ATTENTION_SOURCE_OFFSET_Y_RATIO }
+                        : {}),
                     targetAnchorMode: 'caption-bottom'
                 }
             })
@@ -2662,16 +3227,20 @@ function buildConnectorNodes({
                 }
             })
             : null,
-        vOutputNode && valuePostNode
+        valueAttentionSourceNode && valuePostNode
             ? createConnectorNode({
                 role: 'connector-v',
                 semantic: buildSemantic(baseSemantic, { stage: 'connector-v', role: 'connector-v' }),
-                source: createAnchorRef(vOutputNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+                source: createAnchorRef(valueAttentionSourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
                 target: createAnchorRef(valuePostNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
                 route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                 gap: connectorGaps.value,
-                sourceGap: ATTENTION_VALUE_CONNECTOR_SOURCE_GAP,
-                targetGap: ATTENTION_VALUE_CONNECTOR_TARGET_GAP,
+                sourceGap: kvCacheDecodeActive
+                    ? ATTENTION_DECODE_VALUE_CONNECTOR_SOURCE_GAP
+                    : ATTENTION_VALUE_CONNECTOR_SOURCE_GAP,
+                targetGap: kvCacheDecodeActive
+                    ? ATTENTION_DECODE_VALUE_CONNECTOR_TARGET_GAP
+                    : ATTENTION_VALUE_CONNECTOR_TARGET_GAP,
                 gapKey: 'value',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
@@ -2679,6 +3248,9 @@ function buildConnectorNodes({
                 },
                 metadata: {
                     preserveColor: true,
+                    ...(kvCacheDecodeActive
+                        ? { sourceAnchorOffsetYRatio: KV_CACHE_DECODE_ATTENTION_SOURCE_OFFSET_Y_RATIO }
+                        : {}),
                     sourceAnchorOffsetY: ATTENTION_VALUE_CONNECTOR_SOURCE_OFFSET_Y,
                     targetAnchorMode: 'caption-bottom'
                 }
@@ -2746,6 +3318,19 @@ export function buildMhsaSceneModel({
         resolvedPreviewData.attentionScoreStage,
         resolvedKvCacheState
     );
+    const fullValueProjectionData = resolvedPreviewData.projections.find((projectionData) => (
+        String(projectionData?.kind || '').trim().toLowerCase() === 'v'
+    )) || null;
+    const decodeAttentionValueOperandRowItems = resolvedKvCacheState.kvCacheDecodeActive
+        ? buildProjectionConcatResultRowItems({
+            cacheRows: Array.isArray(fullValueProjectionData?.outputRows)
+                ? fullValueProjectionData.outputRows.slice(0, -1)
+                : [],
+            liveRows: resolveLiveDecodeVectorRows(fullValueProjectionData?.outputRows),
+            baseSemantic,
+            branchKey: 'v'
+        })
+        : null;
     const queryStageIndex = Math.max(
         0,
         resolvedPreviewData.projections.findIndex((projectionData) => String(projectionData?.kind || '').toLowerCase() === 'q')
@@ -2787,8 +3372,14 @@ export function buildMhsaSceneModel({
     const projectionCacheConnectorNodes = projectionStageEntries
         .map((entry) => entry.cacheConnectorNode)
         .filter(Boolean);
+    const projectionCacheSourceConnectorNodes = projectionStageEntries
+        .map((entry) => entry.cacheSourceConnectorNode)
+        .filter(Boolean);
     const projectionCacheCopyConnectorNodes = projectionStageEntries
         .map((entry) => entry.cacheCopyConnectorNode)
+        .filter(Boolean);
+    const projectionCacheNextConnectorNodes = projectionStageEntries
+        .map((entry) => entry.nextCachePreviewConnectorNode)
         .filter(Boolean);
     const projectionSourceNode = buildProjectionSourceNode({
         baseSemantic,
@@ -2828,6 +3419,10 @@ export function buildMhsaSceneModel({
             scoreStage: resolvedAttentionScoreStage,
             queryStageIndex,
             valueStageIndex,
+            kvCacheDecodeActive: resolvedKvCacheState.kvCacheDecodeActive,
+            valueOperandRowItems: decodeAttentionValueOperandRowItems,
+            valueOperandRowCount: decodeAttentionValueOperandRowItems?.length,
+            valueOperandColumnCount: fullValueProjectionData?.outputColumnCount,
             extraRows: resolvedKvCacheState.kvCacheDecodeActive ? 0 : resolvedLayoutMetrics?.extraRows,
             isSmallScreen,
             layoutMetrics: resolvedLayoutMetrics,
@@ -2930,8 +3525,10 @@ export function buildMhsaSceneModel({
         projectionNodes,
         sourceNode: projectionSourceNode
     });
+    connectorNodes.push(...projectionCacheSourceConnectorNodes);
     connectorNodes.push(...projectionCacheConnectorNodes);
     connectorNodes.push(...projectionCacheCopyConnectorNodes);
+    connectorNodes.push(...projectionCacheNextConnectorNodes);
     connectorNodes.unshift(...buildEdgeConnectorNodes({
         baseSemantic,
         projectionSourceNode,
@@ -2943,9 +3540,11 @@ export function buildMhsaSceneModel({
         connectorNodes.push(...buildConnectorNodes({
             baseSemantic,
             layoutMetrics: resolvedLayoutMetrics,
+            projectionStageEntries,
             projectionNodes,
             attentionNode,
-            isSmallScreen
+            isSmallScreen,
+            kvCacheDecodeActive: resolvedKvCacheState.kvCacheDecodeActive
         }));
     }
 

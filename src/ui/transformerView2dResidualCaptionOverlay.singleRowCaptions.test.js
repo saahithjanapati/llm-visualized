@@ -269,6 +269,54 @@ describe('transformerView2dResidualCaptionOverlay single-row vector captions', (
         }
     });
 
+    it('keeps single-row compact captions responsive to zoom instead of pinning them to a fixed size', () => {
+        const fixtures = buildMlpCaptionFixtures(1);
+
+        try {
+            syncOverlayAroundNode({
+                overlay: fixtures.overlay,
+                scene: fixtures.scene,
+                layout: fixtures.layout,
+                canvas: fixtures.canvas,
+                nodeId: fixtures.inputNode?.id || '',
+                scale: 0.34
+            });
+
+            const captionItem = queryCaptionItem(fixtures.inputNode?.id || '');
+            const zoomedOutLabelSize = Number.parseFloat(
+                captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedOutDimensionsSize = Number.parseFloat(
+                captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            syncOverlayAroundNode({
+                overlay: fixtures.overlay,
+                scene: fixtures.scene,
+                layout: fixtures.layout,
+                canvas: fixtures.canvas,
+                nodeId: fixtures.inputNode?.id || '',
+                scale: 1.25
+            });
+
+            const zoomedInLabelSize = Number.parseFloat(
+                captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const zoomedInDimensionsSize = Number.parseFloat(
+                captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+
+            expect(captionItem).toBeTruthy();
+            expect(captionItem?.hidden).toBe(false);
+            expect(zoomedOutLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutDimensionsSize).toBeGreaterThan(0);
+            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(zoomedInDimensionsSize).toBeGreaterThan(zoomedOutDimensionsSize);
+        } finally {
+            fixtures.cleanup();
+        }
+    });
+
     it('lets MLP and output-projection bias terms shrink with scene zoom', () => {
         const outputProjectionFixtures = buildOutputProjectionCaptionFixtures(1);
         const mlpFixtures = buildMlpCaptionFixtures(1);

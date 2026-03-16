@@ -10,6 +10,40 @@ import {
 } from '../utils/mlpLabels.js';
 
 describe('selectionPanelNarrativeUtils bias narratives', () => {
+    it('returns no equation preview for incoming residual stream vectors', () => {
+        const selection = {
+            label: 'Residual Stream Vector',
+            info: {
+                activationData: {
+                    stage: 'layer.incoming',
+                    layerIndex: 4,
+                    tokenIndex: 1,
+                    tokenLabel: 'the'
+                }
+            }
+        };
+
+        const entries = resolveSelectionPreviewEquations('Residual Stream Vector', selection);
+        expect(entries).toEqual([]);
+    });
+
+    it('returns no equation preview for post-layernorm residual vectors', () => {
+        const selection = {
+            label: 'Post LayerNorm 1 Residual Vector',
+            info: {
+                activationData: {
+                    stage: 'ln1.output',
+                    layerIndex: 4,
+                    tokenIndex: 1,
+                    tokenLabel: 'the'
+                }
+            }
+        };
+
+        const entries = resolveSelectionPreviewEquations('Post LayerNorm 1 Residual Vector', selection);
+        expect(entries).toEqual([]);
+    });
+
     it('describes normalized residual stream vectors as post-normalization states', () => {
         const selection = {
             label: 'Normalized Residual Stream Vector',

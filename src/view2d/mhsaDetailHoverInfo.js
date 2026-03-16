@@ -32,9 +32,12 @@ export function normalizeProjectionKind(value = '') {
 export function resolveProjectionKindForNode(node = null) {
     const stageValue = String(node?.semantic?.stage || '').trim().toLowerCase();
     if (stageValue.startsWith('projection-')) {
-        return normalizeProjectionKind(stageValue.slice('projection-'.length));
+        const stageKind = normalizeProjectionKind(stageValue.slice('projection-'.length));
+        if (stageKind) {
+            return stageKind;
+        }
     }
-    return normalizeProjectionKind(node?.metadata?.kind || '');
+    return normalizeProjectionKind(node?.semantic?.branchKey || node?.metadata?.kind || '');
 }
 
 export function resolveProjectionLabel(kind = '') {

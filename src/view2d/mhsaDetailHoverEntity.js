@@ -26,6 +26,7 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
     const node = hit?.node || null;
     if (!node) return null;
     const componentKind = String(node?.semantic?.componentKind || '').trim().toLowerCase();
+    const projectionKind = normalizeProjectionKind(resolveProjectionKindForNode(node));
 
     if (hit?.cellHit) {
         if (node.role === 'concat-output-matrix' || node.role === 'concat-output-copy-matrix') {
@@ -60,8 +61,6 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
             axisHit
         };
     }
-
-    const projectionKind = normalizeProjectionKind(resolveProjectionKindForNode(node));
 
     if (hit?.rowHit) {
         if (componentKind === 'layer-norm') {
@@ -123,6 +122,22 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
                     rowHit: hit.rowHit
                 };
             }
+        }
+        if (node.role === 'projection-cache-concat-result' && projectionKind) {
+            return {
+                type: 'projection-cache-concat-result-row',
+                node,
+                projectionKind,
+                rowHit: hit.rowHit
+            };
+        }
+        if (node.role === 'projection-cache-next' && projectionKind) {
+            return {
+                type: 'projection-cache-concat-result-row',
+                node,
+                projectionKind,
+                rowHit: hit.rowHit
+            };
         }
         if (projectionKind) {
             return {
@@ -236,6 +251,22 @@ export function resolveMhsaDetailHoverEntity(hit = null) {
                 node
             };
         }
+    }
+
+    if (node.role === 'projection-cache-concat-result' && projectionKind) {
+        return {
+            type: 'projection-cache-concat-result',
+            node,
+            projectionKind
+        };
+    }
+
+    if (node.role === 'projection-cache-next' && projectionKind) {
+        return {
+            type: 'projection-cache-concat-result',
+            node,
+            projectionKind
+        };
     }
 
     if (projectionKind) {
