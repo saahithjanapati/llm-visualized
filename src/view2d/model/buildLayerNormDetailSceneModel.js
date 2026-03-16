@@ -5,10 +5,8 @@ import {
 } from '../../ui/selectionPanelConstants.js';
 import { resolveMhsaTokenMatrixLayoutMetrics } from '../../ui/selectionPanelMhsaLayoutUtils.js';
 import {
-    mapValueToColor,
-    mapValueToHueRange
+    mapValueToColor
 } from '../../utils/colors.js';
-import { LAYER_NORM_PARAM_ACTIVE_COLOR_OPTIONS } from '../../utils/layerNormParamColorOptions.js';
 import {
     formatLayerNormLabel,
     formatLayerNormParamLabel
@@ -76,6 +74,8 @@ const NORMALIZATION_BRIDGE_GAP_SMALL = 15;
 const NORMALIZATION_EQUATION_FONT_SCALE = 1.34;
 const NORMALIZATION_EQUATION_OFFSET_Y = -14;
 const NORMALIZATION_EQUATION_OFFSET_Y_SMALL = -11;
+const OUTPUT_STAGE_OFFSET_Y = 32;
+const OUTPUT_STAGE_OFFSET_Y_SMALL = 26;
 const CONNECTOR_LAYER_GAP = 0;
 const HADAMARD_OPERATOR_TEXT = '⊙';
 const LAYER_NORM_EQUATION_TEX = '\\hat{x} = \\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}}';
@@ -146,7 +146,7 @@ function buildLayerNormParamGradientCss(values = [], direction = '90deg') {
     if (!safeValues.length) return 'none';
     const stops = safeValues.map((value, index) => {
         const ratio = safeValues.length > 1 ? index / (safeValues.length - 1) : 0;
-        return `${colorToCss(mapValueToHueRange(value, LAYER_NORM_PARAM_ACTIVE_COLOR_OPTIONS))} ${(ratio * 100).toFixed(4)}%`;
+        return `${colorToCss(mapValueToColor(value, { clampMax: RESIDUAL_COLOR_CLAMP }))} ${(ratio * 100).toFixed(4)}%`;
     });
     if (stops.length === 1) {
         return `linear-gradient(${direction}, ${stops[0].replace(' 0.0000%', ' 0%')}, ${stops[0].replace(' 0.0000%', ' 100%')})`;
@@ -1013,6 +1013,7 @@ export function buildLayerNormDetailSceneModel({
             outgoingArrowSpacerNode
         ],
         layout: {
+            offsetY: isSmallScreen ? OUTPUT_STAGE_OFFSET_Y_SMALL : OUTPUT_STAGE_OFFSET_Y,
             anchorAlign: {
                 axis: 'x',
                 selfNodeId: scaledCopyNode.id,
@@ -1041,6 +1042,7 @@ export function buildLayerNormDetailSceneModel({
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
         },
         metadata: {
+            sourceAnchorMode: 'caption-bottom',
             preserveColor: true,
             strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE
         }
@@ -1061,6 +1063,7 @@ export function buildLayerNormDetailSceneModel({
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
         },
         metadata: {
+            sourceAnchorMode: 'caption-bottom',
             preserveColor: true,
             strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE
         }
@@ -1076,7 +1079,7 @@ export function buildLayerNormDetailSceneModel({
         route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
         gap: CONNECTOR_LAYER_GAP,
         sourceGap: Math.max(6, COPY_CONNECTOR_SOURCE_GAP - 2),
-        targetGap: COPY_CONNECTOR_TARGET_GAP,
+        targetGap: Math.max(0, COPY_CONNECTOR_TARGET_GAP - 8),
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
         },
@@ -1097,11 +1100,12 @@ export function buildLayerNormDetailSceneModel({
         route: VIEW2D_CONNECTOR_ROUTES.VERTICAL,
         gap: CONNECTOR_LAYER_GAP,
         sourceGap: Math.max(6, COPY_CONNECTOR_SOURCE_GAP - 2),
-        targetGap: COPY_CONNECTOR_TARGET_GAP,
+        targetGap: Math.max(0, COPY_CONNECTOR_TARGET_GAP - 8),
         visual: {
             styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL
         },
         metadata: {
+            sourceAnchorMode: 'caption-bottom',
             preserveColor: true,
             strokeWidthScale: EDGE_CONNECTOR_STROKE_WIDTH_SCALE
         }

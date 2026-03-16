@@ -113,7 +113,6 @@ import {
     resolveSelectionVectorSamplingData
 } from './selectionPanelVectorSamplingUtils.js';
 import {
-    LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS,
     resolveLiveLayerNormNormalizedPreviewSelection,
     resolveLayerNormParameterSummary,
     resolveLayerNormProductStageSummary
@@ -3341,19 +3340,16 @@ function shouldShowVectorLegendForSelection(selectionInfo = null) {
     return !!resolveLayerNormParamPreviewSpec(label, selectionInfo);
 }
 
-function buildLayerNormParamVectorPreview(label, selectionInfo) {
+export function buildLayerNormParamVectorPreview(label, selectionInfo) {
     const spec = resolveLayerNormParamPreviewSpec(label, selectionInfo);
     if (!spec) return null;
-
-    // Prefer cloning the live vector appearance so the selection preview
-    // matches the in-scene LayerNorm parameter colors exactly.
-    const liveClonePreview = buildVectorClonePreview(selectionInfo, label);
-    if (liveClonePreview) return liveClonePreview;
 
     const previewLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_MODEL));
     const previewData = getLayerNormParamData(spec.layerIndex, spec.layerNormKind, spec.param, previewLength)
         || extractPreviewVectorData(selectionInfo);
-    if (!Array.isArray(previewData) || previewData.length === 0) return null;
+    if (!Array.isArray(previewData) || previewData.length === 0) {
+        return buildVectorClonePreview(selectionInfo, label);
+    }
     const previewInstanceCount = resolveLayerNormParamPreviewInstanceCount(selectionInfo, previewData);
 
     const vec = createPreviewVector({
@@ -3363,9 +3359,7 @@ function buildLayerNormParamVectorPreview(label, selectionInfo) {
     });
     vec.group.userData = vec.group.userData || {};
     vec.group.userData.label = getLayerNormParamLabel(spec.layerNormKind, spec.param);
-    applyDataToPreviewVector(vec, previewData, {
-        colorOptions: LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS
-    });
+    applyDataToPreviewVector(vec, previewData);
 
     return {
         object: vec.group,

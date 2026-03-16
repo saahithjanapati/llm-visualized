@@ -1,5 +1,4 @@
 import { getLayerNormParamMeta } from '../data/layerNormParams.js';
-import { LAYER_NORM_PARAM_COLOR_OPTIONS } from '../utils/layerNormParamColorOptions.js';
 import {
     formatLayerNormProductVectorLabel,
     isLayerNormProductStage,
@@ -13,8 +12,6 @@ import {
 } from './selectionPanelSelectionUtils.js';
 import { D_MODEL } from './selectionPanelConstants.js';
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
-
-export const LAYER_NORM_ACTIVE_PARAM_PREVIEW_COLOR_OPTIONS = LAYER_NORM_PARAM_COLOR_OPTIONS;
 
 function resolveLayerFromEngine(engine = null, layerNormKind = null, layerIndex = null) {
     const layers = Array.isArray(engine?._layers) ? engine._layers : [];

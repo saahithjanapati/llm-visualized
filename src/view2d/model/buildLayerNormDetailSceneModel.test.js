@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { D_MODEL } from '../../ui/selectionPanelConstants.js';
+import { D_MODEL, RESIDUAL_COLOR_CLAMP } from '../../ui/selectionPanelConstants.js';
+import { mapValueToColor } from '../../utils/colors.js';
 import {
     createMhsaDetailSceneIndex,
     resolveMhsaDetailHoverState
@@ -225,6 +226,7 @@ describe('buildLayerNormDetailSceneModel', () => {
             nodeId: scaledNode?.id,
             anchor: 'bottom'
         });
+        expect(scaledCopyConnectorNode?.metadata?.sourceAnchorMode).toBe('caption-bottom');
         expect(scaledCopyConnectorNode?.target).toMatchObject({
             nodeId: scaledCopyNode?.id,
             anchor: 'top'
@@ -285,6 +287,13 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(scaledCopyEntry?.contentBounds?.y).toBeGreaterThan(
             (scaledEntry?.contentBounds?.y ?? 0) + (scaledEntry?.contentBounds?.height ?? 0)
         );
+        expect(
+            (scaledCopyEntry?.contentBounds?.y ?? 0)
+            - (
+                (scaledEntry?.contentBounds?.y ?? 0)
+                + (scaledEntry?.contentBounds?.height ?? 0)
+            )
+        ).toBeGreaterThan(24);
         expect(shiftEntry?.contentBounds?.x).toBeGreaterThan(
             (scaledCopyEntry?.contentBounds?.x ?? 0) + (scaledCopyEntry?.contentBounds?.width ?? 0)
         );
@@ -412,6 +421,26 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(requestedLengths).not.toContainEqual(['post-attention', D_MODEL]);
         expect(requestedLengths).toContainEqual(['ln1.norm', 12]);
         expect(requestedLengths).toContainEqual(['ln2.norm', 12]);
+    });
+
+    it('uses the residual-stream palette for layer norm parameter rows', () => {
+        const scene = buildScene();
+        const nodes = flattenSceneNodes(scene);
+        const scaleNode = nodes.find((node) => node?.role === 'layer-norm-scale') || null;
+        const shiftNode = nodes.find((node) => node?.role === 'layer-norm-shift') || null;
+        const scaleValues = scaleNode?.rowItems?.[0]?.rawValues || [];
+        const shiftValues = shiftNode?.rowItems?.[0]?.rawValues || [];
+        const scaleExpectedStart = `#${mapValueToColor(
+            scaleValues[0],
+            { clampMax: RESIDUAL_COLOR_CLAMP }
+        ).getHexString()}`;
+        const shiftExpectedStart = `#${mapValueToColor(
+            shiftValues[0],
+            { clampMax: RESIDUAL_COLOR_CLAMP }
+        ).getHexString()}`;
+
+        expect(scaleNode?.rowItems?.[0]?.gradientCss).toContain(scaleExpectedStart);
+        expect(shiftNode?.rowItems?.[0]?.gradientCss).toContain(shiftExpectedStart);
     });
 
     it('reuses deep-detail hover behavior for layer norm token rows', () => {

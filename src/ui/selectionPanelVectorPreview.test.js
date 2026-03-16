@@ -9,8 +9,10 @@ import {
     MLP_DOWN_BIAS_TOOLTIP_LABEL,
     MLP_UP_BIAS_TOOLTIP_LABEL
 } from '../utils/mlpLabels.js';
+import { getLayerNormParamData } from '../data/layerNormParams.js';
 
 let buildVectorClonePreview;
+let buildLayerNormParamVectorPreview;
 
 beforeAll(async () => {
     vi.stubGlobal('localStorage', {
@@ -18,7 +20,10 @@ beforeAll(async () => {
         setItem: () => {},
         removeItem: () => {}
     });
-    ({ buildVectorClonePreview } = await import('./selectionPanel.js'));
+    ({
+        buildVectorClonePreview,
+        buildLayerNormParamVectorPreview
+    } = await import('./selectionPanel.js'));
 });
 
 function createSceneBackedVectorMesh({
@@ -830,5 +835,76 @@ describe('buildVectorClonePreview', () => {
         expect(getHueDistance(endColor, MHA_VALUE_SPECTRUM_COLOR)).toBeLessThan(0.14);
 
         preview.dispose?.();
+    });
+});
+
+describe('buildLayerNormParamVectorPreview', () => {
+    it('uses the residual-vector palette instead of cloning the inactive gray bank colors', () => {
+        const prismCount = 12;
+        const sourceMesh = createSceneBackedVectorMesh({
+            prismCount,
+            vectorColors: [0x808080]
+        });
+        const previewData = getLayerNormParamData(0, 'ln1', 'scale', 768);
+        const selection = {
+            label: 'LayerNorm 1 Scale',
+            kind: 'vector',
+            object: sourceMesh,
+            hit: {
+                object: sourceMesh,
+                instanceId: 0
+            },
+            info: {
+                layerIndex: 0,
+                activationData: {
+                    label: 'LayerNorm 1 Scale',
+                    stage: 'ln1.param.scale',
+                    layerIndex: 0
+                }
+            }
+        };
+        const residualSelection = {
+            label: 'Residual Stream Vector',
+            kind: 'vector',
+            info: {
+                activationData: {
+                    label: 'Residual Stream Vector',
+                    stage: 'layer.incoming',
+                    values: previewData
+                },
+                values: previewData
+            }
+        };
+
+        const preview = buildLayerNormParamVectorPreview(selection.label, selection);
+        const residualPreview = buildVectorClonePreview(residualSelection, residualSelection.label);
+        expect(preview).toBeTruthy();
+        expect(residualPreview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        const residualPreviewMesh = findPreviewMesh(residualPreview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(prismCount);
+        expect(residualPreviewMesh?.isInstancedMesh).toBe(true);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        const expectedStartColor = getGradientColor(residualPreviewMesh, 0, 'colorStart');
+        const expectedEndColor = getGradientColor(residualPreviewMesh, 0, 'colorEnd');
+        expect(startColor).toBeTruthy();
+        expect(endColor).toBeTruthy();
+        expect(expectedStartColor).toBeTruthy();
+        expect(expectedEndColor).toBeTruthy();
+        expect(startColor.r).toBeCloseTo(expectedStartColor.r, 5);
+        expect(startColor.g).toBeCloseTo(expectedStartColor.g, 5);
+        expect(startColor.b).toBeCloseTo(expectedStartColor.b, 5);
+        expect(endColor.r).toBeCloseTo(expectedEndColor.r, 5);
+        expect(endColor.g).toBeCloseTo(expectedEndColor.g, 5);
+        expect(endColor.b).toBeCloseTo(expectedEndColor.b, 5);
+
+        preview.dispose?.();
+        residualPreview.dispose?.();
+        sourceMesh.geometry.dispose();
+        sourceMesh.material.dispose();
     });
 });
