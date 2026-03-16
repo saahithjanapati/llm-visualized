@@ -72,17 +72,21 @@ function resolveInlineSubscriptParts(tex = '', fallbackText = '') {
     if (!rawValue.length) return null;
 
     const patterns = [
-        /^([A-Za-z]+)_\{\\mathrm\{([A-Za-z]+)\}\}$/,
-        /^([A-Za-z]+)_\{\\([A-Za-z]+)\}$/,
-        /^([A-Za-z]+)_\{([A-Za-z]+)\}$/,
-        /^([A-Za-z]+)_([A-Za-z]+)$/
+        /^([A-Za-z]+)_\{\\mathrm\{([A-Za-z0-9_\\]+)\}\}$/,
+        /^([A-Za-z]+)_\{\\text\{([A-Za-z0-9_\\]+)\}\}$/,
+        /^([A-Za-z]+)_\{\\([A-Za-z0-9_\\]+)\}$/,
+        /^([A-Za-z]+)_\{([A-Za-z0-9_]+)\}$/,
+        /^([A-Za-z]+)_([A-Za-z0-9_]+)$/
     ];
     for (const pattern of patterns) {
         const match = rawValue.match(pattern);
         if (!match) continue;
         const [, base, sub] = match;
         if (!base || !sub) continue;
-        return { base, sub };
+        return {
+            base,
+            sub: String(sub).replaceAll('\\_', '_')
+        };
     }
     return null;
 }
@@ -103,6 +107,13 @@ function renderKatex(targetEl, tex = '', fallbackText = '') {
     const cacheKey = `${safeTex}::${safeFallback}`;
     if (targetEl.dataset.renderKey === cacheKey) return;
 
+    const inlineSubscriptParts = resolveInlineSubscriptParts(safeTex, safeFallback);
+    if (inlineSubscriptParts?.sub?.includes('_')) {
+        renderInlineSubscript(targetEl, inlineSubscriptParts.base, inlineSubscriptParts.sub);
+        targetEl.dataset.renderKey = cacheKey;
+        return;
+    }
+
     const katex = (typeof window !== 'undefined') ? window.katex : null;
     if (safeTex && katex && typeof katex.renderToString === 'function') {
         try {
@@ -117,7 +128,6 @@ function renderKatex(targetEl, tex = '', fallbackText = '') {
         }
     }
 
-    const inlineSubscriptParts = resolveInlineSubscriptParts(safeTex, safeFallback);
     if (inlineSubscriptParts) {
         renderInlineSubscript(targetEl, inlineSubscriptParts.base, inlineSubscriptParts.sub);
         targetEl.dataset.renderKey = cacheKey;
@@ -401,6 +411,22 @@ function resolveNodeVisualOpacity(node = null) {
     return Number.isFinite(opacity)
         ? Math.max(0, Math.min(1, opacity))
         : 1;
+}
+
+function hasLocalSceneSelection(node = null, sceneFocusState = null) {
+    if (!node?.id || !sceneFocusState) return false;
+    return !!(
+        sceneFocusState.rowSelections?.get(node.id)?.size
+        || sceneFocusState.columnSelections?.get(node.id)?.size
+        || sceneFocusState.cellSelections?.get(node.id)?.size
+    );
+}
+
+function resolveOverlayNodeOpacity(node = null, sceneFocusState = null) {
+    const focusAlpha = resolveSceneNodeFocusAlpha(node?.id || '', sceneFocusState);
+    const shouldLiftPreviewOpacity = node?.metadata?.nextCachePreviewNode === true
+        && hasLocalSceneSelection(node, sceneFocusState);
+    return focusAlpha * (shouldLiftPreviewOpacity ? 1 : resolveNodeVisualOpacity(node));
 }
 
 function buildCaptionCandidate({
@@ -731,9 +757,7 @@ export function createTransformerView2dResidualCaptionOverlay({
                     '--detail-transformer-view2d-dom-text-scale-y',
                     `${Math.max(0.01, Number(entry?.layoutData?.scaleY) || 1).toFixed(4)}`
                 );
-                item.itemEl.style.opacity = String(
-                    resolveSceneNodeFocusAlpha(node.id, overlayFocusState) * resolveNodeVisualOpacity(node)
-                );
+                item.itemEl.style.opacity = String(resolveOverlayNodeOpacity(node, overlayFocusState));
                 renderKatex(item.labelEl, node.tex, node.text);
             });
 
@@ -983,9 +1007,7 @@ export function createTransformerView2dResidualCaptionOverlay({
                 applyCaptionRoleStyling(item.itemEl, node);
                 item.itemEl.style.setProperty('--detail-transformer-view2d-caption-label-size', `${finalLabelFontPx.toFixed(2)}px`);
                 item.itemEl.style.setProperty('--detail-transformer-view2d-caption-dimensions-size', `${finalDimensionsFontPx.toFixed(2)}px`);
-                item.itemEl.style.opacity = String(
-                    resolveSceneNodeFocusAlpha(node.id, overlayFocusState) * resolveNodeVisualOpacity(node)
-                );
+                item.itemEl.style.opacity = String(resolveOverlayNodeOpacity(node, overlayFocusState));
 
                 renderKatex(item.labelEl, lines[0]?.tex, lines[0]?.text);
                 const dimensionsLine = lines[1] || null;

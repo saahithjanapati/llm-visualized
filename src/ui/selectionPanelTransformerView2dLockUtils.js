@@ -41,9 +41,12 @@ export function resolveTransformerView2dDetailClickLockAction({
     );
 
     if (hasLockedDetailSelection) {
-        return clickedLockedDetailTarget
-            ? TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE
-            : TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.CLEAR_LOCK;
+        if (clickedFocusableDetailTarget) {
+            return clickedLockedDetailTarget
+                ? TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE
+                : TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.LOCK_TARGET;
+        }
+        return TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.CLEAR_LOCK;
     }
 
     return clickedFocusableDetailTarget

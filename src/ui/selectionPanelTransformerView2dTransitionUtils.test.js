@@ -10,18 +10,18 @@ describe('selectionPanelTransformerView2dTransitionUtils', () => {
         expect(TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS).toBe(1520);
     });
 
-    it('keeps the head-detail scene fit when a specific MHSA component is targeted', () => {
+    it('allows component focus when a specific MHSA component is targeted', () => {
         expect(shouldKeepTransformerView2dHeadDetailFitView([{
             componentKind: 'mhsa',
             layerIndex: 1,
             headIndex: 3,
             stage: 'attention',
             role: 'attention-post'
-        }])).toBe(true);
+        }])).toBe(false);
     });
 
-    it('allows normal head-detail focus behavior when no component target is provided', () => {
-        expect(shouldKeepTransformerView2dHeadDetailFitView([])).toBe(false);
-        expect(shouldKeepTransformerView2dHeadDetailFitView(null)).toBe(false);
+    it('keeps the scene fit when no component target is provided', () => {
+        expect(shouldKeepTransformerView2dHeadDetailFitView([])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView(null)).toBe(true);
     });
 });

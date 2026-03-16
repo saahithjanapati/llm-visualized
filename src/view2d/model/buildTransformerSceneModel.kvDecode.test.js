@@ -305,6 +305,10 @@ describe('buildTransformerSceneModel KV-cache decode window', () => {
         expect(valueOutputNode?.rowItems).toHaveLength(1);
         expect(keyOutputNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
         expect(valueOutputNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
+        expect(keyOutputNode?.label?.tex).toBe('K_{\\mathrm{current}}');
+        expect(keyOutputNode?.label?.text).toBe('K_current');
+        expect(valueOutputNode?.label?.tex).toBe('V_{\\mathrm{current}}');
+        expect(valueOutputNode?.label?.text).toBe('V_current');
         expect(keyOutputCopyNode?.dimensions?.rows).toBe(1);
         expect(valueOutputCopyNode?.dimensions?.rows).toBe(1);
         expect(keyOutputCopyNode?.rowItems?.[0]?.semantic?.tokenIndex).toBe(6);
@@ -338,5 +342,7 @@ describe('buildTransformerSceneModel KV-cache decode window', () => {
         expect(keyConcatResultNode?.rowItems?.[3]?.semantic?.concatResultPart).toBe('live');
         expect(valueConcatResultNode?.rowItems?.[2]?.semantic?.concatResultPart).toBe('cache');
         expect(valueConcatResultNode?.rowItems?.[3]?.semantic?.concatResultPart).toBe('live');
+        expect(keyConcatResultNode?.label?.tex).toBe('K');
+        expect(valueConcatResultNode?.label?.tex).toBe('V');
     });
 });

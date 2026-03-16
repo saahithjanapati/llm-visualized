@@ -192,6 +192,142 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.activationData?.stage).toBe('embedding.position');
     });
 
+    it('resolves input token-chip canvas selections onto the live 3D token chip object', () => {
+        const scene = new THREE.Scene();
+        const tokenChipNode = createSceneNode('Token: Gamma', {
+            tokenIndex: 2,
+            tokenId: 17,
+            tokenLabel: 'Gamma'
+        });
+        scene.add(tokenChipNode);
+
+        const panel = createPanelContext(scene);
+        const selection = {
+            label: 'Token: Gamma',
+            info: {
+                tokenIndex: 2,
+                tokenId: 17,
+                tokenLabel: 'Gamma',
+                activationData: {
+                    label: 'Token: Gamma',
+                    stage: 'embedding.token',
+                    tokenIndex: 2,
+                    tokenLabel: 'Gamma',
+                    positionIndex: 3
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.object).toBe(tokenChipNode);
+        expect(resolved?.label).toBe('Token: Gamma');
+        expect(resolved?.kind).toBe('label');
+    });
+
+    it('resolves chosen-token canvas selections onto the live 3D token chip object', () => {
+        const scene = new THREE.Scene();
+        const tokenChipNode = createSceneNode('Token: Gamma', {
+            tokenIndex: 2,
+            tokenId: 17,
+            tokenLabel: 'Gamma'
+        });
+        scene.add(tokenChipNode);
+
+        const panel = createPanelContext(scene);
+        const selection = {
+            label: 'Chosen Token: Gamma',
+            info: {
+                tokenIndex: 2,
+                tokenId: 17,
+                tokenLabel: 'Gamma',
+                activationData: {
+                    label: 'Chosen Token: Gamma',
+                    stage: 'generation.chosen',
+                    tokenIndex: 2,
+                    tokenLabel: 'Gamma',
+                    positionIndex: 3
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.object).toBe(tokenChipNode);
+        expect(resolved?.label).toBe('Token: Gamma');
+        expect(resolved?.kind).toBe('label');
+        expect(resolved?.info?.activationData?.stage).toBe('generation.chosen');
+    });
+
+    it('resolves vocabulary embedding matrix canvas selections onto the live 3D embedding object', () => {
+        const scene = new THREE.Scene();
+        const embeddingNode = createSceneNode('Vocabulary Embedding Matrix');
+        scene.add(embeddingNode);
+
+        const panel = createPanelContext(scene);
+        const selection = {
+            label: 'Vocabulary Embedding Matrix',
+            info: {
+                activationData: {
+                    label: 'Vocabulary Embedding Matrix',
+                    stage: 'embedding.token'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.object).toBe(embeddingNode);
+        expect(resolved?.label).toBe('Vocabulary Embedding Matrix');
+        expect(resolved?.kind).toBe('matrix');
+    });
+
+    it('resolves position embedding matrix canvas selections onto the live 3D embedding object', () => {
+        const scene = new THREE.Scene();
+        const embeddingNode = createSceneNode('Position Embedding Matrix');
+        scene.add(embeddingNode);
+
+        const panel = createPanelContext(scene);
+        const selection = {
+            label: 'Position Embedding Matrix',
+            info: {
+                activationData: {
+                    label: 'Position Embedding Matrix',
+                    stage: 'embedding.position'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.object).toBe(embeddingNode);
+        expect(resolved?.label).toBe('Position Embedding Matrix');
+        expect(resolved?.kind).toBe('matrix');
+    });
+
+    it('resolves unembedding matrix canvas selections onto the live 3D unembedding object', () => {
+        const scene = new THREE.Scene();
+        const unembeddingNode = createSceneNode('Vocabulary Unembedding');
+        scene.add(unembeddingNode);
+
+        const panel = createPanelContext(scene);
+        const selection = {
+            label: 'Vocabulary Unembedding Matrix',
+            info: {
+                activationData: {
+                    label: 'Vocabulary Unembedding Matrix',
+                    stage: 'unembedding'
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.object).toBe(unembeddingNode);
+        expect(resolved?.label).toBe('Vocabulary Unembedding Matrix');
+        expect(resolved?.kind).toBe('matrix');
+    });
+
     it('recovers live layer norm parameter nodes by label when strict stage lookup misses', () => {
         const scene = new THREE.Scene();
         const layerNormScaleNode = createSceneNode('LayerNorm 1 Scale', {

@@ -151,6 +151,7 @@ const ATTENTION_PRE_CONNECTOR_SOURCE_OFFSET_Y = 16;
 const ATTENTION_VALUE_CONNECTOR_SOURCE_OFFSET_Y = 0;
 const ATTENTION_VALUE_CONNECTOR_SOURCE_GAP = 8;
 const ATTENTION_VALUE_CONNECTOR_TARGET_GAP = 8;
+const ATTENTION_DECODE_KEY_CONNECTOR_SOURCE_GAP = 4;
 const ATTENTION_DECODE_VALUE_CONNECTOR_SOURCE_GAP = 4;
 const ATTENTION_DECODE_VALUE_CONNECTOR_TARGET_GAP = 4;
 const MHSA_CONNECTOR_STROKE = 'rgba(255, 255, 255, 0.84)';
@@ -177,7 +178,7 @@ const OUTGOING_ARROW_SPACER_WIDTH = 44;
 const OUTGOING_ARROW_SPACER_WIDTH_SMALL = 38;
 const EDGE_CONNECTOR_STROKE_WIDTH_SCALE = 0.88;
 const HEAD_OUTPUT_EDGE_SOURCE_GAP = 8;
-const KV_CACHE_BRANCH_STROKE = 'rgba(255, 255, 255, 0.34)';
+const KV_CACHE_BRANCH_STROKE = MHSA_CONNECTOR_STROKE;
 const KV_CACHE_BRANCH_STROKE_WIDTH_SCALE = 0.74;
 const KV_CACHE_BRANCH_LIFT = 68;
 const KV_CACHE_BRANCH_LIFT_SMALL = 56;
@@ -213,13 +214,17 @@ const KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_X = 1.18;
 const KV_CACHE_DECODE_CONCAT_OPERATOR_SCALE_Y = 3.0;
 const KV_CACHE_DECODE_COPY_TARGET_GAP = 2;
 const KV_CACHE_DECODE_NEXT_PREVIEW_SOURCE_OFFSET_Y_RATIO = 0.25;
-const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X = 28;
-const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X_SMALL = 22;
-const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y = 24;
-const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y_SMALL = 20;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X = 40;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_X_SMALL = 32;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y = 32;
+const KV_CACHE_DECODE_NEXT_PREVIEW_OFFSET_Y_SMALL = 26;
 const KV_CACHE_DECODE_NEXT_PREVIEW_TARGET_GAP = 4;
 const KV_CACHE_NEXT_PREVIEW_OPACITY = 0.4;
-const KV_CACHE_NEXT_PREVIEW_STROKE = 'rgba(255, 255, 255, 0.22)';
+const KV_CACHE_NEXT_PREVIEW_STROKE = MHSA_CONNECTOR_STROKE;
+const KV_CACHE_DECODE_NEXT_PREVIEW_LABEL_SCALE = 1.02;
+const KV_CACHE_DECODE_NEXT_PREVIEW_VALUE_LABEL_SCALE = 1.1;
+const KV_CACHE_DECODE_NEXT_PREVIEW_LABEL_MIN_SCREEN_FONT_PX = 15.25;
+const KV_CACHE_DECODE_NEXT_PREVIEW_LABEL_MAX_SCREEN_FONT_PX = 16.25;
 
 function normalizeIndex(value) {
     return Number.isFinite(value) ? Math.floor(value) : null;
@@ -317,6 +322,23 @@ function buildMhsaProjectionSubscriptLabel(labelTex = '') {
         labelTex: `${base}_{\\mathrm{${subscript}}}`,
         labelText: safeLabelTex
     };
+}
+
+function buildMhsaDecodeCurrentVectorLabel(labelTex = '', projectionKind = '') {
+    const safeKind = String(projectionKind || '').trim().toLowerCase();
+    if (safeKind !== 'k' && safeKind !== 'v') {
+        const safeLabelTex = typeof labelTex === 'string' ? labelTex.trim() : '';
+        return {
+            labelTex: safeLabelTex,
+            labelText: safeLabelTex
+        };
+    }
+    const baseLabel = (
+        typeof labelTex === 'string' && labelTex.trim().length
+            ? labelTex.trim()
+            : safeKind.toUpperCase()
+    );
+    return buildMhsaProjectionSubscriptLabel(`${baseLabel}_current`);
 }
 
 function createCardMetadata(width = null, height = null, {
@@ -491,6 +513,33 @@ function createMhsaProjectionVectorCaptionProps(projectionKind = '') {
     return String(projectionKind || '').trim().toLowerCase() === 'v'
         ? createMhsaValueLiveCaptionProps()
         : createMhsaBottomVectorCaptionProps();
+}
+
+function createMhsaDecodeNextPreviewCaptionProps(projectionKind = '') {
+    const safeProjectionKind = String(projectionKind || '').trim().toLowerCase();
+    const baseProps = createMhsaProjectionVectorCaptionProps(safeProjectionKind);
+    const boostedLabelScale = safeProjectionKind === 'v'
+        ? KV_CACHE_DECODE_NEXT_PREVIEW_VALUE_LABEL_SCALE
+        : KV_CACHE_DECODE_NEXT_PREVIEW_LABEL_SCALE;
+    return {
+        ...baseProps,
+        captionLabelScale: Math.max(
+            Number(baseProps.captionLabelScale) || 0,
+            boostedLabelScale
+        ),
+        captionUniformLabelScale: Math.max(
+            Number(baseProps.captionUniformLabelScale) || 0,
+            boostedLabelScale
+        ),
+        captionLabelMinScreenFontPx: Math.max(
+            Number(baseProps.captionLabelMinScreenFontPx) || 0,
+            KV_CACHE_DECODE_NEXT_PREVIEW_LABEL_MIN_SCREEN_FONT_PX
+        ),
+        captionLabelMaxScreenFontPx: Math.max(
+            Number(baseProps.captionLabelMaxScreenFontPx) || 0,
+            KV_CACHE_DECODE_NEXT_PREVIEW_LABEL_MAX_SCREEN_FONT_PX
+        )
+    };
 }
 
 function createHiddenSpacer({
@@ -1641,14 +1690,14 @@ function buildProjectionCacheBranch({
                 branchKey: projectionKind,
                 cacheKind: projectionKind
             }),
-            labelTex: `${cacheLabel}_{\\mathrm{cache,next}}`,
+            labelTex: `${cacheLabel}_{\\mathrm{cache\\_next}}`,
             labelText: `${cacheLabel}_cache_next`,
             rowItems: nextCacheRowItems,
             rowCount: nextCacheRowItems.length,
             columnCount: cacheSourceData?.outputColumnCount,
             compactWidth: outputDimensions?.compactWidth,
             rowHeight: outputDimensions?.rowHeight,
-            ...createMhsaProjectionVectorCaptionProps(projectionKind),
+            ...createMhsaDecodeNextPreviewCaptionProps(projectionKind),
             captionDimensionsTex: formatView2dMatrixDimensions(
                 nextCacheRowItems.length,
                 cacheSourceData?.outputColumnCount
@@ -2070,7 +2119,7 @@ function buildProjectionCacheBranch({
             gap: 0,
             sourceGap: projectionKind === 'v'
                 ? ATTENTION_DECODE_VALUE_CONNECTOR_SOURCE_GAP
-                : Math.max(0, Math.floor(Number(connectorGaps.transpose) || 0)),
+                : ATTENTION_DECODE_KEY_CONNECTOR_SOURCE_GAP,
             targetGap: KV_CACHE_DECODE_NEXT_PREVIEW_TARGET_GAP,
             visual: {
                 styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
@@ -2224,11 +2273,16 @@ function buildProjectionStageNode({
         projectionData.outputRowCount,
         projectionData.outputColumnCount
     );
+    const outputLabel = kvCacheState?.kvCacheDecodeActive
+        ? buildMhsaDecodeCurrentVectorLabel(projectionData.outputLabelTex, projectionKind)
+        : {
+            labelTex: projectionData.outputLabelTex,
+            labelText: projectionData.outputLabelTex
+        };
     const outputNode = createVectorStripMatrixNode({
         role: 'projection-output',
         semantic: buildSemantic(projectionSemantic, { role: 'projection-output' }),
-        labelTex: projectionData.outputLabelTex,
-        labelText: projectionData.outputLabelTex,
+        ...outputLabel,
         rowItems: buildProjectionOutputRowItems(projectionData.outputRows, baseSemantic, projectionKind),
         rowCount: projectionData.outputRowCount,
         columnCount: projectionData.outputColumnCount,
@@ -3171,6 +3225,9 @@ function buildConnectorNodes({
                 target: createAnchorRef(transposeNode.id, VIEW2D_ANCHOR_SIDES.BOTTOM),
                 route: VIEW2D_CONNECTOR_ROUTES.ELBOW,
                 gap: connectorGaps.transpose,
+                sourceGap: kvCacheDecodeActive
+                    ? ATTENTION_DECODE_KEY_CONNECTOR_SOURCE_GAP
+                    : null,
                 targetGap: kvCacheDecodeActive
                     ? ATTENTION_DECODE_CONNECTOR_CAPTION_EXIT_GAP
                     : ATTENTION_CONNECTOR_CAPTION_EXIT_GAP,

@@ -10,6 +10,9 @@ import { buildMlpDetailSceneModel } from '../view2d/model/buildMlpDetailSceneMod
 import { buildOutputProjectionDetailSceneModel } from '../view2d/model/buildOutputProjectionDetailSceneModel.js';
 import { flattenSceneNodes } from '../view2d/schema/sceneTypes.js';
 
+const OUTPUT_PROJECTION_SINGLE_ROW_LABEL_MIN_SCREEN_FONT_PX = 10.5;
+const OUTPUT_PROJECTION_SINGLE_ROW_LABEL_MAX_SCREEN_FONT_PX = 13.5;
+
 function createResidualValues(seed = 0, length = D_MODEL) {
     return Array.from({ length }, (_, index) => Number((seed + (index * 0.01)).toFixed(4)));
 }
@@ -259,11 +262,46 @@ describe('transformerView2dResidualCaptionOverlay single-row vector captions', (
             const dimensionsSize = Number.parseFloat(
                 captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
             );
+            const dimensionsLine = captionItem?.querySelector('.detail-transformer-view2d-residual-caption-line--dimensions');
 
             expect(captionItem).toBeTruthy();
             expect(captionItem?.hidden).toBe(false);
-            expect(labelSize).toBeGreaterThanOrEqual(12);
-            expect(dimensionsSize).toBeGreaterThanOrEqual(10.5);
+            expect(labelSize).toBeGreaterThanOrEqual(OUTPUT_PROJECTION_SINGLE_ROW_LABEL_MIN_SCREEN_FONT_PX);
+            expect(dimensionsLine?.hidden).toBe(true);
+        } finally {
+            fixtures.cleanup();
+        }
+    });
+
+    it('caps the single-row output-projection head caption so H_i stays within the compact caption band', () => {
+        const fixtures = buildOutputProjectionCaptionFixtures(1);
+
+        try {
+            syncOverlayAroundNode({
+                overlay: fixtures.overlay,
+                scene: fixtures.scene,
+                layout: fixtures.layout,
+                canvas: fixtures.canvas,
+                nodeId: fixtures.headMatrixNode?.id || '',
+                scale: 1.6,
+                targetX: 56,
+                targetY: 52
+            });
+
+            const captionItem = queryCaptionItem(fixtures.headMatrixNode?.id || '');
+            const labelSize = Number.parseFloat(
+                captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const dimensionsSize = Number.parseFloat(
+                captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+            );
+            const dimensionsLine = captionItem?.querySelector('.detail-transformer-view2d-residual-caption-line--dimensions');
+
+            expect(captionItem).toBeTruthy();
+            expect(captionItem?.hidden).toBe(false);
+            expect(labelSize).toBeGreaterThan(0);
+            expect(dimensionsLine?.hidden).toBe(true);
+            expect(labelSize).toBeLessThanOrEqual(OUTPUT_PROJECTION_SINGLE_ROW_LABEL_MAX_SCREEN_FONT_PX);
         } finally {
             fixtures.cleanup();
         }

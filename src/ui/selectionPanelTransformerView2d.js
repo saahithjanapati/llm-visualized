@@ -13,6 +13,7 @@ import {
 } from '../engine/coreRaycastLabels.js';
 import {
     buildResidualRowHoverPayload,
+    buildResidualRowSelectionFocusState,
     buildSemanticNodeHoverFocusState,
     buildSemanticNodeHoverPayload,
     buildSemanticTarget,
@@ -70,6 +71,7 @@ import {
     resolveTransformerView2dTokenEntriesFromHoverPayload
 } from './selectionPanelTransformerView2dTokenHoverUtils.js';
 import {
+    isTransformerView2dViewportAtFitScene,
     resolveTransformerView2dOverviewMinScale,
     shouldShowTransformerView2dFitSceneAction,
     TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT
@@ -99,6 +101,7 @@ const VIEW2D_DETAIL_ACTION_EXIT_DEEP = 'exit-deep-detail';
 const VIEW2D_DETAIL_ACTION_EXIT_TO_3D = 'exit-to-3d';
 const VIEW2D_DETAIL_ACTION_CLOSE_SELECTION = 'close-selection';
 const VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS = 220;
+const VIEW2D_SELECTION_SIDEBAR_VIEWPORT_TRANSITION_MS = 240;
 const VIEW2D_INTERACTION_SETTLE_MS = 140;
 const VIEW2D_PREVIEW_DPR_CAP_IDLE = 1.5;
 const VIEW2D_PREVIEW_DPR_CAP_INTERACTING = 1;
@@ -107,6 +110,7 @@ const VIEW2D_KEYBOARD_ZOOM_RATE = 0.00165;
 const VIEW2D_KEYBOARD_INITIAL_STEP_MS = 16;
 const VIEW2D_ROW_HOVER_FADE_DURATION_MS = 180;
 const VIEW2D_DETAIL_VIEWPORT_PADDING = 28;
+const VIEW2D_MIN_EFFECTIVE_VIEWPORT_WIDTH_PX = 160;
 const VIEW2D_DETAIL_VIEWPORT_MIN_SCALE = TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT;
 const VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE = 0.06;
 const VIEW2D_DETAIL_VIEWPORT_MAX_SCALE = 10;
@@ -536,6 +540,10 @@ export function createTransformerView2dDetailView(panelEl, {
         detailScenePinnedTokenEntries: null,
         detailScenePinnedTokenSticky: false,
         detailSceneLockActive: false,
+        overviewScenePinnedFocus: null,
+        overviewScenePinnedSignature: '',
+        overviewScenePinnedTokenEntries: null,
+        overviewSceneLockActive: false,
         overviewSceneFocus: null,
         overviewSceneHoverSignature: '',
         hoveredResidualRow: null,
@@ -601,9 +609,54 @@ export function createTransformerView2dDetailView(panelEl, {
         state.overviewSelectionArmSignature = '';
     }
 
+    function shouldRequireTouchSelectionConfirmation(event = null, armSignature = '') {
+        return event?.pointerType === 'touch'
+            && typeof armSignature === 'string'
+            && armSignature.length > 0
+            && state.overviewSelectionArmSignature !== armSignature;
+    }
+
+    function applyTouchSelectionHover(event = null, {
+        armSignature = '',
+        detailHoverState = null
+    } = {}) {
+        if (!armSignature) return false;
+        if (detailHoverState?.focusState) {
+            lockPinnedDetailSceneFocus(detailHoverState, {
+                persistTokenChip: true,
+                lockSelection: false
+            });
+            state.overviewSelectionArmSignature = armSignature;
+            return true;
+        }
+        if (Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)) {
+            updateCanvasHover({
+                clientX: event.clientX,
+                clientY: event.clientY,
+                pointerType: 'mouse'
+            });
+        }
+        state.overviewSelectionArmSignature = armSignature;
+        return true;
+    }
+
     function requestSelectionOpen(selection = null) {
         if (!selection?.label || typeof onOpenSelection !== 'function') return false;
         return onOpenSelection(selection) !== false;
+    }
+
+    function requestSelectionClose() {
+        const didHandleClose = (typeof onCloseSelection === 'function')
+            ? onCloseSelection()
+            : false;
+        if (didHandleClose !== false) {
+            return true;
+        }
+        if (!selectionSidebar || !isSelectionSidebarVisible()) {
+            return false;
+        }
+        setSelectionSidebarVisible(false);
+        return true;
     }
 
     function resolveTokenStripChipSelection(chip = null) {
@@ -632,14 +685,20 @@ export function createTransformerView2dDetailView(panelEl, {
         return requestSelectionOpen(selection);
     }
 
-    function isCanvasChipSelection(selection = null) {
+    function isCanvasSidebarSelection(selection = null) {
         const lower = String(selection?.label || '').trim().toLowerCase();
-        return lower.startsWith('token:') || lower.startsWith('position:');
+        return lower.startsWith('token:')
+            || lower.startsWith('position:')
+            || lower.startsWith('chosen token:')
+            || lower === 'chosen token'
+            || lower === 'vocabulary embedding matrix'
+            || lower === 'position embedding matrix'
+            || lower === 'vocabulary unembedding matrix';
     }
 
     function resolveCanvasSemanticSelection(hit = null) {
         const selection = buildSemanticNodeHoverPayload(hit);
-        return isCanvasChipSelection(selection) ? selection : null;
+        return isCanvasSidebarSelection(selection) ? selection : null;
     }
 
     function setSelectionSidebarLine(element, {
@@ -680,6 +739,7 @@ export function createTransformerView2dDetailView(panelEl, {
     } = {}) {
         if (!selectionSidebar || !workspace) return;
         const nextVisible = !!visible;
+        const wasAtFitScene = isViewportAtFitScene();
         clearSelectionSidebarCloseTimer();
         workspace.dataset.selectionSidebarVisible = nextVisible ? 'true' : 'false';
         selectionSidebar.setAttribute('aria-hidden', nextVisible ? 'false' : 'true');
@@ -687,22 +747,34 @@ export function createTransformerView2dDetailView(panelEl, {
         if (nextVisible) {
             selectionSidebar.classList.remove('is-closing');
             selectionSidebar.classList.add('is-visible');
-            return;
-        }
-
-        if (immediate || !state.isSmallScreen) {
+        } else if (immediate || !state.isSmallScreen) {
             selectionSidebar.classList.remove('is-visible', 'is-closing');
             clearSelectionSidebarHeader();
-            return;
+        } else {
+            selectionSidebar.classList.remove('is-visible');
+            selectionSidebar.classList.add('is-closing');
+            selectionSidebarCloseTimerId = setTimeout(() => {
+                selectionSidebar.classList.remove('is-closing');
+                clearSelectionSidebarHeader();
+                selectionSidebarCloseTimerId = null;
+                if (state.visible) {
+                    syncViewportForSidebarVisibilityChange({
+                        animate: false,
+                        wasAtFitScene: false
+                    });
+                }
+            }, VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS);
         }
 
-        selectionSidebar.classList.remove('is-visible');
-        selectionSidebar.classList.add('is-closing');
-        selectionSidebarCloseTimerId = setTimeout(() => {
-            selectionSidebar.classList.remove('is-closing');
-            clearSelectionSidebarHeader();
-            selectionSidebarCloseTimerId = null;
-        }, VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS);
+        if (state.visible) {
+            syncViewportForSidebarVisibilityChange({
+                animate: !immediate,
+                wasAtFitScene
+            });
+            // Sidebar toggles should preserve the user's current viewport rather than
+            // triggering the next resize pass to auto-frame back out.
+            disableAutoFrameState();
+        }
     }
 
     function setSelectionSidebarHeaderContent({
@@ -758,7 +830,7 @@ export function createTransformerView2dDetailView(panelEl, {
     function getActiveSceneFocusState() {
         return state.headDetailDepthActive
             ? (state.detailSceneFocus || null)
-            : (state.overviewSceneFocus || null);
+            : (state.overviewSceneFocus || state.overviewScenePinnedFocus || null);
     }
 
     function shouldUseOverviewHoverRenderFastPath() {
@@ -806,10 +878,21 @@ export function createTransformerView2dDetailView(panelEl, {
         return true;
     }
 
-    function syncViewportControllerConstraints(viewportWidth = 0) {
+    function syncViewportControllerConstraints(viewportWidth = 0, viewportInsets = null) {
+        const horizontalInset = Math.max(
+            0,
+            Math.floor(
+                (Number(viewportInsets?.left) || 0)
+                + (Number(viewportInsets?.right) || 0)
+            )
+        );
+        const effectiveViewportWidth = Math.max(
+            1,
+            Math.floor(Number(viewportWidth) || 0) - horizontalInset
+        );
         const nextOverviewMinScale = resolveTransformerView2dOverviewMinScale({
             isSmallScreen: state.isSmallScreen,
-            viewportWidth
+            viewportWidth: effectiveViewportWidth
         });
         viewportController.minScale = nextOverviewMinScale;
         viewportController.maxScale = Math.max(nextOverviewMinScale, VIEW2D_DETAIL_VIEWPORT_MAX_SCALE);
@@ -834,16 +917,13 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     function shouldKeepHeadDetailSceneFitView() {
-        return !!state.headDetailTarget
-            && hasSceneBackedDetailTarget()
+        return hasSceneBackedDetailTarget()
             && shouldKeepTransformerView2dHeadDetailFitView(state.detailSemanticTargets);
     }
 
     function shouldKeepSceneBackedDetailFitView() {
         return hasSceneBackedDetailTarget()
-            && !state.headDetailTarget
-            && Array.isArray(state.detailSemanticTargets)
-            && state.detailSemanticTargets.length > 0;
+            && shouldKeepTransformerView2dHeadDetailFitView(state.detailSemanticTargets);
     }
 
     function setDetailTargets({
@@ -1088,6 +1168,97 @@ export function createTransformerView2dDetailView(panelEl, {
         return measureCanvasSize();
     }
 
+    function resolveSelectionSidebarViewportInsets() {
+        const emptyInsets = {
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0
+        };
+        if (!canvas || !selectionSidebar) return emptyInsets;
+        if (
+            !selectionSidebar.classList.contains('is-visible')
+            && !selectionSidebar.classList.contains('is-closing')
+        ) {
+            return emptyInsets;
+        }
+
+        const canvasRect = typeof canvas.getBoundingClientRect === 'function'
+            ? canvas.getBoundingClientRect()
+            : null;
+        const sidebarRect = typeof selectionSidebar.getBoundingClientRect === 'function'
+            ? selectionSidebar.getBoundingClientRect()
+            : null;
+        const canvasWidth = Math.max(0, Number(canvasRect?.width) || 0);
+        const canvasHeight = Math.max(0, Number(canvasRect?.height) || 0);
+        if (!(canvasWidth > 0) || !(canvasHeight > 0)) {
+            return emptyInsets;
+        }
+
+        const overlapWidth = Math.max(
+            0,
+            Math.min(Number(canvasRect?.right) || 0, Number(sidebarRect?.right) || 0)
+                - Math.max(Number(canvasRect?.left) || 0, Number(sidebarRect?.left) || 0)
+        );
+        const overlapHeight = Math.max(
+            0,
+            Math.min(Number(canvasRect?.bottom) || 0, Number(sidebarRect?.bottom) || 0)
+                - Math.max(Number(canvasRect?.top) || 0, Number(sidebarRect?.top) || 0)
+        );
+        const remainingWidth = canvasWidth - overlapWidth;
+        if (
+            !(overlapWidth > 0)
+            || !(overlapHeight > 0)
+            || remainingWidth < VIEW2D_MIN_EFFECTIVE_VIEWPORT_WIDTH_PX
+        ) {
+            return emptyInsets;
+        }
+
+        const canvasCenterX = (Number(canvasRect?.left) || 0) + (canvasWidth * 0.5);
+        const sidebarCenterX = (Number(sidebarRect?.left) || 0) + ((Number(sidebarRect?.width) || 0) * 0.5);
+        const insetWidth = Math.round(overlapWidth);
+        return sidebarCenterX >= canvasCenterX
+            ? {
+                ...emptyInsets,
+                right: insetWidth
+            }
+            : {
+                ...emptyInsets,
+                left: insetWidth
+            };
+    }
+
+    function syncViewportControllers({
+        preserveVisibleCenter = false,
+        animate = false,
+        durationMs = VIEW2D_SELECTION_SIDEBAR_VIEWPORT_TRANSITION_MS
+    } = {}) {
+        const { width, height } = getCanvasSize();
+        const viewportInsets = resolveSelectionSidebarViewportInsets();
+        const transitionNow = performance.now();
+        viewportController.setViewportSize(width, height);
+        detailViewportController.setViewportSize(width, height);
+        viewportController.setViewportInsets(viewportInsets, {
+            preserveVisibleCenter,
+            animate,
+            durationMs,
+            now: transitionNow,
+            source: 'detail-transformer-view2d-sidebar-shift'
+        });
+        detailViewportController.setViewportInsets(viewportInsets, {
+            preserveVisibleCenter,
+            animate,
+            durationMs,
+            now: transitionNow,
+            source: 'detail-transformer-view2d-sidebar-shift'
+        });
+        return {
+            width,
+            height,
+            viewportInsets
+        };
+    }
+
     function containsPoint(bounds = null, x = 0, y = 0) {
         if (!bounds) return false;
         const minX = Number.isFinite(bounds.x) ? bounds.x : 0;
@@ -1126,19 +1297,20 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function syncHeadDetailViewport({
         forceFit = false,
-        animate = false
+        animate = false,
+        durationMs = 420
     } = {}) {
         if (!hasSceneBackedDetailTarget()) return false;
         const bounds = resolveHeadDetailSceneBounds();
         if (!bounds) return false;
-        const { width, height } = getCanvasSize();
-        detailViewportController.setViewportSize(width, height);
+        const { width, height, viewportInsets } = syncViewportControllers();
         detailViewportController.setSceneBounds(bounds);
         const viewportPadding = VIEW2D_HEAD_DETAIL_VIEWPORT_PADDING;
         const fitTransform = resolveViewportFitTransform(bounds, { width, height }, {
             padding: viewportPadding,
             minScale: VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE,
-            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+            viewportInsets
         });
         state.headDetailSceneFitScale = Number.isFinite(fitTransform?.scale) ? fitTransform.scale : null;
         if (!forceFit) {
@@ -1147,7 +1319,7 @@ export function createTransformerView2dDetailView(panelEl, {
         if (animate) {
             detailViewportController.flyToBounds(bounds, {
                 animate: true,
-                durationMs: 420,
+                durationMs,
                 now: performance.now(),
                 padding: viewportPadding
             });
@@ -1164,7 +1336,7 @@ export function createTransformerView2dDetailView(panelEl, {
         animate = true,
         durationMs = 360
     } = {}) {
-        if (!state.headDetailTarget || !state.headDetailDepthActive) return false;
+        if (!state.headDetailDepthActive || !hasSceneBackedDetailTarget()) return false;
         const bounds = resolveHeadDetailFocusBounds();
         if (!bounds) return false;
         const padding = VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING;
@@ -1280,6 +1452,12 @@ export function createTransformerView2dDetailView(panelEl, {
                 if (!didActivateDepth) {
                     clearStagedHeadDetailTransition();
                     return;
+                }
+                if (!shouldKeepHeadDetailSceneFitView()) {
+                    focusHeadDetailTarget({
+                        animate: true,
+                        durationMs: 420
+                    });
                 }
                 clearStagedHeadDetailTransition();
             });
@@ -1425,10 +1603,14 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     function resolveViewportWorldBounds(controller = viewportController) {
-        const { width, height } = getCanvasSize();
+        const effectiveViewportRect = controller?.getEffectiveViewportRect?.() || null;
+        const width = Number(effectiveViewportRect?.width) || 0;
+        const height = Number(effectiveViewportRect?.height) || 0;
         if (!(width > 0) || !(height > 0)) return null;
-        const topLeft = controller.screenToWorld(0, 0);
-        const bottomRight = controller.screenToWorld(width, height);
+        const originX = Number(effectiveViewportRect?.x) || 0;
+        const originY = Number(effectiveViewportRect?.y) || 0;
+        const topLeft = controller.screenToWorld(originX, originY);
+        const bottomRight = controller.screenToWorld(originX + width, originY + height);
         const minX = Math.min(topLeft.x, bottomRight.x);
         const minY = Math.min(topLeft.y, bottomRight.y);
         const maxX = Math.max(topLeft.x, bottomRight.x);
@@ -1696,6 +1878,42 @@ export function createTransformerView2dDetailView(panelEl, {
         return hadPinnedFocus;
     }
 
+    function clearPinnedOverviewSceneFocus({ scheduleRender: shouldScheduleRender = true } = {}) {
+        const hadPinnedFocus = !!state.overviewScenePinnedFocus;
+        const hadOverviewFocus = !!state.overviewSceneFocus;
+        const hadResidualHover = !!state.hoveredResidualRow;
+        state.overviewScenePinnedFocus = null;
+        state.overviewScenePinnedSignature = '';
+        state.overviewScenePinnedTokenEntries = null;
+        state.overviewSceneLockActive = false;
+        state.overviewSceneFocus = null;
+        state.overviewSceneHoverSignature = '';
+        state.hoveredResidualRow = null;
+        resetOverviewSelectionArm();
+        resetHoverOverviewBlend();
+        resetHoverRowBlend();
+        resetCanvasHoverTargetKey();
+        tokenHoverSync.clearCanvasEntry({ emit: true });
+        hoverLabelOverlay.hide();
+        setHoverDimmingTarget(0, {
+            immediate: !state.visible,
+            shouldRender: false
+        });
+        if ((hadPinnedFocus || hadOverviewFocus || hadResidualHover) && shouldScheduleRender) {
+            scheduleRender();
+        }
+        return hadPinnedFocus;
+    }
+
+    function clearPinnedSceneSelectionLocks({ scheduleRender: shouldScheduleRender = true } = {}) {
+        const didClearDetailSelectionLock = clearPinnedDetailSceneFocus({ scheduleRender: false });
+        const didClearOverviewSelectionLock = clearPinnedOverviewSceneFocus({ scheduleRender: false });
+        if ((didClearDetailSelectionLock || didClearOverviewSelectionLock) && shouldScheduleRender) {
+            scheduleRender();
+        }
+        return didClearDetailSelectionLock || didClearOverviewSelectionLock;
+    }
+
     function lockPinnedDetailSceneFocus(detailHoverState = null, {
         scheduleRender: shouldScheduleRender = true,
         persistTokenChip = false,
@@ -1740,11 +1958,55 @@ export function createTransformerView2dDetailView(panelEl, {
         return true;
     }
 
+    function lockPinnedOverviewSceneFocus(overviewFocusState = null, {
+        scheduleRender: shouldScheduleRender = true
+    } = {}) {
+        if (!overviewFocusState?.focusState) return false;
+        const pinnedTokenEntries = resolveTransformerView2dTokenEntriesFromHoverPayload(overviewFocusState);
+        const nextSignature = typeof overviewFocusState.signature === 'string'
+            ? overviewFocusState.signature
+            : '';
+        const didChange = (
+            !state.overviewScenePinnedFocus
+            || state.overviewScenePinnedSignature !== nextSignature
+        );
+        state.hoveredResidualRow = null;
+        resetHoverRowBlend();
+        state.detailSceneFocus = state.detailScenePinnedFocus || null;
+        state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
+        state.overviewScenePinnedFocus = overviewFocusState.focusState;
+        state.overviewScenePinnedSignature = nextSignature;
+        state.overviewScenePinnedTokenEntries = pinnedTokenEntries;
+        state.overviewSceneLockActive = true;
+        state.overviewSceneFocus = overviewFocusState.focusState;
+        state.overviewSceneHoverSignature = nextSignature;
+        resetOverviewSelectionArm();
+        resetHoverOverviewBlend();
+        resetCanvasHoverTargetKey();
+        setHoverDimmingTarget(1, {
+            immediate: true,
+            shouldRender: false
+        });
+        if (pinnedTokenEntries.length) {
+            tokenHoverSync.setCanvasEntry(pinnedTokenEntries, { emit: true });
+        } else {
+            tokenHoverSync.clearCanvasEntry({ emit: true });
+        }
+        hoverLabelOverlay.hide();
+        if (didChange && shouldScheduleRender) {
+            scheduleRender();
+        }
+        return true;
+    }
+
     function clearCanvasHover({
         scheduleRender: shouldScheduleRender = true,
-        force = false
+        force = false,
+        preserveSelectionArm = false
     } = {}) {
-        resetOverviewSelectionArm();
+        if (!preserveSelectionArm) {
+            resetOverviewSelectionArm();
+        }
         if (state.detailScenePinnedFocus && force !== true) {
             const hadResidualHover = !!state.hoveredResidualRow;
             const hadOverviewFocus = !!state.overviewSceneFocus;
@@ -1763,6 +2025,32 @@ export function createTransformerView2dDetailView(panelEl, {
             hoverLabelOverlay.hide();
             resetHoverRowBlend();
             setHoverDimmingTarget(0, {
+                immediate: !state.visible,
+                shouldRender: false
+            });
+            if ((hadResidualHover || hadOverviewFocus) && shouldScheduleRender) {
+                scheduleRender();
+            }
+            return;
+        }
+        if (state.overviewScenePinnedFocus && force !== true) {
+            const hadResidualHover = !!state.hoveredResidualRow;
+            const hadOverviewFocus = !!state.overviewSceneFocus;
+            if (state.overviewScenePinnedTokenEntries?.length) {
+                tokenHoverSync.setCanvasEntry(state.overviewScenePinnedTokenEntries, { emit: true });
+            } else {
+                tokenHoverSync.clearCanvasEntry({ emit: true });
+            }
+            resetCanvasHoverTargetKey();
+            state.hoveredResidualRow = null;
+            state.detailSceneFocus = state.detailScenePinnedFocus || null;
+            state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
+            resetHoverRowBlend();
+            resetHoverOverviewBlend();
+            state.overviewSceneFocus = state.overviewScenePinnedFocus;
+            state.overviewSceneHoverSignature = state.overviewScenePinnedSignature;
+            hoverLabelOverlay.hide();
+            setHoverDimmingTarget(1, {
                 immediate: !state.visible,
                 shouldRender: false
             });
@@ -1810,6 +2098,11 @@ export function createTransformerView2dDetailView(panelEl, {
             allowDetailSceneHover,
             detailSceneSelectionLocked: state.detailSceneLockActive
         });
+        const freezeOverviewHover = !!(
+            !state.headDetailDepthActive
+            && state.overviewSceneLockActive
+            && state.overviewScenePinnedFocus
+        );
         const suppressOverviewHover = !!(
             state.headDetailDepthActive
             && hasActiveDetailTarget()
@@ -1838,6 +2131,10 @@ export function createTransformerView2dDetailView(panelEl, {
             clearCanvasHover({ scheduleRender: false });
             return hit?.entry || null;
         }
+        if (freezeOverviewHover) {
+            clearCanvasHover({ scheduleRender: false });
+            return hit?.entry || null;
+        }
         if (allowDetailSceneHover) {
             const detailHoverKey = buildCanvasHoverTargetKey(hit, 'detail');
             if (detailHoverKey === state.hoverTargetKey) {
@@ -1848,7 +2145,9 @@ export function createTransformerView2dDetailView(panelEl, {
                 return hit?.entry || null;
             }
 
-            const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, hit);
+            const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, hit, {
+                interactionKind: 'hover'
+            });
             if (!detailHoverState?.focusState) {
                 clearCanvasHover();
                 return hit?.entry || null;
@@ -2148,6 +2447,11 @@ export function createTransformerView2dDetailView(panelEl, {
         };
     }
 
+    function isViewportAtFitScene() {
+        if (!state.visible || !state.scene || !state.layout) return false;
+        return isTransformerView2dViewportAtFitScene(resolveFitSceneActionState());
+    }
+
     function syncFitSceneActionVisibility() {
         if (!fitBtn) return;
 
@@ -2172,15 +2476,46 @@ export function createTransformerView2dDetailView(panelEl, {
         }
     }
 
+    function syncViewportForSidebarVisibilityChange({
+        animate = true,
+        wasAtFitScene = false
+    } = {}) {
+        if (!state.visible) return false;
+        if (animate) {
+            stopAnimation();
+        }
+        measureCanvasSize();
+        const { width, viewportInsets } = syncViewportControllers({
+            preserveVisibleCenter: !wasAtFitScene,
+            animate: animate && !wasAtFitScene,
+            durationMs: VIEW2D_SELECTION_SIDEBAR_VIEWPORT_TRANSITION_MS
+        });
+        syncViewportControllerConstraints(width, viewportInsets);
+        updateReadouts();
+        if (wasAtFitScene) {
+            return fitScene({
+                animate,
+                durationMs: VIEW2D_SELECTION_SIDEBAR_VIEWPORT_TRANSITION_MS
+            });
+        }
+        if (animate && (viewportController.animation || detailViewportController.animation)) {
+            animateViewport();
+            return true;
+        }
+        scheduleRender();
+        return true;
+    }
+
     function computeHeadDetailFocusScale() {
         if (!hasActiveDetailTarget() || !state.layout?.registry) return null;
         const bounds = resolveSelectionFocusBounds();
         if (!bounds) return null;
-        const { width, height } = getCanvasSize();
+        const { width, height, viewportInsets } = syncViewportControllers();
         const transform = resolveViewportFitTransform(bounds, { width, height }, {
             padding: VIEW2D_HEAD_DETAIL_FOCUS_PADDING,
             minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
-            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+            viewportInsets
         });
         return Number.isFinite(transform?.scale) ? transform.scale : null;
     }
@@ -2353,7 +2688,8 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function openHeadDetail(headDetailTarget = null, {
         animate = true,
-        focusDurationMs = null
+        focusDurationMs = null,
+        nextDepthActive = false
     } = {}) {
         const resolvedTarget = resolveHeadDetailTarget(headDetailTarget);
         if (!resolvedTarget) return false;
@@ -2363,7 +2699,7 @@ export function createTransformerView2dDetailView(panelEl, {
         setDetailTargets({ headDetailTarget: resolvedTarget });
         return commitSceneSelection({
             animate,
-            nextDepthActive: false,
+            nextDepthActive,
             focusDurationMs
         });
     }
@@ -2415,7 +2751,7 @@ export function createTransformerView2dDetailView(panelEl, {
         clearStagedDetailTransition();
         cancelScheduledHoverUpdate();
         clearCanvasHover({ scheduleRender: false });
-        clearPinnedDetailSceneFocus({ scheduleRender: false });
+        clearPinnedSceneSelectionLocks({ scheduleRender: false });
         const overviewState = buildTransformerView2dOverviewState();
         state.baseSemanticTarget = overviewState.baseSemanticTarget;
         state.baseFocusLabel = overviewState.baseFocusLabel;
@@ -2431,10 +2767,16 @@ export function createTransformerView2dDetailView(panelEl, {
         });
     }
 
+    function resolveDisplayedStageSemanticTarget() {
+        return state.headDetailDepthActive
+            ? state.semanticTarget
+            : null;
+    }
+
     function updateReadouts() {
         syncHeadDetailChrome();
         syncFitSceneActionVisibility();
-        const stageHeader = resolveTransformerView2dStageHeader(state.semanticTarget);
+        const stageHeader = resolveTransformerView2dStageHeader(resolveDisplayedStageSemanticTarget());
         if (stageLayerReadout) {
             setNodeText(stageLayerReadout, stageHeader.layerLabel);
             stageLayerReadout.hidden = !stageHeader.layerLabel;
@@ -2510,11 +2852,10 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function render() {
         if (!state.visible || !state.scene || !state.layout) return false;
-        const { width, height } = getCanvasSize();
-        viewportController.setViewportSize(width, height);
+        const { width, height, viewportInsets } = syncViewportControllers();
+        syncViewportControllerConstraints(width, viewportInsets);
         viewportController.setSceneBounds(state.layout.sceneBounds || null);
         const headDetailSceneBounds = resolveHeadDetailSceneBounds();
-        detailViewportController.setViewportSize(width, height);
         detailViewportController.setSceneBounds(headDetailSceneBounds);
         updateHeadDetailDepthState();
         const hoverRenderFastPath = shouldUseOverviewHoverRenderFastPath();
@@ -2589,11 +2930,15 @@ export function createTransformerView2dDetailView(panelEl, {
         state.animationFrame = requestAnimationFrame(tick);
     }
 
-    function fitScene({ animate = true } = {}) {
+    function fitScene({
+        animate = true,
+        durationMs = 420
+    } = {}) {
         if (state.headDetailDepthActive && hasSceneBackedDetailTarget()) {
             const didFit = syncHeadDetailViewport({
                 forceFit: true,
-                animate
+                animate,
+                durationMs
             });
             if (didFit && !animate) {
                 render();
@@ -2604,7 +2949,7 @@ export function createTransformerView2dDetailView(panelEl, {
         if (animate) {
             viewportController.flyToBounds(state.layout.sceneBounds, {
                 animate: true,
-                durationMs: 420,
+                durationMs,
                 now: performance.now(),
                 padding: VIEW2D_DETAIL_VIEWPORT_PADDING
             });
@@ -2695,11 +3040,12 @@ export function createTransformerView2dDetailView(panelEl, {
             ? Math.max(1, Math.floor(durationMs))
             : (hasActiveDetailTarget() ? 520 : 420);
         if (hasActiveDetailTarget()) {
-            const { width, height } = getCanvasSize();
+            const { width, height, viewportInsets } = syncViewportControllers();
             const transform = resolveViewportFitTransform(bounds, { width, height }, {
                 padding,
                 minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
-                maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+                maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+                viewportInsets
             });
             state.headDetailFocusScale = Number.isFinite(transform?.scale) ? transform.scale : null;
             state.headDetailDepthActive = animate !== true;
@@ -2759,20 +3105,25 @@ export function createTransformerView2dDetailView(panelEl, {
         resetOverviewSelectionArm();
         clearStagedHeadDetailTransition();
         clearStagedDetailTransition();
-        setDetailFocusTarget({
-            detailSemanticTargets: [],
-            detailFocusLabel: ''
-        });
-        state.pendingDetailInteractionTargets = [];
+        const clearDetailFocusTarget = () => {
+            setDetailFocusTarget({
+                detailSemanticTargets: [],
+                detailFocusLabel: ''
+            });
+            state.pendingDetailInteractionTargets = [];
+        };
         if (isMhsaHeadOverviewEntry(entry)) {
+            clearDetailFocusTarget();
             return openHeadDetail({
                 layerIndex: entry.semantic.layerIndex,
                 headIndex: entry.semantic.headIndex
             }, {
-                animate: true
+                animate: true,
+                nextDepthActive: true
             });
         }
         if (isConcatOverviewEntry(entry)) {
+            clearDetailFocusTarget();
             return openConcatDetail({
                 layerIndex: entry.semantic.layerIndex
             }, {
@@ -2780,6 +3131,7 @@ export function createTransformerView2dDetailView(panelEl, {
             });
         }
         if (isOutputProjectionOverviewEntry(entry)) {
+            clearDetailFocusTarget();
             return openOutputProjectionDetail({
                 layerIndex: entry.semantic.layerIndex
             }, {
@@ -2787,6 +3139,7 @@ export function createTransformerView2dDetailView(panelEl, {
             });
         }
         if (isMlpOverviewEntry(entry)) {
+            clearDetailFocusTarget();
             return openMlpDetail({
                 layerIndex: entry.semantic.layerIndex
             }, {
@@ -2794,6 +3147,7 @@ export function createTransformerView2dDetailView(panelEl, {
             });
         }
         if (isLayerNormOverviewEntry(entry)) {
+            clearDetailFocusTarget();
             return openLayerNormDetail({
                 layerNormKind: entry.semantic.stage === 'final-ln' ? 'final' : entry.semantic.stage,
                 layerIndex: entry.semantic.layerIndex
@@ -2849,9 +3203,10 @@ export function createTransformerView2dDetailView(panelEl, {
         }
 
         if (zoomDir !== 0) {
-            const { width, height } = getCanvasSize();
             const zoomFactor = Math.exp(zoomDir * safeDt * VIEW2D_KEYBOARD_ZOOM_RATE);
-            activeViewportController.zoomAt(zoomFactor, width * 0.5, height * 0.5);
+            // Use the controller's effective visible center so keyboard zoom stays
+            // stable when the canvas viewport is inset by the docked sidebar.
+            activeViewportController.zoomAt(zoomFactor);
             changed = true;
         }
 
@@ -2959,7 +3314,7 @@ export function createTransformerView2dDetailView(panelEl, {
     function onDocumentPointerDown(event) {
         if (!state.visible || !(event?.target instanceof Node)) return;
         if (root.contains(event.target)) return;
-        clearPinnedDetailSceneFocus({ scheduleRender: true });
+        clearPinnedSceneSelectionLocks({ scheduleRender: true });
         disengageKeyboardMotion();
     }
 
@@ -2984,7 +3339,11 @@ export function createTransformerView2dDetailView(panelEl, {
         suppressClick = false
     } = {}) {
         cancelScheduledHoverUpdate();
-        clearCanvasHover({ scheduleRender: false });
+        const isTouchPointer = String(pointerType || '').toLowerCase() === 'touch';
+        clearCanvasHover({
+            scheduleRender: false,
+            preserveSelectionArm: isTouchPointer && !!state.overviewSelectionArmSignature
+        });
         state.pointer = {
             pointerId: Number.isFinite(pointerId) ? pointerId : null,
             pointerType: String(pointerType || ''),
@@ -3133,6 +3492,7 @@ export function createTransformerView2dDetailView(panelEl, {
         if (event?.pointerType === 'touch') {
             trackTouchPointer(event);
             if (beginTouchPinch()) {
+                resetOverviewSelectionArm();
                 event.preventDefault();
                 return;
             }
@@ -3176,6 +3536,7 @@ export function createTransformerView2dDetailView(panelEl, {
         state.pointer.moved = pointerIntent.moved;
         state.pointer.suppressClick = pointerIntent.suppressClick;
         if (pointerIntent.shouldPan) {
+            resetOverviewSelectionArm();
             getActiveViewportController().panBy(pointerIntent.deltaX, pointerIntent.deltaY);
             disableAutoFrameState();
             markInteraction(true);
@@ -3231,20 +3592,44 @@ export function createTransformerView2dDetailView(panelEl, {
         updateCanvasCursor(clickedEntry);
         if (shouldTreatAsClick) {
             if (state.headDetailDepthActive && state.detailSceneIndex) {
-                const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, clickedHit);
+                const detailHoverState = resolveMhsaDetailHoverState(state.detailSceneIndex, clickedHit, {
+                    interactionKind: 'click'
+                });
+                const detailArmSignature = detailHoverState?.focusState && detailHoverState?.signature
+                    ? `detail:${detailHoverState.signature}`
+                    : '';
+                if (shouldRequireTouchSelectionConfirmation(event, detailArmSignature)) {
+                    applyTouchSelectionHover(event, {
+                        armSignature: detailArmSignature,
+                        detailHoverState
+                    });
+                    return;
+                }
+                if (detailArmSignature) {
+                    resetOverviewSelectionArm();
+                }
                 const detailClickLockAction = resolveTransformerView2dDetailClickLockAction({
                     detailSceneSelectionLocked: state.detailSceneLockActive,
                     detailScenePinnedSignature: state.detailScenePinnedSignature,
                     detailHoverState
                 });
                 if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.LOCK_TARGET) {
-                    lockPinnedDetailSceneFocus(detailHoverState, {
+                    const didLockTarget = lockPinnedDetailSceneFocus(detailHoverState, {
+                        scheduleRender: false,
                         persistTokenChip: true
                     });
+                    requestSelectionOpen(detailHoverState);
+                    if (didLockTarget) {
+                        scheduleRender();
+                    }
                     return;
                 }
                 if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.CLEAR_LOCK) {
-                    clearPinnedDetailSceneFocus({ scheduleRender: true });
+                    const didClearSelectionLock = clearPinnedDetailSceneFocus({ scheduleRender: false });
+                    requestSelectionClose();
+                    if (didClearSelectionLock) {
+                        scheduleRender();
+                    }
                     return;
                 }
                 if (detailClickLockAction === TRANSFORMER_VIEW2D_DETAIL_CLICK_LOCK_ACTIONS.IGNORE) {
@@ -3258,15 +3643,62 @@ export function createTransformerView2dDetailView(panelEl, {
                 }
             }
             const residualSelection = buildResidualRowHoverPayload(clickedHit?.rowHit, state.activationSource);
-            resetOverviewSelectionArm();
-            if (residualSelection && requestSelectionOpen(residualSelection)) {
-                return;
+            const residualSelectionFocusState = buildResidualRowSelectionFocusState(state.scene, clickedHit);
+            const residualArmSignature = residualSelection
+                ? buildCanvasHoverTargetKey(clickedHit, 'overview-row-selection')
+                : '';
+            if (residualSelection) {
+                if (shouldRequireTouchSelectionConfirmation(event, residualArmSignature)) {
+                    applyTouchSelectionHover(event, {
+                        armSignature: residualArmSignature
+                    });
+                    return;
+                }
+                resetOverviewSelectionArm();
+                if (requestSelectionOpen(residualSelection)) {
+                    if (residualSelectionFocusState?.focusState) {
+                        lockPinnedOverviewSceneFocus({
+                            ...residualSelection,
+                            ...residualSelectionFocusState
+                        }, {
+                            scheduleRender: true
+                        });
+                    } else {
+                        clearPinnedOverviewSceneFocus({ scheduleRender: true });
+                    }
+                    return;
+                }
             }
             const semanticSelection = resolveCanvasSemanticSelection(clickedHit);
-            if (semanticSelection && requestSelectionOpen(semanticSelection)) {
+            const semanticArmSignature = semanticSelection
+                ? buildCanvasHoverTargetKey(clickedHit, 'overview-node-selection')
+                : '';
+            if (semanticSelection) {
+                if (shouldRequireTouchSelectionConfirmation(event, semanticArmSignature)) {
+                    applyTouchSelectionHover(event, {
+                        armSignature: semanticArmSignature
+                    });
+                    return;
+                }
+                resetOverviewSelectionArm();
+                if (requestSelectionOpen(semanticSelection)) {
+                    clearPinnedOverviewSceneFocus({ scheduleRender: true });
+                    return;
+                }
+            }
+            const shouldOpenSceneNode = !!(
+                isMhsaHeadOverviewEntry(clickedEntry)
+                || isConcatOverviewEntry(clickedEntry)
+                || isOutputProjectionOverviewEntry(clickedEntry)
+                || isMlpOverviewEntry(clickedEntry)
+                || isLayerNormOverviewEntry(clickedEntry)
+            );
+            if (shouldOpenSceneNode) {
+                clearPinnedOverviewSceneFocus({ scheduleRender: false });
+                onSceneNodeClick(clickedEntry);
                 return;
             }
-            onSceneNodeClick(clickedEntry);
+            clearPinnedOverviewSceneFocus({ scheduleRender: true });
         }
     }
 
@@ -3316,11 +3748,10 @@ export function createTransformerView2dDetailView(panelEl, {
         }
     });
     closeSelectionBtn?.addEventListener('click', () => {
-        const didHandleClose = (typeof onCloseSelection === 'function')
-            ? onCloseSelection()
-            : false;
-        if (didHandleClose === false) {
-            setSelectionSidebarVisible(false);
+        const didClearSelectionLock = clearPinnedSceneSelectionLocks({ scheduleRender: false });
+        requestSelectionClose();
+        if (didClearSelectionLock) {
+            scheduleRender();
         }
         focusCanvasSurface();
     });
@@ -3348,12 +3779,13 @@ export function createTransformerView2dDetailView(panelEl, {
 
     return {
         hasSelectionLock() {
-            return isTransformerView2dDetailSelectionLockActive(state.detailSceneLockActive);
+            return isTransformerView2dDetailSelectionLockActive(state.detailSceneLockActive)
+                || state.overviewSceneLockActive === true;
         },
         clearSelectionLock({
             scheduleRender: shouldScheduleRender = true
         } = {}) {
-            return clearPinnedDetailSceneFocus({
+            return clearPinnedSceneSelectionLocks({
                 scheduleRender: shouldScheduleRender
             });
         },
@@ -3369,7 +3801,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 clearStagedHeadDetailTransition();
                 clearStagedDetailTransition();
                 cancelScheduledHoverUpdate();
-                clearPinnedDetailSceneFocus({ scheduleRender: false });
+                clearPinnedSceneSelectionLocks({ scheduleRender: false });
                 clearCanvasHover({ scheduleRender: false, force: true });
                 stopHoverDimmingAnimation();
                 setHoverDimmingTarget(0, { immediate: true, shouldRender: false });
@@ -3481,7 +3913,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 };
             }
             cancelScheduledHoverUpdate();
-            clearPinnedDetailSceneFocus({ scheduleRender: false });
+            clearPinnedSceneSelectionLocks({ scheduleRender: false });
             clearCanvasHover({ scheduleRender: false, force: true });
             tokenHoverSync.clear({ emit: true });
             setHoverDimmingTarget(0, { immediate: true, shouldRender: false });
@@ -3532,9 +3964,11 @@ export function createTransformerView2dDetailView(panelEl, {
         },
         resizeAndRender() {
             if (!state.visible || !state.scene || !state.layout) return false;
-            const { width, height } = measureCanvasSize();
-            syncViewportControllerConstraints(width);
-            viewportController.setViewportSize(width, height);
+            measureCanvasSize();
+            const { width, height, viewportInsets } = syncViewportControllers({
+                preserveVisibleCenter: true
+            });
+            syncViewportControllerConstraints(width, viewportInsets);
             viewportController.setSceneBounds(state.layout.sceneBounds || null);
             if (shouldAutoFrameViewport(width, height)) {
                 const shouldOpenFromOverview = (

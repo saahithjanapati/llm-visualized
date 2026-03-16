@@ -138,6 +138,64 @@ describe('selectionPanelTransformerView2dViewportUtils', () => {
         })).toBe(true);
     });
 
+    it('treats docked-sidebar framing as fit when the controller state uses the same viewport inset', () => {
+        const fitBounds = {
+            x: 0,
+            y: 18,
+            width: 820,
+            height: 240
+        };
+        const controllerState = {
+            viewport: {
+                width: 1200,
+                height: 640
+            },
+            viewportInsets: {
+                top: 0,
+                right: 320,
+                bottom: 0,
+                left: 0
+            }
+        };
+        const fitTransform = resolveViewportFitTransform(fitBounds, controllerState.viewport, {
+            padding: 28,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10,
+            viewportInsets: controllerState.viewportInsets
+        });
+        const fullViewportFitTransform = resolveViewportFitTransform(fitBounds, controllerState.viewport, {
+            padding: 28,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        });
+
+        expect(fitTransform.scale).toBeLessThan(fullViewportFitTransform.scale);
+        expect(isTransformerView2dViewportAtFitScene({
+            controllerState: {
+                ...controllerState,
+                scale: fitTransform.scale,
+                panX: fitTransform.panX,
+                panY: fitTransform.panY
+            },
+            fitBounds,
+            padding: 28,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        })).toBe(true);
+        expect(shouldShowTransformerView2dFitSceneAction({
+            controllerState: {
+                ...controllerState,
+                scale: fitTransform.scale,
+                panX: fitTransform.panX,
+                panY: fitTransform.panY
+            },
+            fitBounds,
+            padding: 28,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        })).toBe(false);
+    });
+
     it('keeps the fit action hidden when no fit target is available yet', () => {
         expect(shouldShowTransformerView2dFitSceneAction({
             controllerState: {

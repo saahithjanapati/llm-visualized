@@ -52,6 +52,7 @@ function resolveTransformerView2dFitSceneTransform({
     fitBounds = null,
     viewportWidth = null,
     viewportHeight = null,
+    viewportInsets = null,
     padding = 24,
     minScale = 0.05,
     maxScale = 4
@@ -63,6 +64,7 @@ function resolveTransformerView2dFitSceneTransform({
     if (!viewport) return null;
 
     return resolveViewportFitTransform(fitBounds, viewport, {
+        viewportInsets: viewportInsets || controllerState?.viewportInsets || null,
         padding,
         minScale,
         maxScale

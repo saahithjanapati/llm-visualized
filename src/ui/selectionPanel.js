@@ -1771,6 +1771,15 @@ function extractTokenText(label) {
     return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
 }
 
+function extractChosenTokenText(label) {
+    if (!label) return '';
+    const match = String(label).match(/^chosen token\s*:\s*(.*)$/i);
+    if (!match) return '';
+    const extracted = match[1] || '';
+    const trimmed = extracted.trim();
+    return trimmed.length ? trimmed : SPACE_TOKEN_DISPLAY;
+}
+
 function resolvePreviewTokenId(label, selectionInfo) {
     const source = selectionInfo?.object || selectionInfo?.hit?.object;
     const directInfo = selectionInfo?.info;
@@ -6260,6 +6269,63 @@ export class SelectionPanel {
         return visibleMatch || fallbackMatch;
     }
 
+    _findPositionChipSceneObject({
+        tokenIndex = null,
+        tokenId = null,
+        tokenText = '',
+        positionIndex = null
+    } = {}) {
+        const scene = this.engine?.scene;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+
+        const normalizedTokenText = formatTokenLabelForPreview(tokenText);
+        const safePositionIndex = Number.isFinite(positionIndex) ? Math.max(0, Math.floor(positionIndex)) : null;
+        let fallbackMatch = null;
+        let visibleMatch = null;
+
+        scene.traverse((node) => {
+            if (!node || !node.userData || node.isScene) return;
+            const label = typeof node.userData.label === 'string'
+                ? node.userData.label
+                : '';
+            if (!label.toLowerCase().startsWith('position:')) return;
+
+            const nodeTokenIndex = Number.isFinite(node.userData.tokenIndex)
+                ? Math.floor(node.userData.tokenIndex)
+                : null;
+            const nodeTokenId = Number.isFinite(node.userData.tokenId)
+                ? Math.floor(node.userData.tokenId)
+                : null;
+            const nodeTokenText = formatTokenLabelForPreview(node.userData.tokenLabel);
+            const nodePositionIndex = Number.isFinite(node.userData.positionIndex)
+                ? Math.floor(node.userData.positionIndex)
+                : (() => {
+                    const parsed = Number(extractTokenText(label));
+                    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+                })();
+
+            if (Number.isFinite(tokenIndex) && Number.isFinite(nodeTokenIndex) && nodeTokenIndex !== tokenIndex) return;
+            if (Number.isFinite(tokenId) && Number.isFinite(nodeTokenId) && nodeTokenId !== tokenId) return;
+            if (Number.isFinite(safePositionIndex) && Number.isFinite(nodePositionIndex) && nodePositionIndex !== safePositionIndex) {
+                return;
+            }
+            if (
+                normalizedTokenText
+                && normalizedTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText
+                && nodeTokenText !== ATTENTION_VALUE_PLACEHOLDER
+                && nodeTokenText !== normalizedTokenText
+            ) {
+                return;
+            }
+
+            if (!fallbackMatch) fallbackMatch = node;
+            if (!visibleMatch && node.visible !== false) visibleMatch = node;
+        });
+
+        return visibleMatch || fallbackMatch;
+    }
+
     _onSubtitleSecondaryClick(event) {
         const target = event?.target;
         const chip = target && typeof target.closest === 'function'
@@ -8231,7 +8297,140 @@ export class SelectionPanel {
         ].filter(Boolean))];
         const layerIndex = findUserDataNumber(fallbackSelection, 'layerIndex');
         const headIndex = findUserDataNumber(fallbackSelection, 'headIndex');
+        const positionIndex = findUserDataNumber(fallbackSelection, 'positionIndex');
         const tokenContext = this._resolveTransformerView2dSelectionTokenContext(fallbackSelection);
+        const buildChipSelection = ({
+            chipObject = null,
+            resolvedLabel = '',
+            tokenLabel = '',
+            kind = 'label'
+        } = {}) => {
+            const activationData = fallbackSelection?.info?.activationData;
+            const info = fallbackSelection?.info && typeof fallbackSelection.info === 'object'
+                ? { ...fallbackSelection.info }
+                : {};
+            if (Number.isFinite(tokenContext.tokenIndex)) info.tokenIndex = tokenContext.tokenIndex;
+            if (Number.isFinite(tokenContext.tokenId)) info.tokenId = tokenContext.tokenId;
+            if (Number.isFinite(positionIndex)) info.positionIndex = Math.floor(positionIndex);
+            if (tokenLabel) info.tokenLabel = tokenLabel;
+            if (activationData && typeof activationData === 'object') {
+                info.activationData = {
+                    ...activationData,
+                    ...(resolvedLabel ? { label: resolvedLabel } : {})
+                };
+            }
+            return {
+                label: resolvedLabel || fallbackSelection.label,
+                kind,
+                info,
+                ...(chipObject ? { object: chipObject } : {})
+            };
+        };
+        const findMatrixSceneSelectionByLabelAliases = (labelAliases = []) => {
+            const normalizedAliases = Array.isArray(labelAliases)
+                ? labelAliases
+                    .map((candidate) => String(candidate || '').trim().toLowerCase())
+                    .filter(Boolean)
+                : [];
+            if (!normalizedAliases.length) return null;
+            return this._findGenericSceneObjectSelection({
+                label: '',
+                kind: 'matrix',
+                fallbackLabel: label,
+                labelMatcher: (sceneLabel = '', node = null) => {
+                    const normalizedSceneLabel = this._normalizeTransformerView2dSceneLookupLabel(
+                        sceneLabel,
+                        node ? { object: node } : null
+                    );
+                    return normalizedAliases.includes(normalizedSceneLabel);
+                }
+            });
+        };
+
+        if (lower.startsWith('token:')) {
+            const tokenText = tokenContext.tokenLabel || formatTokenLabelForPreview(extractTokenText(label));
+            const tokenObj = this._findTokenChipSceneObject({
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenText
+            });
+            const objectLabel = typeof tokenObj?.userData?.label === 'string' ? tokenObj.userData.label : '';
+            return buildChipSelection({
+                chipObject: tokenObj,
+                resolvedLabel: objectLabel.toLowerCase().startsWith('token:')
+                    ? objectLabel
+                    : (tokenText ? `Token: ${tokenText}` : label),
+                tokenLabel: tokenText
+            });
+        }
+
+        if (lower.startsWith('position:')) {
+            const tokenText = tokenContext.tokenLabel || formatTokenLabelForPreview(extractTokenText(label));
+            const positionObj = this._findPositionChipSceneObject({
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenText,
+                positionIndex
+            });
+            const objectLabel = typeof positionObj?.userData?.label === 'string' ? positionObj.userData.label : '';
+            return buildChipSelection({
+                chipObject: positionObj,
+                resolvedLabel: objectLabel.toLowerCase().startsWith('position:')
+                    ? objectLabel
+                    : label,
+                tokenLabel: tokenText
+            });
+        }
+
+        if (
+            stageLower.startsWith('generation.chosen')
+            || lower.startsWith('chosen token:')
+            || lower === 'chosen token'
+        ) {
+            const chosenTokenText = tokenContext.tokenLabel
+                || formatTokenLabelForPreview(extractChosenTokenText(label));
+            const tokenObj = this._findTokenChipSceneObject({
+                tokenIndex: tokenContext.tokenIndex,
+                tokenId: tokenContext.tokenId,
+                tokenText: chosenTokenText
+            });
+            const objectLabel = typeof tokenObj?.userData?.label === 'string' ? tokenObj.userData.label : '';
+            return buildChipSelection({
+                chipObject: tokenObj,
+                resolvedLabel: objectLabel.toLowerCase().startsWith('token:')
+                    ? objectLabel
+                    : (chosenTokenText ? `Token: ${chosenTokenText}` : label),
+                tokenLabel: chosenTokenText
+            });
+        }
+
+        if (lower === 'vocabulary embedding matrix') {
+            return findMatrixSceneSelectionByLabelAliases([
+                'vocabulary embedding matrix'
+            ]) || fallbackSelection;
+        }
+
+        if (lower === 'position embedding matrix') {
+            return findMatrixSceneSelectionByLabelAliases([
+                'position embedding matrix'
+            ]) || fallbackSelection;
+        }
+
+        if (lower === 'vocabulary unembedding matrix' || lower === 'vocabulary unembedding') {
+            const resolvedSelection = findMatrixSceneSelectionByLabelAliases([
+                'vocabulary unembedding matrix',
+                'vocabulary unembedding',
+                'vocab unembedding',
+                'vocabulary embedding (top)',
+                'vocab embedding (top)'
+            ]);
+            return resolvedSelection
+                ? {
+                    ...resolvedSelection,
+                    label
+                }
+                : fallbackSelection;
+        }
 
         if (
             stageLower === 'attention.mask'
@@ -9038,6 +9237,9 @@ export class SelectionPanel {
         if (!restoreSections && !sidebarVisible) {
             return false;
         }
+        this._transformerView2dDetailView?.clearSelectionLock?.({
+            scheduleRender: false
+        });
         this._transformerView2dDetailView?.setSelectionSidebarVisible?.(false);
         if (restoreSections) {
             if (this._transformerView2dSelectionSidebarRestoreTimer !== null) {

@@ -329,6 +329,7 @@ function drawVectorStripRows(
         dimmingStrength = 0,
         dimmedRowOpacity = 0.18,
         baseAlpha = 1,
+        focusedRowBaseAlpha = null,
         bandCount = 12,
         bandSeparatorOpacity = 0,
         focusedBandCells = null,
@@ -348,6 +349,16 @@ function drawVectorStripRows(
         : 0;
     const resolvedHoverScaleY = Number.isFinite(hoverScaleY) ? Math.max(1, hoverScaleY) : 1;
     const resolvedHoverGlowBlur = Number.isFinite(hoverGlowBlur) ? Math.max(0, hoverGlowBlur) : 0;
+    const resolvedBaseAlpha = Math.max(0, Math.min(1, Number.isFinite(baseAlpha) ? baseAlpha : 1));
+    const resolvedFocusedRowBaseAlpha = Math.max(
+        0,
+        Math.min(
+            1,
+            Number.isFinite(focusedRowBaseAlpha)
+                ? focusedRowBaseAlpha
+                : resolvedBaseAlpha
+        )
+    );
     const focusedBandMap = new Map();
     if (focusedBandCells instanceof Map) {
         focusedBandCells.forEach((bandSet, rowIndex) => {
@@ -413,23 +424,23 @@ function drawVectorStripRows(
             y: baseBounds.y - ((scaledHeight - baseBounds.height) * 0.5),
             height: scaledHeight
         };
-        const alpha = Math.max(0, Math.min(1, Number.isFinite(baseAlpha) ? baseAlpha : 1))
-            * (
-                hasFocusedRows
-                    ? (focusedRowIndexSet.has(index)
-                        ? 1
-                        : Math.max(0, Math.min(1, Number.isFinite(dimmedRowOpacity) ? dimmedRowOpacity : 0.18)))
-                    : hasFocusedBands
-                        ? (focusedBandMap.has(index)
-                            ? 1
-                            : Math.max(0, Math.min(1, Number.isFinite(dimmedRowOpacity) ? dimmedRowOpacity : 0.18)))
-                    : resolveRowDimmingAlpha(index, hoveredRowIndex, {
+        const inactiveRowOpacity = Math.max(0, Math.min(1, Number.isFinite(dimmedRowOpacity) ? dimmedRowOpacity : 0.18));
+        const alpha = hasFocusedRows
+            ? (focusedRowIndexSet.has(index)
+                ? resolvedFocusedRowBaseAlpha
+                : (resolvedBaseAlpha * inactiveRowOpacity))
+            : hasFocusedBands
+                ? (focusedBandMap.has(index)
+                    ? resolvedFocusedRowBaseAlpha
+                    : (resolvedBaseAlpha * inactiveRowOpacity))
+                : (
+                    resolvedBaseAlpha * resolveRowDimmingAlpha(index, hoveredRowIndex, {
                         previousHoveredRowIndex,
                         hoverRowBlend,
                         dimStrength: dimmingStrength,
                         dimmedRowOpacity
                     })
-            );
+                );
         return {
             rowItem,
             index,
@@ -2148,6 +2159,9 @@ function drawMatrixNode(
                     && Number.isFinite(selection.bandIndex)
                 ))
                 : null;
+            const focusedRowBaseAlpha = node?.metadata?.nextCachePreviewNode === true
+                ? Math.max(0, Math.min(1, Number.isFinite(focusAlpha) ? focusAlpha : 1))
+                : nodeFocusAlpha;
             drawVectorStripRows(
                 ctx,
                 rowItems,
@@ -2160,6 +2174,7 @@ function drawMatrixNode(
                         focusedRowIndices: sceneFocusedRowIndices,
                         dimmedRowOpacity: sceneFocusState?.inactiveOpacity || dimmedRowOpacity,
                         baseAlpha: nodeFocusAlpha,
+                        focusedRowBaseAlpha,
                         bandCount: vectorStripBandCount,
                         bandSeparatorOpacity: vectorStripBandSeparatorOpacity,
                         focusedBandCells: sceneFocusedBandCells,
@@ -2177,6 +2192,7 @@ function drawMatrixNode(
                                 dimmingStrength: hoverDimStrength,
                                 dimmedRowOpacity,
                                 baseAlpha: nodeFocusAlpha,
+                                focusedRowBaseAlpha,
                                 bandCount: vectorStripBandCount,
                                 bandSeparatorOpacity: vectorStripBandSeparatorOpacity,
                                 focusedBandCells: sceneFocusedBandCells,
@@ -2187,6 +2203,7 @@ function drawMatrixNode(
                             }
                             : {
                                 baseAlpha: nodeFocusAlpha,
+                                focusedRowBaseAlpha,
                                 bandCount: vectorStripBandCount,
                                 bandSeparatorOpacity: vectorStripBandSeparatorOpacity,
                                 focusedBandCells: sceneFocusedBandCells,

@@ -1229,6 +1229,86 @@ describe('CanvasSceneRenderer', () => {
         expect(sortedAlphas[2]).toBeCloseTo(0.18, 3);
     });
 
+    it('lifts a focused next-cache preview row above the node preview opacity', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const matrixNode = createMatrixNode({
+            role: 'projection-cache-next',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 0,
+                headIndex: 0,
+                stage: 'kv-cache.v.next',
+                role: 'projection-cache-next',
+                branchKey: 'v'
+            },
+            dimensions: { rows: 3, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_V,
+                opacity: 0.4
+            },
+            metadata: {
+                nextCachePreviewNode: true,
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [matrixNode],
+            metadata: {
+                visualContract: 'selection-panel-mhsa-v1'
+            }
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: [matrixNode.id],
+                    rowSelections: [
+                        { nodeId: matrixNode.id, rowIndex: 2 }
+                    ]
+                }
+            }
+        })).toBe(true);
+
+        const fillRects = ctx.operations.filter((entry) => (
+            entry.type === 'fillRect'
+            && String(entry.fillStyle || '').includes('rgba(80, 160, 255, 0.96)')
+        ));
+        expect(fillRects).toHaveLength(3);
+        const sortedAlphas = fillRects
+            .map((entry) => Number(entry.globalAlpha) || 0)
+            .sort((left, right) => right - left);
+
+        expect(sortedAlphas[0]).toBeCloseTo(1, 3);
+        expect(sortedAlphas[1]).toBeCloseTo(0.072, 3);
+        expect(sortedAlphas[2]).toBeCloseTo(0.072, 3);
+    });
+
     it('focuses a specific compact-row vector-strip band when cell selections target it', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);

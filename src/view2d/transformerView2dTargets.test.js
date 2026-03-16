@@ -4,6 +4,7 @@ import { buildTransformerSceneModel } from './model/buildTransformerSceneModel.j
 import { flattenSceneNodes, VIEW2D_NODE_KINDS } from './schema/sceneTypes.js';
 import {
     buildResidualRowHoverPayload,
+    buildResidualRowSelectionFocusState,
     buildSemanticNodeHoverFocusState,
     buildSemanticNodeHoverPayload,
     isLayerNormOverviewEntry,
@@ -88,6 +89,47 @@ describe('transformerView2dTargets', () => {
             },
             focusLabel: 'Token embeddings'
         });
+    });
+
+    it('builds a row-scoped overview focus state for residual selections', () => {
+        const scene = buildTransformerSceneModel({
+            tokenIndices: [0, 1],
+            tokenLabels: ['Token A', 'Token B'],
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const residualNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+        ));
+        const residualNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+        ));
+
+        const focusResult = buildResidualRowSelectionFocusState(scene, {
+            node: residualNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: residualNode?.rowItems?.[1]
+            }
+        });
+
+        expect(focusResult?.focusState?.activeNodeIds).toContain(residualNode?.id);
+        expect(focusResult?.focusState?.rowSelections).toEqual(expect.arrayContaining(
+            residualNodes.map((node) => ({
+                nodeId: node.id,
+                rowIndex: 1
+            }))
+        ));
+        expect(focusResult?.focusState?.rowSelections).toHaveLength(residualNodes.length);
+        expect(focusResult?.focusState?.activeNodeIds).toEqual(expect.arrayContaining(
+            residualNodes.map((node) => node.id)
+        ));
+        expect(focusResult?.focusState?.activeConnectorIds?.length || 0).toBeGreaterThan(0);
     });
 
     it('uses the staged head-detail opening flow for attention head targets', () => {
@@ -498,17 +540,92 @@ describe('transformerView2dTargets', () => {
         });
 
         expect(payload).toEqual({
-            label: 'Chosen Token',
+            label: 'Chosen Token: Gamma',
             info: {
                 tokenIndex: 2,
                 tokenLabel: 'Gamma',
                 positionIndex: 3,
                 activationData: {
-                    label: 'Chosen Token',
+                    label: 'Chosen Token: Gamma',
                     stage: 'generation.chosen',
                     tokenIndex: 2,
                     tokenLabel: 'Gamma',
                     positionIndex: 3
+                }
+            }
+        });
+    });
+
+    it('exposes hover context for the overview vocabulary embedding matrix', () => {
+        const payload = buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'vocabulary-embedding-card',
+                semantic: {
+                    componentKind: 'embedding',
+                    stage: 'embedding.token',
+                    role: 'vocabulary-embedding-card'
+                }
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'Vocabulary Embedding Matrix',
+            info: {
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'Vocabulary Embedding Matrix',
+                    stage: 'embedding.token',
+                    suppressTokenChip: true
+                }
+            }
+        });
+    });
+
+    it('exposes hover context for the overview position embedding matrix', () => {
+        const payload = buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'position-embedding-card',
+                semantic: {
+                    componentKind: 'embedding',
+                    stage: 'embedding.position',
+                    role: 'position-embedding-card'
+                }
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'Position Embedding Matrix',
+            info: {
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'Position Embedding Matrix',
+                    stage: 'embedding.position',
+                    suppressTokenChip: true
+                }
+            }
+        });
+    });
+
+    it('exposes hover context for the overview unembedding matrix', () => {
+        const payload = buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'unembedding',
+                semantic: {
+                    componentKind: 'logits',
+                    stage: 'unembedding',
+                    role: 'unembedding'
+                }
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'Vocabulary Unembedding Matrix',
+            info: {
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'Vocabulary Unembedding Matrix',
+                    stage: 'unembedding',
+                    suppressTokenChip: true
                 }
             }
         });

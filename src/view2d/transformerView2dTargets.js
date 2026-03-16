@@ -25,8 +25,28 @@ import {
 } from '../utils/layerNormLabels.js';
 import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
-export const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT-2 (124 M)';
+export const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT 2 124M';
 const OVERVIEW_HOVER_FOCUS_RESULT_CACHE = new WeakMap();
+
+function isResidualOverviewStreamNode(node = null) {
+    return (
+        node?.kind === VIEW2D_NODE_KINDS.MATRIX
+        && typeof node?.id === 'string'
+        && node.id.length > 0
+        && node?.semantic?.componentKind === 'residual'
+        && (
+            node?.role === 'module-card'
+            || node?.role === 'add-circle'
+        )
+    );
+}
+
+function isResidualOverviewVectorNode(node = null) {
+    return (
+        isResidualOverviewStreamNode(node)
+        && node?.role === 'module-card'
+    );
+}
 
 export function normalizeOptionalIndex(value) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -453,6 +473,79 @@ export function buildResidualRowHoverPayload(rowHit = null, activationSource = n
     };
 }
 
+export function buildResidualRowSelectionFocusState(scene = null, hit = null) {
+    const rowHit = hit?.rowHit || null;
+    const semantic = rowHit?.rowItem?.semantic || null;
+    const nodeId = typeof hit?.node?.id === 'string' ? hit.node.id : '';
+    const rowIndex = Number.isFinite(rowHit?.rowIndex)
+        ? Math.max(0, Math.floor(rowHit.rowIndex))
+        : null;
+    if (
+        !scene
+        || !nodeId.length
+        || !Number.isFinite(rowIndex)
+        || semantic?.componentKind !== 'residual'
+    ) {
+        return null;
+    }
+
+    const flattenedNodes = flattenSceneNodes(scene);
+    const streamNodeIds = new Set();
+    const residualVectorNodes = [];
+    flattenedNodes.forEach((node) => {
+        if (isResidualOverviewStreamNode(node)) {
+            streamNodeIds.add(node.id);
+            if (isResidualOverviewVectorNode(node)) {
+                residualVectorNodes.push(node);
+            }
+        }
+    });
+
+    const activeConnectorIds = [];
+    flattenedNodes.forEach((node) => {
+        if (
+            node?.kind !== VIEW2D_NODE_KINDS.CONNECTOR
+            || typeof node.id !== 'string'
+            || !node.id.length
+        ) {
+            return;
+        }
+        const sourceNodeId = typeof node?.source?.nodeId === 'string'
+            ? node.source.nodeId
+            : '';
+        const targetNodeId = typeof node?.target?.nodeId === 'string'
+            ? node.target.nodeId
+            : '';
+        if (
+            streamNodeIds.has(sourceNodeId)
+            && streamNodeIds.has(targetNodeId)
+        ) {
+            activeConnectorIds.push(node.id);
+        }
+    });
+
+    const rowSelections = residualVectorNodes
+        .filter((node) => {
+            const rowItems = Array.isArray(node?.rowItems) ? node.rowItems : [];
+            return rowIndex >= 0 && rowIndex < rowItems.length;
+        })
+        .map((node) => ({
+            nodeId: node.id,
+            rowIndex
+        }));
+
+    return buildFocusResult({
+        activeNodeIds: streamNodeIds.size ? Array.from(streamNodeIds) : [nodeId],
+        activeConnectorIds,
+        rowSelections: rowSelections.length
+            ? rowSelections
+            : [{
+                nodeId,
+                rowIndex
+            }]
+    });
+}
+
 function resolveLayerNormKindFromSemanticStage(stage = '') {
     const lower = String(stage || '').trim().toLowerCase();
     if (lower === 'ln1') return 'ln1';
@@ -530,6 +623,15 @@ function buildSemanticPositionChipLabel(positionIndex = null) {
     return Number.isFinite(positionIndex)
         ? `Position: ${Math.max(1, Math.floor(positionIndex))}`
         : 'Position';
+}
+
+function buildSemanticChosenTokenChipLabel(tokenLabel = '', tokenIndex = null) {
+    const safeTokenLabel = typeof tokenLabel === 'string' ? tokenLabel.trim() : '';
+    const fallbackLabel = Number.isFinite(tokenIndex)
+        ? `Token ${Math.floor(tokenIndex) + 1}`
+        : '';
+    const detailLabel = safeTokenLabel || fallbackLabel;
+    return detailLabel ? `Chosen Token: ${detailLabel}` : 'Chosen Token';
 }
 
 export function buildSemanticNodeHoverPayload(hit = null) {
@@ -632,20 +734,81 @@ export function buildSemanticNodeHoverPayload(hit = null) {
         const tokenIndex = normalizeOptionalIndex(semantic.tokenIndex);
         const tokenLabel = resolveSemanticTokenLabel(hit, tokenIndex);
         const positionIndex = resolveSemanticPositionIndex(hit, tokenIndex);
+        const label = buildSemanticChosenTokenChipLabel(tokenLabel, tokenIndex);
         return {
-            label: 'Chosen Token',
+            label,
             info: {
                 ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
                 ...(tokenLabel.length ? { tokenLabel } : {}),
                 ...(Number.isFinite(positionIndex) ? { positionIndex } : {}),
                 activationData: {
-                    label: 'Chosen Token',
+                    label,
                     stage: 'generation.chosen',
                     ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
                     ...(tokenLabel.length ? { tokenLabel } : {}),
                     ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
                 }
             }
+        };
+    }
+
+    if (
+        semantic.componentKind === 'embedding'
+        && semantic.stage === 'embedding.token'
+        && (
+            role === 'module'
+            || role === 'module-title'
+            || role === 'vocabulary-embedding-card'
+        )
+    ) {
+        const label = 'Vocabulary Embedding Matrix';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                activationStage: 'embedding.token',
+                suppressTokenChip: true
+            })
+        };
+    }
+
+    if (
+        semantic.componentKind === 'embedding'
+        && semantic.stage === 'embedding.position'
+        && (
+            role === 'module'
+            || role === 'module-title'
+            || role === 'position-embedding-card'
+        )
+    ) {
+        const label = 'Position Embedding Matrix';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                activationStage: 'embedding.position',
+                suppressTokenChip: true
+            })
+        };
+    }
+
+    if (
+        semantic.componentKind === 'logits'
+        && semantic.stage === 'unembedding'
+        && (
+            role === 'module'
+            || role === 'module-title'
+            || role === 'unembedding'
+        )
+    ) {
+        const label = 'Vocabulary Unembedding Matrix';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                activationStage: 'unembedding',
+                suppressTokenChip: true
+            })
         };
     }
 

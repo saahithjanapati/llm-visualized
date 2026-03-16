@@ -1854,6 +1854,18 @@ body.detail-panel-resizing * {
 }
 .settings-section { margin-bottom: 14px; }
 .settings-section:last-child { margin-bottom: 0; }
+.toggle-row + .toggle-row,
+.toggle-row + .settings-hint,
+.settings-hint + .toggle-row {
+    margin-top: 8px;
+}
+.settings-spacer {
+    height: 12px;
+    flex: 0 0 auto;
+}
+.settings-spacer--compact {
+    height: 10px;
+}
 .section-label {
     display: block;
     margin-bottom: 8px;
@@ -1868,14 +1880,14 @@ body.detail-panel-resizing * {
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 11px;
     background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
-    margin-bottom: 8px;
+    margin-bottom: 0;
 }
 .settings-field {
     padding: 10px 12px;
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 11px;
     background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
-    margin-bottom: 8px;
+    margin-bottom: 0;
 }
 .settings-field-label {
     display: block;
@@ -2147,7 +2159,7 @@ body.detail-panel-resizing * {
     opacity: 0.5;
 }
 .settings-hint {
-    margin-top: 8px;
+    margin-top: 0;
     padding: 8px 10px;
     border-radius: 9px;
     border: 1px solid rgba(255, 255, 255, 0.16);

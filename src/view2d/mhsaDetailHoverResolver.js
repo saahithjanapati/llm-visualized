@@ -134,52 +134,50 @@ function buildPathFocusResult(index = null, {
     });
 }
 
-const LAYER_NORM_MATRIX_ROLES = Object.freeze([
-    'layer-norm-input',
-    'layer-norm-normalized',
-    'layer-norm-normalized-copy',
-    'layer-norm-scale',
-    'layer-norm-scaled',
-    'layer-norm-scaled-copy',
-    'layer-norm-shift',
-    'layer-norm-output'
-]);
-
-const LAYER_NORM_ROW_ROLES = Object.freeze([
-    'layer-norm-input',
-    'layer-norm-normalized',
-    'layer-norm-normalized-copy',
-    'layer-norm-scaled',
-    'layer-norm-scaled-copy',
-    'layer-norm-output'
-]);
-
-const LAYER_NORM_CONNECTOR_ROLES = Object.freeze([
-    'connector-layer-norm-input',
-    'connector-layer-norm-normalization',
-    'connector-layer-norm-copy-normalized',
-    'connector-layer-norm-copy-scaled',
-    'connector-layer-norm-output'
-]);
-
-function collectNodeIdsByRoles(index = null, roles = []) {
-    const nodeIds = [];
-    roles.forEach((role) => {
-        appendAllUnique(nodeIds, index?.nodeIdsByRole?.get(role) || []);
-    });
-    return nodeIds;
-}
-
-function collectConnectorIdsByRoles(index = null, roles = []) {
-    const connectorIds = [];
-    if (!index?.nodesById) return connectorIds;
-    const roleSet = new Set(roles.map((role) => String(role || '').trim()));
-    for (const node of index.nodesById.values()) {
-        if (!roleSet.has(String(node?.role || '').trim())) continue;
-        appendUnique(connectorIds, node.id);
+const LAYER_NORM_DIRECT_FOCUS_CONFIGS = Object.freeze({
+    'layer-norm-input': {
+        connectedNodeRoles: ['layer-norm-normalized'],
+        connectorRoles: ['connector-layer-norm-normalization'],
+        mirroredRowRoles: ['layer-norm-normalized']
+    },
+    'layer-norm-normalized': {
+        connectedNodeRoles: ['layer-norm-input'],
+        connectorRoles: ['connector-layer-norm-normalization'],
+        mirroredRowRoles: ['layer-norm-input']
+    },
+    'layer-norm-normalized-copy': {
+        connectedNodeRoles: ['layer-norm-normalized'],
+        connectorRoles: ['connector-layer-norm-copy-normalized'],
+        mirroredRowRoles: ['layer-norm-normalized']
+    },
+    'layer-norm-scale': {
+        connectedNodeRoles: ['layer-norm-normalized-copy']
+    },
+    'layer-norm-scaled': {
+        connectedNodeRoles: ['layer-norm-normalized-copy', 'layer-norm-scale'],
+        mirroredRowRoles: ['layer-norm-normalized-copy'],
+        fixedRowSelections: [{
+            role: 'layer-norm-scale',
+            rowIndex: 0
+        }]
+    },
+    'layer-norm-scaled-copy': {
+        connectedNodeRoles: ['layer-norm-scaled'],
+        connectorRoles: ['connector-layer-norm-copy-scaled'],
+        mirroredRowRoles: ['layer-norm-scaled']
+    },
+    'layer-norm-shift': {
+        connectedNodeRoles: ['layer-norm-scaled-copy']
+    },
+    'layer-norm-output': {
+        connectedNodeRoles: ['layer-norm-scaled-copy', 'layer-norm-shift'],
+        mirroredRowRoles: ['layer-norm-scaled-copy'],
+        fixedRowSelections: [{
+            role: 'layer-norm-shift',
+            rowIndex: 0
+        }]
     }
-    return connectorIds;
-}
+});
 
 function findSingleNodeIdByRole(index = null, role = '') {
     return (index?.nodeIdsByRole?.get(role) || [])[0] || '';
@@ -211,51 +209,285 @@ function findNodeIdByRole(index = null, role = '') {
     return '';
 }
 
-function buildLayerNormRowSelections(index = null, rowIndex = null) {
-    if (!Number.isFinite(rowIndex)) return [];
-    const safeRowIndex = Math.max(0, Math.floor(rowIndex));
-    return LAYER_NORM_ROW_ROLES.reduce((selections, role) => {
-        const nodeId = findSingleNodeIdByRole(index, role);
-        if (nodeId) {
-            selections.push({
-                nodeId,
-                rowIndex: safeRowIndex
-            });
-        }
-        return selections;
-    }, []);
+function buildDecodeProjectionSourceCurrentRowSelections(index = null, {
+    includeSelection = false
+} = {}) {
+    if (!includeSelection) return [];
+    const projectionSourceNodeId = index?.singleNodeIds?.projectionSourceXln || '';
+    if (!projectionSourceNodeId) return [];
+    return [{
+        nodeId: projectionSourceNodeId,
+        rowIndex: 0
+    }];
 }
 
-function buildLayerNormSharedFocusResult(index = null, {
+function buildDecodeProjectionCurrentInputRowSelections(index = null, kind = '', {
+    includeProjectionSource = true,
+    rowIndex = 0
+} = {}) {
+    const safeKind = normalizeProjectionKind(kind);
+    const safeRowIndex = Number.isFinite(rowIndex) ? Math.max(0, Math.floor(rowIndex)) : 0;
+    if (!safeKind || !index) return [];
+    const rowSelections = includeProjectionSource
+        ? buildDecodeProjectionSourceCurrentRowSelections(index, {
+            includeSelection: true
+        })
+        : [];
+    const projectionInputNodeId = index?.projectionInputIdsByKind?.[safeKind] || '';
+    if (projectionInputNodeId) {
+        rowSelections.push({
+            nodeId: projectionInputNodeId,
+            rowIndex: safeRowIndex
+        });
+    }
+    return rowSelections;
+}
+
+function buildScoreAxisSelectionsWithoutTranspose(index = null, axisIndex = null, options = null) {
+    const selections = buildScoreAxisSelections(index, axisIndex, options);
+    const transposeNodeId = index?.singleNodeIds?.attentionKeyTranspose || '';
+    if (!transposeNodeId) return selections;
+    return {
+        rowSelections: (Array.isArray(selections?.rowSelections) ? selections.rowSelections : []).filter(
+            (selection) => selection?.nodeId !== transposeNodeId
+        ),
+        columnSelections: (Array.isArray(selections?.columnSelections) ? selections.columnSelections : []).filter(
+            (selection) => selection?.nodeId !== transposeNodeId
+        )
+    };
+}
+
+function buildDecodeClickedScoreCellKeyBackprop(index = null, axisIndex = null) {
+    const safeAxisIndex = Number.isFinite(axisIndex) ? Math.max(0, Math.floor(axisIndex)) : null;
+    if (!index || !Number.isFinite(safeAxisIndex)) {
+        return {
+            rowSelections: [],
+            extraConnectorIds: []
+        };
+    }
+    if (!index?.scene?.metadata?.kvCacheState?.kvCacheDecodeActive) {
+        return {
+            rowSelections: buildKeyRowSelections(index, safeAxisIndex),
+            extraConnectorIds: []
+        };
+    }
+
+    const liveDisplayRowIndex = resolveDecodeProjectionLiveDisplayRowIndex(index, 'k');
+    const projectionOutputNodeId = index?.projectionOutputIdsByKind?.k || '';
+    const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', 'k');
+    const cacheNodeId = findProjectionNodeIdByKind(index, 'projection-cache', 'k');
+    const cacheSourceNodeId = findProjectionNodeIdByKind(index, 'projection-cache-source', 'k');
+    const concatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', 'k');
+    const nextPreviewNodeId = findProjectionNodeIdByKind(index, 'projection-cache-next', 'k');
+    const cacheSourceConnectorNodeId = findNodeIdByRole(index, 'connector-k-cache-source');
+    const cacheCopyConnectorNodeId = findNodeIdByRole(index, 'connector-k-cache-copy');
+    const nextPreviewConnectorNodeId = findNodeIdByRole(index, 'connector-k-cache-next');
+
+    if (
+        Number.isFinite(liveDisplayRowIndex)
+        && safeAxisIndex === liveDisplayRowIndex
+    ) {
+        return {
+            liveColumn: true,
+            rowSelections: [
+                ...buildDecodeProjectionCurrentInputRowSelections(index, 'k', {
+                    includeProjectionSource: true,
+                    rowIndex: 0
+                }),
+                ...(projectionOutputNodeId
+                    ? [{
+                        nodeId: projectionOutputNodeId,
+                        rowIndex: 0
+                    }]
+                    : []),
+                ...(projectionOutputCopyNodeId
+                    ? [{
+                        nodeId: projectionOutputCopyNodeId,
+                        rowIndex: 0
+                    }]
+                    : []),
+                ...(concatResultNodeId
+                    ? [{
+                        nodeId: concatResultNodeId,
+                        rowIndex: liveDisplayRowIndex
+                    }]
+                    : []),
+                ...(nextPreviewNodeId
+                    ? [{
+                        nodeId: nextPreviewNodeId,
+                        rowIndex: liveDisplayRowIndex
+                    }]
+                    : [])
+            ],
+            extraConnectorIds: [
+                cacheCopyConnectorNodeId,
+                nextPreviewConnectorNodeId
+            ].filter(Boolean)
+        };
+    }
+
+    return {
+        liveColumn: false,
+        rowSelections: [
+            ...(cacheNodeId
+                ? [{
+                    nodeId: cacheNodeId,
+                    rowIndex: safeAxisIndex
+                }]
+                : []),
+            ...(cacheSourceNodeId
+                ? [{
+                    nodeId: cacheSourceNodeId,
+                    rowIndex: safeAxisIndex
+                }]
+                : []),
+            ...(concatResultNodeId
+                ? [{
+                    nodeId: concatResultNodeId,
+                    rowIndex: safeAxisIndex
+                }]
+                : [])
+        ],
+        extraConnectorIds: [cacheSourceConnectorNodeId].filter(Boolean)
+    };
+}
+
+function buildDecodeClickedPreScoreDescriptors(keyBackprop = null) {
+    const isLiveColumn = keyBackprop?.liveColumn === true;
+    if (isLiveColumn) {
+        return [
+            {
+                projectionKinds: ['q', 'k'],
+                attentionOptions: {
+                    query: true,
+                    transpose: true,
+                    score: false,
+                    includeWeightedOutput: false
+                },
+                singleNodeKeys: ['attentionPreScore', 'attentionMaskedInput'],
+                connectorKinds: ['q', 'k', 'pre']
+            }
+        ];
+    }
+    return [
+        {
+            projectionKinds: ['q'],
+            attentionOptions: {
+                query: true,
+                transpose: true,
+                score: false,
+                includeWeightedOutput: false
+            },
+            singleNodeKeys: ['attentionPreScore', 'attentionMaskedInput'],
+            connectorKinds: ['q', 'k', 'pre']
+        }
+    ];
+}
+
+function buildDecodeClickedSoftmaxDescriptors(keyBackprop = null, {
+    isMaskStage = false
+} = {}) {
+    const isLiveColumn = keyBackprop?.liveColumn === true;
+    if (isLiveColumn) {
+        return [
+            isMaskStage
+                ? 'maskPath'
+                : 'scorePath'
+        ];
+    }
+    return [
+        isMaskStage
+            ? {
+                projectionKinds: ['q'],
+                attentionMaskOptions: {
+                    query: true,
+                    transpose: true
+                },
+                connectorKinds: ['q', 'k', 'pre']
+            }
+            : {
+                projectionKinds: ['q'],
+                attentionOptions: {
+                    query: true,
+                    transpose: true,
+                    score: true,
+                    includeWeightedOutput: false
+                },
+                connectorKinds: ['q', 'k', 'pre', 'post']
+            }
+    ];
+}
+
+function resolveDecodeProjectionLiveDisplayRowIndex(index = null, kind = '') {
+    const concatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', kind);
+    if (!concatResultNodeId) return null;
+    const concatResultNode = index?.nodesById?.get(concatResultNodeId) || null;
+    const rowCount = Number.isFinite(concatResultNode?.dimensions?.rows)
+        ? Math.max(0, Math.floor(concatResultNode.dimensions.rows))
+        : 0;
+    if (rowCount > 0) {
+        return rowCount - 1;
+    }
+    const rowItems = Array.isArray(concatResultNode?.rowItems) ? concatResultNode.rowItems : [];
+    if (!rowItems.length) return null;
+    return Math.max(0, rowItems.length - 1);
+}
+
+function appendLayerNormRowSelectionByRole(target = [], index = null, role = '', rowIndex = null) {
+    if (!Array.isArray(target) || !Number.isFinite(rowIndex)) return;
+    const nodeId = findSingleNodeIdByRole(index, role);
+    if (!nodeId) return;
+    target.push({
+        nodeId,
+        rowIndex: Math.max(0, Math.floor(rowIndex))
+    });
+}
+
+function appendLayerNormNodeIdsByRoles(target = [], index = null, roles = []) {
+    roles.forEach((role) => {
+        appendUnique(target, findSingleNodeIdByRole(index, role));
+    });
+}
+
+function appendLayerNormConnectorIdsByRoles(target = [], index = null, roles = []) {
+    roles.forEach((role) => {
+        appendUnique(target, findNodeIdByRole(index, role));
+    });
+}
+
+function buildLayerNormDirectFocusResult(index = null, {
     label = '',
     info = null,
+    hoveredRole = '',
     rowIndex = null,
-    includeScaleSelection = false,
-    includeShiftSelection = false
+    selfRowIndex = rowIndex
 } = {}, options = null) {
-    const activeNodeIds = collectNodeIdsByRoles(index, LAYER_NORM_MATRIX_ROLES);
-    const activeConnectorIds = collectConnectorIdsByRoles(index, LAYER_NORM_CONNECTOR_ROLES);
-    const rowSelections = Number.isFinite(rowIndex)
-        ? buildLayerNormRowSelections(index, rowIndex)
-        : [];
-    if (includeScaleSelection) {
-        const scaleNodeId = findSingleNodeIdByRole(index, 'layer-norm-scale');
-        if (scaleNodeId) {
-            rowSelections.push({
-                nodeId: scaleNodeId,
-                rowIndex: 0
-            });
-        }
+    const config = LAYER_NORM_DIRECT_FOCUS_CONFIGS[String(hoveredRole || '').trim()] || {};
+    const activeNodeIds = [];
+    const activeConnectorIds = [];
+    const rowSelections = [];
+
+    appendLayerNormNodeIdsByRoles(activeNodeIds, index, [
+        hoveredRole,
+        ...(config.connectedNodeRoles || [])
+    ]);
+    appendLayerNormConnectorIdsByRoles(activeConnectorIds, index, config.connectorRoles || []);
+
+    appendLayerNormRowSelectionByRole(rowSelections, index, hoveredRole, selfRowIndex);
+    if (Number.isFinite(rowIndex)) {
+        (config.mirroredRowRoles || []).forEach((role) => {
+            appendLayerNormRowSelectionByRole(rowSelections, index, role, rowIndex);
+        });
     }
-    if (includeShiftSelection) {
-        const shiftNodeId = findSingleNodeIdByRole(index, 'layer-norm-shift');
-        if (shiftNodeId) {
-            rowSelections.push({
-                nodeId: shiftNodeId,
-                rowIndex: 0
-            });
-        }
-    }
+    (config.fixedRowSelections || []).forEach((selection) => {
+        appendLayerNormRowSelectionByRole(
+            rowSelections,
+            index,
+            selection?.role || '',
+            selection?.rowIndex
+        );
+    });
+
     return buildFocusResult({
         label,
         info,
@@ -278,14 +510,22 @@ function buildPostCopyMirrorCellSelections(index = null, rowIndex = null, colInd
 }
 
 function buildPreScoreCellResult(index = null, node = null, rowIndex = null, colIndex = null, cellItem = null, options = null) {
+    const interactionKind = String(options?.interactionKind || 'hover').trim().toLowerCase();
+    const isClickInteraction = interactionKind === 'click';
+    const keyBackprop = isClickInteraction
+        ? buildDecodeClickedScoreCellKeyBackprop(index, colIndex)
+        : {
+            rowSelections: buildKeyRowSelections(index, colIndex),
+            extraConnectorIds: []
+        };
     const scoreAxisSelections = buildScoreAxisSelections(index, colIndex, {
         includePost: false,
         includePostCopy: false
-    });
+        });
     const info = buildAttentionCellHoverInfo(node, cellItem, 'pre');
     const rowSelections = [
         ...buildQueryRowSelections(index, rowIndex),
-        ...buildKeyRowSelections(index, colIndex),
+        ...keyBackprop.rowSelections,
         ...scoreAxisSelections.rowSelections,
         { nodeId: index?.singleNodeIds?.attentionHeadOutput, rowIndex }
     ];
@@ -301,19 +541,22 @@ function buildPreScoreCellResult(index = null, node = null, rowIndex = null, col
     return buildPathFocusResult(index, {
         label: info?.activationData?.label || resolveAttentionHoverLabel('pre'),
         info,
-        descriptors: [
-            {
-                projectionKinds: ['q', 'k'],
-                attentionOptions: {
-                    query: true,
-                    transpose: true,
-                    score: false,
-                    includeWeightedOutput: false
-                },
-                singleNodeKeys: ['attentionPreScore', 'attentionMaskedInput'],
-                connectorKinds: ['q', 'k', 'pre']
-            }
-        ],
+        descriptors: isClickInteraction
+            ? buildDecodeClickedPreScoreDescriptors(keyBackprop)
+            : [
+                {
+                    projectionKinds: ['q', 'k'],
+                    attentionOptions: {
+                        query: true,
+                        transpose: true,
+                        score: false,
+                        includeWeightedOutput: false
+                    },
+                    singleNodeKeys: ['attentionPreScore', 'attentionMaskedInput'],
+                    connectorKinds: ['q', 'k', 'pre']
+                }
+            ],
+        extraConnectorIds: keyBackprop.extraConnectorIds,
         rowSelections,
         columnSelections,
         cellSelections
@@ -326,6 +569,14 @@ function buildSoftmaxCellResult(index = null, node = null, rowIndex = null, colI
     includeMirroredPostCopyCell = false,
     includePostForMask = false
 } = {}, options = null) {
+    const interactionKind = String(options?.interactionKind || 'hover').trim().toLowerCase();
+    const isClickInteraction = interactionKind === 'click';
+    const keyBackprop = isClickInteraction
+        ? buildDecodeClickedScoreCellKeyBackprop(index, colIndex)
+        : {
+            rowSelections: buildKeyRowSelections(index, colIndex),
+            extraConnectorIds: []
+        };
     const normalizedStageKey = normalizeAttentionHoverStageKey(stageKey);
     const isMaskStage = normalizedStageKey === 'mask';
     const includePostSelections = !isMaskStage || includePostForMask;
@@ -336,7 +587,7 @@ function buildSoftmaxCellResult(index = null, node = null, rowIndex = null, colI
     const info = buildAttentionCellHoverInfo(node, cellItem, normalizedStageKey);
     const rowSelections = [
         ...buildQueryRowSelections(index, rowIndex),
-        ...buildKeyRowSelections(index, colIndex),
+        ...keyBackprop.rowSelections,
         ...scoreAxisSelections.rowSelections,
         { nodeId: index?.singleNodeIds?.attentionHeadOutput, rowIndex }
     ];
@@ -359,11 +610,16 @@ function buildSoftmaxCellResult(index = null, node = null, rowIndex = null, colI
     return buildPathFocusResult(index, {
         label: info?.activationData?.label || resolveAttentionHoverLabel(normalizedStageKey),
         info,
-        descriptors: [
-            isMaskStage
-                ? 'maskPath'
-                : 'scorePath'
-        ],
+        descriptors: isClickInteraction
+            ? buildDecodeClickedSoftmaxDescriptors(keyBackprop, {
+                isMaskStage
+            })
+            : [
+                isMaskStage
+                    ? 'maskPath'
+                    : 'scorePath'
+            ],
+        extraConnectorIds: keyBackprop.extraConnectorIds,
         rowSelections,
         columnSelections,
         cellSelections
@@ -374,6 +630,9 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
     const safeKind = normalizeProjectionKind(kind);
     if (!safeKind || !rowHit) return null;
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
+    const interactionKind = String(options?.interactionKind || 'hover').trim().toLowerCase();
+    const isClickInteraction = interactionKind === 'click';
+    const projectionOutputNodeId = index?.projectionOutputIdsByKind?.[safeKind] || '';
     const dimNodeIds = safeKind === 'v'
         ? buildValueBranchExtraDimNodeIds(index)
         : [];
@@ -385,7 +644,165 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
     const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', safeKind);
     const cacheNodeId = findProjectionNodeIdByKind(index, 'projection-cache', safeKind);
     const cacheSourceNodeId = findProjectionNodeIdByKind(index, 'projection-cache-source', safeKind);
+    const concatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', safeKind);
+    const nextPreviewNodeId = findProjectionNodeIdByKind(index, 'projection-cache-next', safeKind);
     const cacheSourceConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-source`);
+    const cacheCopyConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-copy`);
+    const nextPreviewConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-next`);
+    const isDecodeCurrentProjectionRow = (
+        safeKind === 'k'
+        && (role === 'projection-output' || role === 'projection-output-copy')
+        && Number.isFinite(node?.dimensions?.rows)
+        && Math.max(0, Math.floor(node.dimensions.rows)) === 1
+        && !!concatResultNodeId
+        && !!nextPreviewNodeId
+    );
+    const isDecodeCurrentValueProjectionRow = (
+        safeKind === 'v'
+        && (role === 'projection-output' || role === 'projection-output-copy')
+        && Number.isFinite(node?.dimensions?.rows)
+        && Math.max(0, Math.floor(node.dimensions.rows)) === 1
+        && !!projectionOutputCopyNodeId
+        && !!concatResultNodeId
+        && !!nextPreviewNodeId
+    );
+    const isDecodeCurrentValueInputRow = (
+        safeKind === 'v'
+        && role === 'x-ln-copy'
+        && !!index?.scene?.metadata?.kvCacheState?.kvCacheDecodeActive
+        && Number.isFinite(node?.dimensions?.rows)
+        && Math.max(0, Math.floor(node.dimensions.rows)) === 1
+        && !!projectionOutputNodeId
+        && !!projectionOutputCopyNodeId
+        && !!concatResultNodeId
+        && !!nextPreviewNodeId
+    );
+
+    if (isDecodeCurrentProjectionRow) {
+        const liveDisplayRowIndex = resolveDecodeProjectionLiveDisplayRowIndex(index, safeKind);
+        const scoreAxisSelections = buildScoreAxisSelections(index, liveDisplayRowIndex, {
+            includePost: true,
+            includePostCopy: true
+        });
+        return buildPathFocusResult(index, {
+            label: `${resolveProjectionLabel(safeKind)} Vector`,
+            info: buildProjectionVectorHoverInfo(node, rowHit.rowItem, safeKind),
+            descriptors: ['keyScorePath'],
+            extraConnectorIds: [cacheCopyConnectorNodeId, nextPreviewConnectorNodeId].filter(Boolean),
+            rowSelections: [
+                ...buildKeyRowSelections(index, rowIndex),
+                {
+                    nodeId: projectionOutputCopyNodeId,
+                    rowIndex
+                },
+                {
+                    nodeId: concatResultNodeId,
+                    rowIndex: liveDisplayRowIndex
+                },
+                {
+                    nodeId: nextPreviewNodeId,
+                    rowIndex: liveDisplayRowIndex
+                }
+            ],
+            columnSelections: scoreAxisSelections.columnSelections
+        }, options);
+    }
+
+    if (isDecodeCurrentValueProjectionRow) {
+        const liveDisplayRowIndex = resolveDecodeProjectionLiveDisplayRowIndex(index, safeKind);
+        return buildPathFocusResult(index, {
+            label: `${resolveProjectionLabel(safeKind)} Vector`,
+            info: buildProjectionVectorHoverInfo(node, rowHit.rowItem, safeKind),
+            descriptors: ['valueProjectionPath'],
+            dimNodeIds,
+            extraConnectorIds: [cacheCopyConnectorNodeId, nextPreviewConnectorNodeId].filter(Boolean),
+            rowSelections: [
+                ...buildDecodeProjectionCurrentInputRowSelections(index, safeKind, {
+                    includeProjectionSource: true,
+                    rowIndex
+                }),
+                {
+                    nodeId: projectionOutputNodeId,
+                    rowIndex
+                },
+                {
+                    nodeId: projectionOutputCopyNodeId,
+                    rowIndex
+                },
+                {
+                    nodeId: concatResultNodeId,
+                    rowIndex: liveDisplayRowIndex
+                },
+                {
+                    nodeId: nextPreviewNodeId,
+                    rowIndex: liveDisplayRowIndex
+                },
+                {
+                    nodeId: index?.singleNodeIds?.attentionValuePost,
+                    rowIndex: liveDisplayRowIndex
+                }
+            ]
+        }, options);
+    }
+
+    if (isDecodeCurrentValueInputRow) {
+        const liveDisplayRowIndex = resolveDecodeProjectionLiveDisplayRowIndex(index, safeKind);
+        const info = buildPostLayerNormResidualHoverInfo(node, rowHit.rowItem);
+        return buildPathFocusResult(index, {
+            label: info?.activationData?.label || `${resolveProjectionLabel(safeKind)} row`,
+            info,
+            descriptors: ['valueProjectionPath'],
+            dimNodeIds,
+            extraConnectorIds: [cacheCopyConnectorNodeId, nextPreviewConnectorNodeId].filter(Boolean),
+            rowSelections: [
+                ...buildDecodeProjectionCurrentInputRowSelections(index, safeKind, {
+                    includeProjectionSource: true,
+                    rowIndex
+                }),
+                {
+                    nodeId: projectionOutputNodeId,
+                    rowIndex
+                },
+                {
+                    nodeId: projectionOutputCopyNodeId,
+                    rowIndex
+                },
+                {
+                    nodeId: concatResultNodeId,
+                    rowIndex: liveDisplayRowIndex
+                },
+                {
+                    nodeId: nextPreviewNodeId,
+                    rowIndex: liveDisplayRowIndex
+                },
+                {
+                    nodeId: index?.singleNodeIds?.attentionValuePost,
+                    rowIndex: liveDisplayRowIndex
+                }
+            ]
+        }, options);
+    }
+
+    if (safeKind === 'k' && role === 'x-ln-copy' && !isClickInteraction) {
+        const result = buildPathFocusResult(index, {
+            label: `${resolveProjectionLabel(safeKind)} row`,
+            info: createTokenInfo(rowHit.rowItem),
+            descriptors: [{
+                projectionKinds: ['k'],
+                projectionInputKinds: ['k']
+            }],
+            rowSelections: [
+                ...buildKeyRowSelections(index, rowIndex),
+                ...buildProjectionSourceMirrorRowSelections(index, rowIndex)
+            ]
+        }, options);
+        const info = buildPostLayerNormResidualHoverInfo(node, rowHit.rowItem);
+        return {
+            ...result,
+            label: info?.activationData?.label || result.label,
+            info
+        };
+    }
 
     if (safeKind === 'q') {
         const includeAttentionScorePath = (
@@ -482,41 +899,122 @@ function buildProjectionCacheRowResult(index = null, node = null, kind = '', row
     const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', safeKind);
     const cacheNodeId = findProjectionNodeIdByKind(index, 'projection-cache', safeKind);
     const cacheSourceNodeId = findProjectionNodeIdByKind(index, 'projection-cache-source', safeKind);
+    const concatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', safeKind);
+    const nextPreviewNodeId = findProjectionNodeIdByKind(index, 'projection-cache-next', safeKind);
     const cacheConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache`);
     const cacheSourceConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-source`);
     const cacheCopyConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-copy`);
+    const nextPreviewConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-next`);
+    const terminalConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}`);
+    const preConnectorNodeId = findNodeIdByRole(index, 'connector-pre');
+    const postConnectorNodeId = findNodeIdByRole(index, 'connector-post');
+    const terminalNodeId = safeKind === 'v'
+        ? index?.singleNodeIds?.attentionValuePost || ''
+        : '';
+    const isDecodeCacheBranch = String(node?.metadata?.kvCachePhase || '').trim().toLowerCase() === 'decode';
+    const interactionKind = String(options?.interactionKind || 'hover').trim().toLowerCase();
+    const isClickInteraction = interactionKind === 'click';
+    const includeDecodeKeyScoreSelections = isDecodeCacheBranch && safeKind === 'k';
+    const includeDecodeValueDownstreamSelections = isDecodeCacheBranch && safeKind === 'v';
+    const scoreAxisSelections = includeDecodeKeyScoreSelections
+        ? (
+            isClickInteraction
+                ? buildScoreAxisSelections(index, rowIndex, {
+                    includePost: true,
+                    includePostCopy: true
+                })
+                : buildScoreAxisSelectionsWithoutTranspose(index, rowIndex, {
+                    includePost: true,
+                    includePostCopy: true
+                })
+        )
+        : {
+            rowSelections: [],
+            columnSelections: []
+        };
+
+    const activeNodeIds = isDecodeCacheBranch
+        ? [
+            cacheNodeId,
+            cacheSourceNodeId,
+            node.id
+        ]
+        : [
+            projectionOutputNodeId,
+            projectionOutputCopyNodeId,
+            cacheNodeId,
+            cacheSourceNodeId,
+            node.id
+        ];
+    const activeConnectorIds = isDecodeCacheBranch
+        ? [
+            cacheSourceConnectorNodeId,
+            cacheConnectorNodeId,
+            ...(includeDecodeKeyScoreSelections
+                ? [
+                    ...(isClickInteraction ? [terminalConnectorNodeId] : []),
+                    preConnectorNodeId,
+                    postConnectorNodeId
+                ]
+                : []),
+            ...(includeDecodeValueDownstreamSelections
+                ? [nextPreviewConnectorNodeId, terminalConnectorNodeId]
+                : [])
+        ].filter(Boolean)
+        : [cacheSourceConnectorNodeId, cacheConnectorNodeId, cacheCopyConnectorNodeId].filter(Boolean);
+    const rowSelections = [
+        ...(!isDecodeCacheBranch
+            ? [{
+                nodeId: projectionOutputNodeId,
+                rowIndex
+            }]
+            : []),
+        {
+            nodeId: cacheNodeId,
+            rowIndex
+        },
+        {
+            nodeId: cacheSourceNodeId,
+            rowIndex
+        },
+        ...(isDecodeCacheBranch && concatResultNodeId
+            ? [{
+                nodeId: concatResultNodeId,
+                rowIndex
+            }]
+            : []),
+        ...scoreAxisSelections.rowSelections,
+        ...(includeDecodeValueDownstreamSelections
+            ? [
+                {
+                    nodeId: concatResultNodeId,
+                    rowIndex
+                },
+                {
+                    nodeId: nextPreviewNodeId,
+                    rowIndex
+                },
+                {
+                    nodeId: terminalNodeId,
+                    rowIndex
+                }
+            ]
+            : []),
+        {
+            nodeId: node.id,
+            rowIndex
+        }
+    ];
 
     return buildFocusResult({
         label: `Cached ${resolveProjectionLabel(safeKind)} Vector`,
         info: buildProjectionVectorHoverInfo(node, rowHit.rowItem, safeKind, {
             cachedKv: true
         }),
-        activeNodeIds: [
-            projectionOutputNodeId,
-            projectionOutputCopyNodeId,
-            cacheNodeId,
-            cacheSourceNodeId,
-            node.id
-        ],
-        activeConnectorIds: [cacheSourceConnectorNodeId, cacheConnectorNodeId, cacheCopyConnectorNodeId].filter(Boolean),
-        rowSelections: [
-            {
-                nodeId: projectionOutputNodeId,
-                rowIndex
-            },
-            {
-                nodeId: cacheNodeId,
-                rowIndex
-            },
-            {
-                nodeId: cacheSourceNodeId,
-                rowIndex
-            },
-            {
-                nodeId: node.id,
-                rowIndex
-            }
-        ],
+        activeNodeIds,
+        activeConnectorIds,
+        rowSelections,
+        columnSelections: scoreAxisSelections.columnSelections,
         includeFocusState: options?.includeFocusState !== false
     });
 }
@@ -526,6 +1024,7 @@ function buildProjectionCacheConcatResultRowResult(index = null, node = null, ki
     if (!index || !node?.id || !safeKind || !rowHit) return null;
     const displayRowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
     if (!Number.isFinite(displayRowIndex)) return null;
+    const isNextCachePreviewNode = String(node?.role || '').trim() === 'projection-cache-next';
 
     const concatResultPart = String(rowHit?.rowItem?.semantic?.concatResultPart || '').trim().toLowerCase();
     const isLiveRow = concatResultPart === 'live';
@@ -534,42 +1033,138 @@ function buildProjectionCacheConcatResultRowResult(index = null, node = null, ki
     const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', safeKind);
     const cacheNodeId = findProjectionNodeIdByKind(index, 'projection-cache', safeKind);
     const cacheSourceNodeId = findProjectionNodeIdByKind(index, 'projection-cache-source', safeKind);
+    const concatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', safeKind);
     const cacheSourceConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-source`);
     const cacheCopyConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-copy`);
+    const nextPreviewConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}-cache-next`);
     const terminalConnectorNodeId = findNodeIdByRole(index, `connector-${safeKind}`);
+    const preConnectorNodeId = findNodeIdByRole(index, 'connector-pre');
+    const postConnectorNodeId = findNodeIdByRole(index, 'connector-post');
     const terminalNodeId = safeKind === 'k'
         ? index?.singleNodeIds?.attentionKeyTranspose || ''
         : (safeKind === 'v' ? index?.singleNodeIds?.attentionValuePost || '' : '');
+    const cachedKeyScoreAxisSelections = !isLiveRow && safeKind === 'k'
+        ? buildScoreAxisSelections(index, displayRowIndex, {
+            includePost: true,
+            includePostCopy: true
+        })
+        : {
+            rowSelections: [],
+            columnSelections: []
+        };
+
+    if (isNextCachePreviewNode) {
+        return buildFocusResult({
+            label: `Cached ${resolveProjectionLabel(safeKind)} Vector`,
+            info: buildProjectionVectorHoverInfo(node, rowHit.rowItem, safeKind, {
+                cachedKv: true
+            }),
+            activeConnectorIds: [
+                isLiveRow ? cacheCopyConnectorNodeId : cacheSourceConnectorNodeId,
+                nextPreviewConnectorNodeId,
+                terminalConnectorNodeId
+            ].filter(Boolean),
+            dimNodeIds: safeKind === 'v'
+                ? buildValueBranchExtraDimNodeIds(index)
+                : [],
+            columnSelections: safeKind === 'k' && terminalNodeId && terminalNodeId !== node.id
+                ? [{
+                    nodeId: terminalNodeId,
+                    colIndex: displayRowIndex
+                }]
+                : [],
+            rowSelections: [
+                ...(isLiveRow
+                    ? [
+                        ...buildDecodeProjectionCurrentInputRowSelections(index, safeKind, {
+                            includeProjectionSource: true,
+                            rowIndex: sourceRowIndex
+                        }),
+                        {
+                            nodeId: projectionOutputNodeId,
+                            rowIndex: sourceRowIndex
+                        },
+                        {
+                            nodeId: projectionOutputCopyNodeId,
+                            rowIndex: sourceRowIndex
+                        }
+                    ]
+                    : [
+                        {
+                            nodeId: cacheNodeId,
+                            rowIndex: sourceRowIndex
+                        },
+                        {
+                            nodeId: cacheSourceNodeId,
+                            rowIndex: sourceRowIndex
+                        }
+                    ]),
+                ...(concatResultNodeId && concatResultNodeId !== node.id
+                    ? [{
+                        nodeId: concatResultNodeId,
+                        rowIndex: displayRowIndex
+                    }]
+                    : []),
+                ...(safeKind === 'v' && terminalNodeId && terminalNodeId !== node.id
+                    ? [{
+                        nodeId: terminalNodeId,
+                        rowIndex: displayRowIndex
+                    }]
+                    : []),
+                {
+                    nodeId: node.id,
+                    rowIndex: displayRowIndex
+                }
+            ],
+            includeFocusState: options?.includeFocusState !== false
+        });
+    }
+
+    const activeNodeIds = isLiveRow
+        ? [
+            projectionOutputNodeId,
+            projectionOutputCopyNodeId,
+            terminalNodeId,
+            node.id
+        ]
+        : [
+            cacheNodeId,
+            cacheSourceNodeId,
+            terminalNodeId,
+            node.id
+        ];
 
     return buildFocusResult({
         label: `${isLiveRow ? '' : 'Cached '}${resolveProjectionLabel(safeKind)} Vector`,
         info: buildProjectionVectorHoverInfo(node, rowHit.rowItem, safeKind, {
             cachedKv: !isLiveRow
         }),
-        activeNodeIds: [
-            projectionOutputNodeId,
-            projectionOutputCopyNodeId,
-            cacheNodeId,
-            cacheSourceNodeId,
-            terminalNodeId,
-            node.id
-        ],
+        activeNodeIds,
         activeConnectorIds: [
             isLiveRow ? cacheCopyConnectorNodeId : cacheSourceConnectorNodeId,
-            terminalConnectorNodeId
+            terminalConnectorNodeId,
+            ...(!isLiveRow && safeKind === 'k'
+                ? [preConnectorNodeId, postConnectorNodeId]
+                : [])
         ].filter(Boolean),
         dimNodeIds: safeKind === 'v'
             ? buildValueBranchExtraDimNodeIds(index)
             : [],
-        columnSelections: safeKind === 'k' && terminalNodeId && terminalNodeId !== node.id
-            ? [{
-                nodeId: terminalNodeId,
-                colIndex: displayRowIndex
-            }]
-            : [],
+        columnSelections: isLiveRow
+            ? (safeKind === 'k' && terminalNodeId && terminalNodeId !== node.id
+                ? [{
+                    nodeId: terminalNodeId,
+                    colIndex: displayRowIndex
+                }]
+                : [])
+            : cachedKeyScoreAxisSelections.columnSelections,
         rowSelections: [
             ...(isLiveRow
                 ? [
+                    ...buildDecodeProjectionCurrentInputRowSelections(index, safeKind, {
+                        includeProjectionSource: true,
+                        rowIndex: sourceRowIndex
+                    }),
                     {
                         nodeId: projectionOutputNodeId,
                         rowIndex: sourceRowIndex
@@ -589,6 +1184,7 @@ function buildProjectionCacheConcatResultRowResult(index = null, node = null, ki
                         rowIndex: sourceRowIndex
                     }
                 ]),
+            ...cachedKeyScoreAxisSelections.rowSelections,
             ...(safeKind === 'v' && terminalNodeId && terminalNodeId !== node.id
                 ? [{
                     nodeId: terminalNodeId,
@@ -1083,7 +1679,42 @@ function buildOutputProjectionOutputRowResult(index = null, node = null, rowHit 
 function buildProjectionSourceRowResult(index = null, rowHit = null, options = null) {
     if (!index || !rowHit) return null;
     const rowIndex = Number.isFinite(rowHit.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : null;
-    const transposeSelections = buildAttentionKeyTransposeSelections(index, rowIndex);
+    const interactionKind = String(options?.interactionKind || 'hover').trim().toLowerCase();
+    const isClickInteraction = interactionKind === 'click';
+    const isDecodeClickInteraction = isClickInteraction && !!index?.scene?.metadata?.kvCacheState?.kvCacheDecodeActive;
+    const decodeKeyLiveDisplayRowIndex = isDecodeClickInteraction
+        ? resolveDecodeProjectionLiveDisplayRowIndex(index, 'k')
+        : null;
+    const decodeValueLiveDisplayRowIndex = isDecodeClickInteraction
+        ? resolveDecodeProjectionLiveDisplayRowIndex(index, 'v')
+        : null;
+    const keyProjectionOutputNodeId = index?.projectionOutputIdsByKind?.k || '';
+    const keyProjectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', 'k');
+    const keyConcatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', 'k');
+    const keyNextPreviewNodeId = findProjectionNodeIdByKind(index, 'projection-cache-next', 'k');
+    const valueProjectionOutputNodeId = index?.projectionOutputIdsByKind?.v || '';
+    const valueProjectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', 'v');
+    const valueConcatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', 'v');
+    const valueNextPreviewNodeId = findProjectionNodeIdByKind(index, 'projection-cache-next', 'v');
+    const decodeExtraConnectorIds = isDecodeClickInteraction
+        ? [
+            findNodeIdByRole(index, 'connector-k'),
+            findNodeIdByRole(index, 'connector-k-cache-copy'),
+            findNodeIdByRole(index, 'connector-k-cache-next'),
+            findNodeIdByRole(index, 'connector-v'),
+            findNodeIdByRole(index, 'connector-v-cache-copy'),
+            findNodeIdByRole(index, 'connector-v-cache-next')
+        ].filter(Boolean)
+        : [];
+    const transposeSelections = isClickInteraction
+        ? buildAttentionKeyTransposeSelections(
+            index,
+            Number.isFinite(decodeKeyLiveDisplayRowIndex) ? decodeKeyLiveDisplayRowIndex : rowIndex
+        )
+        : {
+            rowSelections: [],
+            columnSelections: []
+        };
     const mlpWeightNodeId = (index?.nodeIdsByRole?.get('mlp-up-weight') || [])[0] || '';
     const mlpBiasNodeId = (index?.nodeIdsByRole?.get('mlp-up-bias') || [])[0] || '';
     const mlpOutputNodeId = (index?.nodeIdsByRole?.get('mlp-up-output') || [])[0] || '';
@@ -1102,6 +1733,7 @@ function buildProjectionSourceRowResult(index = null, rowHit = null, options = n
         info,
         descriptors: ['projectionSourceAll'],
         extraNodeIds: [mlpWeightNodeId, mlpBiasNodeId],
+        extraConnectorIds: decodeExtraConnectorIds,
         rowSelections: [
             ...buildProjectionSourceRowSelections(index, rowIndex),
             ...(mlpOutputNodeId ? [{ nodeId: mlpOutputNodeId, rowIndex }] : []),
@@ -1110,8 +1742,68 @@ function buildProjectionSourceRowResult(index = null, rowHit = null, options = n
             ...(mlpActivationCopyNodeId ? [{ nodeId: mlpActivationCopyNodeId, rowIndex }] : []),
             ...(mlpDownOutputNodeId ? [{ nodeId: mlpDownOutputNodeId, rowIndex }] : []),
             ...buildQueryRowSelections(index, rowIndex),
-            ...buildKeyRowSelections(index, rowIndex),
-            ...buildValueRowSelections(index, rowIndex),
+            ...(isDecodeClickInteraction
+                ? [
+                    ...(keyProjectionOutputNodeId
+                        ? [{
+                            nodeId: keyProjectionOutputNodeId,
+                            rowIndex
+                        }]
+                        : []),
+                    ...(keyProjectionOutputCopyNodeId
+                        ? [{
+                            nodeId: keyProjectionOutputCopyNodeId,
+                            rowIndex
+                        }]
+                        : []),
+                    ...(Number.isFinite(decodeKeyLiveDisplayRowIndex) && keyConcatResultNodeId
+                        ? [{
+                            nodeId: keyConcatResultNodeId,
+                            rowIndex: decodeKeyLiveDisplayRowIndex
+                        }]
+                        : []),
+                    ...(Number.isFinite(decodeKeyLiveDisplayRowIndex) && keyNextPreviewNodeId
+                        ? [{
+                            nodeId: keyNextPreviewNodeId,
+                            rowIndex: decodeKeyLiveDisplayRowIndex
+                        }]
+                        : [])
+                ]
+                : buildKeyRowSelections(index, rowIndex)),
+            ...(isDecodeClickInteraction
+                ? [
+                    ...(valueProjectionOutputNodeId
+                        ? [{
+                            nodeId: valueProjectionOutputNodeId,
+                            rowIndex
+                        }]
+                        : []),
+                    ...(valueProjectionOutputCopyNodeId
+                        ? [{
+                            nodeId: valueProjectionOutputCopyNodeId,
+                            rowIndex
+                        }]
+                        : []),
+                    ...(Number.isFinite(decodeValueLiveDisplayRowIndex) && valueConcatResultNodeId
+                        ? [{
+                            nodeId: valueConcatResultNodeId,
+                            rowIndex: decodeValueLiveDisplayRowIndex
+                        }]
+                        : []),
+                    ...(Number.isFinite(decodeValueLiveDisplayRowIndex) && valueNextPreviewNodeId
+                        ? [{
+                            nodeId: valueNextPreviewNodeId,
+                            rowIndex: decodeValueLiveDisplayRowIndex
+                        }]
+                        : []),
+                    ...(Number.isFinite(decodeValueLiveDisplayRowIndex) && index?.singleNodeIds?.attentionValuePost
+                        ? [{
+                            nodeId: index.singleNodeIds.attentionValuePost,
+                            rowIndex: decodeValueLiveDisplayRowIndex
+                        }]
+                        : [])
+                ]
+                : buildValueRowSelections(index, rowIndex)),
             ...transposeSelections.rowSelections
         ],
         columnSelections: transposeSelections.columnSelections
@@ -1124,12 +1816,11 @@ function buildLayerNormInputRowResult(index = null, node = null, rowHit = null, 
     const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
         variant: 'input'
     });
-    return buildLayerNormSharedFocusResult(index, {
+    return buildLayerNormDirectFocusResult(index, {
         label: info?.activationData?.label || 'LayerNorm Input Vector',
         info,
-        rowIndex,
-        includeScaleSelection: true,
-        includeShiftSelection: true
+        hoveredRole: String(node.role || '').trim(),
+        rowIndex
     }, options);
 }
 
@@ -1139,12 +1830,11 @@ function buildLayerNormNormalizedRowResult(index = null, node = null, rowHit = n
     const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
         variant: 'normalized'
     });
-    return buildLayerNormSharedFocusResult(index, {
+    return buildLayerNormDirectFocusResult(index, {
         label: info?.activationData?.label || 'LayerNorm Normalized Vector',
         info,
-        rowIndex,
-        includeScaleSelection: true,
-        includeShiftSelection: true
+        hoveredRole: String(node.role || '').trim(),
+        rowIndex
     }, options);
 }
 
@@ -1154,12 +1844,11 @@ function buildLayerNormScaledRowResult(index = null, node = null, rowHit = null,
     const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
         variant: 'scaled'
     });
-    return buildLayerNormSharedFocusResult(index, {
+    return buildLayerNormDirectFocusResult(index, {
         label: info?.activationData?.label || 'LayerNorm Product Vector',
         info,
-        rowIndex,
-        includeScaleSelection: true,
-        includeShiftSelection: true
+        hoveredRole: String(node.role || '').trim(),
+        rowIndex
     }, options);
 }
 
@@ -1169,12 +1858,11 @@ function buildLayerNormOutputRowResult(index = null, node = null, rowHit = null,
     const info = buildLayerNormActivationHoverInfo(node, rowHit.rowItem, {
         variant: 'output'
     });
-    return buildLayerNormSharedFocusResult(index, {
+    return buildLayerNormDirectFocusResult(index, {
         label: info?.activationData?.label || 'LayerNorm Output Vector',
         info,
-        rowIndex,
-        includeScaleSelection: true,
-        includeShiftSelection: true
+        hoveredRole: String(node.role || '').trim(),
+        rowIndex
     }, options);
 }
 
@@ -1183,11 +1871,11 @@ function buildLayerNormParamResult(index = null, node = null, {
 } = {}, options = null) {
     if (!index || !node) return null;
     const info = buildLayerNormParamHoverInfo(node, { param });
-    return buildLayerNormSharedFocusResult(index, {
+    return buildLayerNormDirectFocusResult(index, {
         label: info?.activationData?.label || 'LayerNorm Parameter',
         info,
-        includeScaleSelection: param === 'scale',
-        includeShiftSelection: param === 'shift'
+        hoveredRole: String(node.role || '').trim(),
+        selfRowIndex: 0
     }, options);
 }
 

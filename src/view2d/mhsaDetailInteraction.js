@@ -18,7 +18,8 @@ function buildMhsaDetailHoverCacheKey(hit = null, options = null) {
     const nodeId = typeof hit?.node?.id === 'string' ? hit.node.id : '';
     if (!nodeId.length) return '';
     const includeFocusState = options?.includeFocusState !== false;
-    const parts = [includeFocusState ? 'focus' : 'tooltip', nodeId];
+    const interactionKind = String(options?.interactionKind || 'hover').trim().toLowerCase() || 'hover';
+    const parts = [includeFocusState ? 'focus' : 'tooltip', interactionKind, nodeId];
     if (Number.isFinite(hit?.cellHit?.rowIndex) && Number.isFinite(hit?.cellHit?.colIndex)) {
         parts.push(`cell:${Math.max(0, Math.floor(hit.cellHit.rowIndex))}:${Math.max(0, Math.floor(hit.cellHit.colIndex))}`);
     } else if (Number.isFinite(hit?.rowHit?.rowIndex)) {

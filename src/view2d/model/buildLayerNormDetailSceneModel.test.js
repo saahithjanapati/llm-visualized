@@ -443,7 +443,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(shiftNode?.rowItems?.[0]?.gradientCss).toContain(shiftExpectedStart);
     });
 
-    it('reuses deep-detail hover behavior for layer norm token rows', () => {
+    it('limits layer norm input hover focus to the immediate normalization step', () => {
         const scene = buildScene();
         const nodes = flattenSceneNodes(scene);
         const inputNode = nodes.find((node) => node?.role === 'layer-norm-input') || null;
@@ -454,6 +454,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         const scaledCopyNode = nodes.find((node) => node?.role === 'layer-norm-scaled-copy') || null;
         const shiftNode = nodes.find((node) => node?.role === 'layer-norm-shift') || null;
         const outputNode = nodes.find((node) => node?.role === 'layer-norm-output') || null;
+        const normalizationConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-normalization') || null;
         const index = createMhsaDetailSceneIndex(scene);
         const hoverState = resolveMhsaDetailHoverState(index, {
             node: inputNode,
@@ -471,12 +472,13 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(hoverState?.info?.activationData?.values).toEqual(inputNode?.rowItems?.[1]?.rawValues);
         expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
         expect(hoverState?.focusState?.activeNodeIds).toContain(normalizedNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(normalizedCopyNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(scaleNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(scaledNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(scaledCopyNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(shiftNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(normalizedCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(scaleNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(scaledNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(scaledCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(shiftNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(outputNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toEqual([normalizationConnectorNode?.id]);
         expect(hoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: inputNode?.id,
             rowIndex: 1
@@ -485,37 +487,50 @@ describe('buildLayerNormDetailSceneModel', () => {
             nodeId: normalizedNode?.id,
             rowIndex: 1
         });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: normalizedCopyNode?.id,
-            rowIndex: 1
-        });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: scaledNode?.id,
-            rowIndex: 1
-        });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: scaledCopyNode?.id,
-            rowIndex: 1
-        });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: outputNode?.id,
-            rowIndex: 1
-        });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: scaleNode?.id,
-            rowIndex: 0
-        });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
-            nodeId: shiftNode?.id,
-            rowIndex: 0
-        });
+        expect(hoverState?.focusState?.rowSelections).toHaveLength(2);
     });
 
-    it('keeps layer norm parameter cards hoverable with layer-norm-specific tooltips', () => {
+    it('limits layer norm normalized hover focus to the direct input vector', () => {
         const scene = buildScene();
         const nodes = flattenSceneNodes(scene);
         const inputNode = nodes.find((node) => node?.role === 'layer-norm-input') || null;
+        const normalizedNode = nodes.find((node) => node?.role === 'layer-norm-normalized') || null;
+        const normalizedCopyNode = nodes.find((node) => node?.role === 'layer-norm-normalized-copy') || null;
         const scaleNode = nodes.find((node) => node?.role === 'layer-norm-scale') || null;
+        const normalizationConnectorNode = nodes.find((node) => node?.role === 'connector-layer-norm-normalization') || null;
+        const index = createMhsaDetailSceneIndex(scene);
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: normalizedNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: normalizedNode?.rowItems?.[1]
+            }
+        });
+
+        expect(hoverState?.label).toBe('LayerNorm 1 Normalized Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('ln1.norm');
+        expect(hoverState?.focusState?.activeNodeIds).toContain(normalizedNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(normalizedCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(scaleNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toEqual([normalizationConnectorNode?.id]);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: normalizedNode?.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: inputNode?.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toHaveLength(2);
+    });
+
+    it('keeps layer norm parameter hovers on the direct operand only', () => {
+        const scene = buildScene();
+        const nodes = flattenSceneNodes(scene);
+        const normalizedCopyNode = nodes.find((node) => node?.role === 'layer-norm-normalized-copy') || null;
+        const scaleNode = nodes.find((node) => node?.role === 'layer-norm-scale') || null;
+        const scaledNode = nodes.find((node) => node?.role === 'layer-norm-scaled') || null;
         const outputNode = nodes.find((node) => node?.role === 'layer-norm-output') || null;
         const index = createMhsaDetailSceneIndex(scene);
         const hoverState = resolveMhsaDetailHoverState(index, {
@@ -530,12 +545,53 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(hoverState?.info?.activationData?.stage).toBe('ln1.param.scale');
         expect(hoverState?.info?.activationData?.layerNormKind).toBe('ln1');
         expect(hoverState?.focusState?.activeNodeIds).toContain(scaleNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(inputNode?.id);
-        expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(normalizedCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(scaledNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(outputNode?.id);
         expect(hoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: scaleNode?.id,
             rowIndex: 0
         });
+        expect(hoverState?.focusState?.rowSelections).toHaveLength(1);
+    });
+
+    it('keeps layer norm output hover focus on the direct additive inputs', () => {
+        const scene = buildScene();
+        const nodes = flattenSceneNodes(scene);
+        const inputNode = nodes.find((node) => node?.role === 'layer-norm-input') || null;
+        const scaleNode = nodes.find((node) => node?.role === 'layer-norm-scale') || null;
+        const scaledCopyNode = nodes.find((node) => node?.role === 'layer-norm-scaled-copy') || null;
+        const shiftNode = nodes.find((node) => node?.role === 'layer-norm-shift') || null;
+        const outputNode = nodes.find((node) => node?.role === 'layer-norm-output') || null;
+        const index = createMhsaDetailSceneIndex(scene);
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: outputNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: outputNode?.rowItems?.[1]
+            }
+        });
+
+        expect(hoverState?.label).toBe('Post LayerNorm 1 Residual Vector');
+        expect(hoverState?.info?.activationData?.stage).toBe('ln1.output');
+        expect(hoverState?.focusState?.activeNodeIds).toContain(outputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(scaledCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(shiftNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(inputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(scaleNode?.id);
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: outputNode?.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: scaledCopyNode?.id,
+            rowIndex: 1
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: shiftNode?.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toHaveLength(3);
     });
 
     it('uses a final-layer-specific hover label for the top layer norm output', () => {

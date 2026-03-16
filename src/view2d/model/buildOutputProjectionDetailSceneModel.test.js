@@ -291,4 +291,46 @@ describe('buildOutputProjectionDetailSceneModel', () => {
             - (concatOutputEntry?.contentBounds?.y ?? 0)
         )).toBeLessThan(8);
     });
+
+    it('adds compact single-row label-only captions to decode-sized H_i matrices', () => {
+        const scene = buildOutputProjectionDetailSceneModel({
+            activationSource: createMockActivationSource(),
+            outputProjectionDetailTarget: {
+                layerIndex: 3
+            },
+            tokenRefs: [
+                { rowIndex: 0, tokenIndex: 7, tokenLabel: 'Token H' }
+            ]
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const headMatrixNode = nodes.find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'head-output-matrix'
+            && Number(node?.semantic?.headIndex) === 0
+        ));
+
+        expect(headMatrixNode?.dimensions).toEqual({
+            rows: 1,
+            cols: D_HEAD
+        });
+        expect(headMatrixNode?.metadata?.caption?.labelScale).toBeGreaterThan(0);
+        expect(headMatrixNode?.metadata?.caption?.uniformLabelScale).toBe(
+            headMatrixNode?.metadata?.caption?.labelScale
+        );
+        expect(headMatrixNode?.metadata?.caption?.lines).toEqual([{
+            tex: 'H_{1}',
+            text: 'H_1'
+        }]);
+        expect(headMatrixNode?.metadata?.caption?.labelMinScreenFontPx).toBeGreaterThan(0);
+        expect(headMatrixNode?.metadata?.caption?.labelMaxScreenFontPx).toBeGreaterThan(0);
+        expect(headMatrixNode?.metadata?.caption?.labelMinScreenFontPx).toBeLessThan(
+            headMatrixNode?.metadata?.caption?.labelMaxScreenFontPx
+        );
+        expect(headMatrixNode?.metadata?.caption?.labelFixedScreenFontPx).toBeUndefined();
+        expect(headMatrixNode?.metadata?.caption?.dimensionsMaxScreenFontPx).toBeUndefined();
+        expect(headMatrixNode?.metadata?.caption?.dimensionsFixedScreenFontPx).toBeUndefined();
+        expect(headMatrixNode?.metadata?.caption?.dimensionsTex).toBeUndefined();
+        expect(headMatrixNode?.metadata?.caption?.dimensionsText).toBeUndefined();
+    });
 });

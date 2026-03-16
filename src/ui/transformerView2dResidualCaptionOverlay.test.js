@@ -230,12 +230,20 @@ function buildMhsaFixtures({
         node.role === 'projection-cache-source'
         && String(node.semantic?.branchKey || node.metadata?.kind || '').toLowerCase() === 'k'
     )) || null;
+    const kCacheNextNode = nodes.find((node) => (
+        node.role === 'projection-cache-next'
+        && String(node.semantic?.branchKey || node.metadata?.kind || '').toLowerCase() === 'k'
+    )) || null;
     const vCacheNode = nodes.find((node) => (
         node.role === 'projection-cache'
         && String(node.semantic?.branchKey || '').toLowerCase() === 'v'
     )) || null;
     const vCacheSourceNode = nodes.find((node) => (
         node.role === 'projection-cache-source'
+        && String(node.semantic?.branchKey || node.metadata?.kind || '').toLowerCase() === 'v'
+    )) || null;
+    const vCacheNextNode = nodes.find((node) => (
+        node.role === 'projection-cache-next'
         && String(node.semantic?.branchKey || node.metadata?.kind || '').toLowerCase() === 'v'
     )) || null;
     const kCacheSourceConnectorNode = nodes.find((node) => node.role === 'connector-k-cache-source') || null;
@@ -289,8 +297,10 @@ function buildMhsaFixtures({
         scaleNode,
         kCacheNode,
         kCacheSourceNode,
+        kCacheNextNode,
         vCacheNode,
         vCacheSourceNode,
+        vCacheNextNode,
         kCacheSourceConnectorNode,
         kCacheConnectorNode,
         vCacheSourceConnectorNode,
@@ -918,8 +928,10 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             headOutputNode,
             kCacheNode,
             kCacheSourceNode,
+            kCacheNextNode,
             vCacheNode,
             vCacheSourceNode,
+            vCacheNextNode,
             canvas,
             overlay,
             cleanup
@@ -1006,6 +1018,20 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(queryCaptionItem(vOutputCopyNode?.id || '')).toBeNull();
             expect(queryCaptionItem(kCacheNode?.id || '')).toBeNull();
             expect(queryCaptionItem(vCacheNode?.id || '')).toBeNull();
+            const kOutputItem = queryCaptionItem(kOutputNode?.id || '');
+            const vOutputItem = queryCaptionItem(vOutputNode?.id || '');
+            const kOutputInlineSubscript = kOutputItem?.querySelector('.detail-transformer-view2d-inline-subscript__sub');
+            const vOutputInlineSubscript = vOutputItem?.querySelector('.detail-transformer-view2d-inline-subscript__sub');
+            expect(kOutputInlineSubscript?.textContent).toBe('current');
+            expect(vOutputInlineSubscript?.textContent).toBe('current');
+            const kCacheNextItem = queryCaptionItem(kCacheNextNode?.id || '');
+            const vCacheNextItem = queryCaptionItem(vCacheNextNode?.id || '');
+            const kCacheNextInlineSubscript = kCacheNextItem?.querySelector('.detail-transformer-view2d-inline-subscript__sub');
+            const vCacheNextInlineSubscript = vCacheNextItem?.querySelector('.detail-transformer-view2d-inline-subscript__sub');
+            expect(kCacheNextItem?.hidden).toBe(false);
+            expect(vCacheNextItem?.hidden).toBe(false);
+            expect(kCacheNextInlineSubscript?.textContent).toBe('cache_next');
+            expect(vCacheNextInlineSubscript?.textContent).toBe('cache_next');
             const baselineKCacheLabelSize = captionSizeByNodeId.get(kCacheSourceNode?.id || '')?.labelSize || 0;
             const baselineKCacheDimensionsSize = captionSizeByNodeId.get(kCacheSourceNode?.id || '')?.dimensionsSize || 0;
 
@@ -2138,6 +2164,72 @@ describe('transformerView2dResidualCaptionOverlay', () => {
             expect(captionItem).toBeTruthy();
             expect(captionItem?.hidden).toBe(false);
             expect(labelSize).toBeGreaterThan(0);
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('keeps decode-sized output-projection H_i captions in a compact zoom band', () => {
+        const fixtures = buildOutputProjectionFixtures({
+            tokenLabels: ['Decode Token'],
+            canvasWidth: 1280,
+            canvasHeight: 840
+        });
+        const {
+            scene,
+            layout,
+            headMatrixNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const headEntry = layout.registry.getNodeEntry(headMatrixNode.id);
+            const targetX = 40;
+            const targetY = 48;
+            const projectBounds = (scale) => {
+                const offsetX = targetX - ((Number(headEntry?.contentBounds?.x) || 0) * scale);
+                const offsetY = targetY - ((Number(headEntry?.contentBounds?.y) || 0) * scale);
+                return (bounds) => ({
+                    x: (bounds.x * scale) + offsetX,
+                    y: (bounds.y * scale) + offsetY,
+                    width: bounds.width * scale,
+                    height: bounds.height * scale
+                });
+            };
+            const measureCaptionSizes = (scale) => {
+                overlay.sync({
+                    scene,
+                    layout,
+                    canvas,
+                    projectBounds: projectBounds(scale),
+                    visible: true,
+                    enabled: true
+                });
+                const captionItem = queryCaptionItem(headMatrixNode.id);
+                return {
+                    labelSize: Number.parseFloat(
+                        captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+                    ),
+                    dimensionsSize: Number.parseFloat(
+                        captionItem?.style.getPropertyValue('--detail-transformer-view2d-caption-dimensions-size') || '0'
+                    ),
+                    hidden: captionItem?.hidden
+                };
+            };
+
+            const zoomedOut = measureCaptionSizes(0.06);
+            const zoomedIn = measureCaptionSizes(1.35);
+            const captionItem = queryCaptionItem(headMatrixNode.id);
+            const dimensionsLine = captionItem?.querySelector('.detail-transformer-view2d-residual-caption-line--dimensions');
+
+            expect(zoomedOut.hidden).toBe(false);
+            expect(zoomedIn.hidden).toBe(false);
+            expect(zoomedOut.labelSize).toBeGreaterThanOrEqual(10.5);
+            expect(zoomedIn.labelSize).toBeGreaterThan(zoomedOut.labelSize);
+            expect(zoomedIn.labelSize).toBeLessThanOrEqual(13.5);
+            expect(dimensionsLine?.hidden).toBe(true);
         } finally {
             cleanup();
         }

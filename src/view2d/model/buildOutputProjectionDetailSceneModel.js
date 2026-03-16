@@ -79,6 +79,8 @@ const INCOMING_ARROW_SPACER_WIDTH = 56;
 const INCOMING_ARROW_SPACER_WIDTH_SMALL = 48;
 const ARROW_HEAD_TARGET_GAP = 12;
 const OUTPUT_HEAD_CAPTION_LABEL_SCALE = 0.9;
+const OUTPUT_HEAD_SINGLE_ROW_LABEL_MIN_SCREEN_FONT_PX = 10.5;
+const OUTPUT_HEAD_SINGLE_ROW_LABEL_MAX_SCREEN_FONT_PX = 13.5;
 const OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT = 7;
 const OUTPUT_PROJECTION_VECTOR_ROW_HEIGHT_SMALL = 6;
 const OUTPUT_PROJECTION_BIAS_ROW_HEIGHT = 14;
@@ -475,7 +477,8 @@ function createHeadOutputMatrixNode(activationSource = null, tokenRefs = [], {
     const resolvedRowHeight = Number.isFinite(rowHeight) && rowHeight > 0
         ? Math.max(1, Math.floor(rowHeight))
         : (isSmallScreen ? HEAD_OUTPUT_ROW_HEIGHT_SMALL : HEAD_OUTPUT_ROW_HEIGHT);
-    return createVectorStripMatrixNode({
+    const useFixedSingleRowCaptionSizing = rowCount === 1;
+    const matrixNode = createVectorStripMatrixNode({
         role,
         semantic: buildSemantic(baseSemantic, {
             role: semanticRole
@@ -493,6 +496,7 @@ function createHeadOutputMatrixNode(activationSource = null, tokenRefs = [], {
         rowHeight: resolvedRowHeight,
         captionPosition: 'bottom',
         captionLabelScale,
+        captionUniformLabelScale: captionLabelScale,
         visualStyleKey: VIEW2D_STYLE_KEYS.MHSA_HEAD_OUTPUT,
         stripMetadata: createView2dVectorStripMetadata({
             compactWidth: resolvedCompactWidth,
@@ -511,6 +515,20 @@ function createHeadOutputMatrixNode(activationSource = null, tokenRefs = [], {
             headIndex
         }
     });
+    if (useFixedSingleRowCaptionSizing && matrixNode?.metadata?.caption) {
+        matrixNode.metadata.caption.lines = [{
+            tex: matrixNode?.label?.tex || `H_{${headIndex + 1}}`,
+            text: matrixNode?.label?.text || `H_${headIndex + 1}`
+        }];
+        delete matrixNode.metadata.caption.dimensionsTex;
+        delete matrixNode.metadata.caption.dimensionsText;
+        matrixNode.metadata.caption.labelMinScreenFontPx = OUTPUT_HEAD_SINGLE_ROW_LABEL_MIN_SCREEN_FONT_PX;
+        matrixNode.metadata.caption.labelMaxScreenFontPx = OUTPUT_HEAD_SINGLE_ROW_LABEL_MAX_SCREEN_FONT_PX;
+        delete matrixNode.metadata.caption.labelFixedScreenFontPx;
+        delete matrixNode.metadata.caption.dimensionsMaxScreenFontPx;
+        delete matrixNode.metadata.caption.dimensionsFixedScreenFontPx;
+    }
+    return matrixNode;
 }
 
 function createConcatOutputMatrixNode(activationSource = null, tokenRefs = [], {
