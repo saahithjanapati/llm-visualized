@@ -798,9 +798,18 @@ export function createTransformerView2dDetailView(panelEl, {
         if (!selectionSidebar || !workspace) return;
         const nextVisible = !!visible;
         const wasAtFitScene = isViewportAtFitScene();
+        const wasVisible = selectionSidebar.classList.contains('is-visible');
+        const wasClosing = selectionSidebar.classList.contains('is-closing');
         clearSelectionSidebarCloseTimer();
         workspace.dataset.selectionSidebarVisible = nextVisible ? 'true' : 'false';
         selectionSidebar.setAttribute('aria-hidden', nextVisible ? 'false' : 'true');
+
+        if (nextVisible && wasVisible && !wasClosing) {
+            if (state.visible) {
+                disableAutoFrameState();
+            }
+            return false;
+        }
 
         if (nextVisible) {
             selectionSidebar.classList.remove('is-closing');
@@ -2963,7 +2972,7 @@ export function createTransformerView2dDetailView(panelEl, {
             canvas,
             projectBounds: (bounds) => renderer.resolveScreenBounds(bounds),
             visible: state.visible,
-            enabled: !viewportAnimationActive && !state.isInteracting,
+            enabled: !viewportAnimationActive,
             focusState: activeSceneFocusState
         });
         syncDetailFrame();
@@ -3921,13 +3930,14 @@ export function createTransformerView2dDetailView(panelEl, {
             detailFocusLabel = '',
             detailInteractionTargets = null,
             transitionMode = '',
+            initialSelectionSidebarVisible = false,
             isSmallScreen = false
         } = {}) {
             clearStagedFocusTransition();
             clearStagedHeadDetailTransition();
             clearStagedDetailTransition();
             state.isSmallScreen = !!isSmallScreen;
-            setSelectionSidebarVisible(false, { immediate: true });
+            setSelectionSidebarVisible(initialSelectionSidebarVisible === true, { immediate: true });
             state.activationSource = activationSource;
             state.tokenIndices = Array.isArray(tokenIndices) ? [...tokenIndices] : tokenIndices;
             state.tokenLabels = Array.isArray(tokenLabels) ? [...tokenLabels] : tokenLabels;

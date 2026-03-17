@@ -9402,6 +9402,10 @@ export class SelectionPanel {
                 ? { detailInteractionTargets: resolvedDetailInteractionTargets }
                 : {})
         };
+        const shouldAutoOpenSelectionSidebar = !!(
+            resolvedSelection
+            && !(this._isSmallScreen && this._isSmallScreen())
+        );
         const selectionSidebarHeaderContent = resolvedSelection
             ? this._buildTransformerView2dSelectionSidebarHeaderContent()
             : null;
@@ -9443,12 +9447,9 @@ export class SelectionPanel {
             detailFocusLabel: hydratedView2dContext.detailFocusLabel,
             detailInteractionTargets: hydratedView2dContext.detailInteractionTargets,
             transitionMode: hydratedView2dContext.transitionMode,
+            initialSelectionSidebarVisible: shouldAutoOpenSelectionSidebar,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
         });
-        const shouldAutoOpenSelectionSidebar = !!(
-            resolvedSelection
-            && !(this._isSmallScreen && this._isSmallScreen())
-        );
         if (shouldAutoOpenSelectionSidebar) {
             this._showTransformerView2dSelectionSidebar({ scrollToTop: true });
             if (selectionSidebarHeaderContent) {

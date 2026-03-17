@@ -617,6 +617,59 @@ describe('createTransformerView2dDetailView', () => {
         expect(sidebarViewportState.scale).toBeCloseTo(focusedViewportState.scale, 5);
     });
 
+    it('starts focused opens with the docked sidebar viewport already applied', () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const selectionSidebar = panelEl.querySelector('.detail-transformer-view2d-selection-sidebar');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+        setElementRectAt(selectionSidebar, {
+            left: 560,
+            top: 56,
+            width: 384,
+            height: 544
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-weight'
+            }],
+            detailFocusLabel: 'MLP Up Weight Matrix',
+            transitionMode: 'staged-detail',
+            initialSelectionSidebarVisible: true
+        });
+
+        const initialViewportState = view.getViewportState();
+        expect(view.isSelectionSidebarVisible()).toBe(true);
+        expect(initialViewportState.viewportInsets.right).toBe(384);
+
+        view.setSelectionSidebarVisible(true);
+        view.resizeAndRender();
+
+        const stableViewportState = view.getViewportState();
+        expect(stableViewportState.viewportInsets.right).toBe(384);
+        expect(stableViewportState.scale).toBeCloseTo(initialViewportState.scale, 5);
+        expect(stableViewportState.panX).toBeCloseTo(initialViewportState.panX, 5);
+        expect(stableViewportState.panY).toBeCloseTo(initialViewportState.panY, 5);
+    });
+
     it('anchors keyboard zoom to the unobscured viewport center when the docked sidebar is visible', () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
@@ -687,7 +740,7 @@ describe('createTransformerView2dDetailView', () => {
         expect(worldCenterAfter.y).toBeCloseTo(worldCenterBefore.y, 6);
     });
 
-    it('keeps a stable interaction DPR and hides the DOM caption overlay while zooming', async () => {
+    it('keeps a stable interaction DPR and preserves the DOM caption overlay while zooming', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
         const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
@@ -734,7 +787,7 @@ describe('createTransformerView2dDetailView', () => {
 
         const interactionRenderArgs = renderSpy.mock.calls.at(-1)?.[0] || null;
         expect(interactionRenderArgs?.dprCap).toBe(idleRenderArgs?.dprCap);
-        expect(overlay?.style.display).toBe('none');
+        expect(overlay?.style.display).toBe('block');
 
         await vi.advanceTimersByTimeAsync(220);
         expect(overlay?.style.display).toBe('block');

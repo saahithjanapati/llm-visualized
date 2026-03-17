@@ -119,7 +119,11 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
 
         expect(opened).toBe(true);
         expect(panel._transformerView2dDetailView.setVisible).toHaveBeenCalledWith(true);
-        expect(panel._transformerView2dDetailView.open).toHaveBeenCalled();
+        expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
+            expect.objectContaining({
+                initialSelectionSidebarVisible: true
+            })
+        );
         expect(panel._showTransformerView2dSelectionSidebar).toHaveBeenCalledWith({
             scrollToTop: true
         });
@@ -167,6 +171,7 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         expect(panel._transformerView2dDetailView.setVisible).toHaveBeenCalledWith(true);
         expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
             expect.objectContaining({
+                initialSelectionSidebarVisible: false,
                 isSmallScreen: true
             })
         );
@@ -240,6 +245,11 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
 
         expect(opened).toBe(true);
         expect(panel._showTransformerView2dSelectionSidebar).not.toHaveBeenCalled();
+        expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
+            expect.objectContaining({
+                initialSelectionSidebarVisible: false
+            })
+        );
         expect(panel._transformerView2dDetailView.setSelectionSidebarHeaderContent).not.toHaveBeenCalled();
         expect(panel._stopLoop).toHaveBeenCalled();
     });
