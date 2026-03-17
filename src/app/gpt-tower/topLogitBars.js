@@ -19,8 +19,19 @@ import {
 import { resolveLogitEntryText } from '../../utils/logitTokenText.js';
 import { scaleGlobalEmissiveIntensity } from '../../utils/materialUtils.js';
 import { isIncompleteUtf8TokenId } from '../../utils/tokenEncodingNotes.js';
+import {
+    buildPromptTokenChipEntries,
+    getActivePromptTokenChipLookup,
+    resolvePromptTokenChipColorState,
+    resolveTokenChipColorKey
+} from '../../ui/tokenChipColorUtils.js';
 import { formatTokenLabel } from './tokenLabels.js';
-import { getLogitTokenColorUnit, resolveLogitTokenSeed } from './logitColor.js';
+import {
+    getLogitTokenChipColorHex,
+    getLogitTokenColorUnit,
+    resolveLogitTokenSeed
+} from './logitColor.js';
+import { resolveChosenTokenCandidateForToken } from '../../utils/captureTokenSelection.js';
 
 const LOGIT_LABEL_FONT_URL = 'https://threejs.org/examples/fonts/helvetiker_regular.typeface.json';
 const LOGIT_LABEL_TEXT_SIZE_MIN = 320;
@@ -108,6 +119,83 @@ function applyChosenLogitSelectionMetadata(object, chosen, labelText, { setName 
     }
 }
 
+function resolveChosenLogitTokenLabel(entry) {
+    const tokenText = resolveLogitEntryText(entry);
+    return tokenText ? formatTokenLabel(sanitizeLogitToken(tokenText)) : '';
+}
+
+function resolvePromptContextTokenLabel(activationSource, tokenIndex) {
+    if (!Number.isFinite(tokenIndex) || !activationSource || typeof activationSource.getTokenString !== 'function') {
+        return '';
+    }
+    return formatTokenLabel(activationSource.getTokenString(Math.floor(tokenIndex)) ?? '');
+}
+
+export function resolveChosenLogitDisplayColorKey({
+    activationSource = null,
+    laneTokenIndices = null,
+    chosenEntry = null,
+    chosenTokenIndex = null,
+    fallbackIndex = 0
+} = {}) {
+    const tokenIndices = Array.isArray(laneTokenIndices) ? laneTokenIndices.slice() : [];
+    const tokenLabels = tokenIndices.map((tokenIndex) => resolvePromptContextTokenLabel(activationSource, tokenIndex));
+    const tokenIds = tokenIndices.map((tokenIndex) => {
+        if (!Number.isFinite(tokenIndex) || !activationSource || typeof activationSource.getTokenId !== 'function') {
+            return null;
+        }
+        return activationSource.getTokenId(Math.floor(tokenIndex));
+    });
+    const chosenTokenLabel = resolveChosenLogitTokenLabel(chosenEntry);
+    const previousLookup = getActivePromptTokenChipLookup();
+    const promptEntries = buildPromptTokenChipEntries({
+        tokenLabels,
+        tokenIndices,
+        tokenIds,
+        generatedToken: chosenTokenLabel
+            ? {
+                tokenIndex: chosenTokenIndex,
+                tokenId: resolveChosenLogitTokenId(chosenEntry),
+                tokenLabel: chosenTokenLabel,
+                logitEntry: chosenEntry
+            }
+            : null
+    });
+    const promptColorState = resolvePromptTokenChipColorState(promptEntries, { previousLookup });
+    return resolveTokenChipColorKey({
+        tokenIndex: chosenTokenIndex,
+        tokenId: resolveChosenLogitTokenId(chosenEntry),
+        tokenLabel: chosenTokenLabel
+    }, fallbackIndex, { lookup: promptColorState.lookup });
+}
+
+function resolveChosenLogitDisplayColor({
+    activationSource = null,
+    laneTokenIndices = null,
+    chosenEntry = null,
+    chosenTokenIndex = null,
+    fallbackIndex = 0,
+    fallbackColor = 0xffffff
+} = {}) {
+    try {
+        const colorKey = resolveChosenLogitDisplayColorKey({
+            activationSource,
+            laneTokenIndices,
+            chosenEntry,
+            chosenTokenIndex,
+            fallbackIndex
+        });
+        if (Number.isFinite(colorKey)) {
+            return new THREE.Color(getLogitTokenChipColorHex(colorKey));
+        }
+    } catch (_) {
+        // Fall back to the logit-bar hue if prompt-strip color resolution fails.
+    }
+    return fallbackColor instanceof THREE.Color
+        ? fallbackColor.clone()
+        : new THREE.Color(fallbackColor);
+}
+
 function createExtrudedTextGroup(label, font, { size, depth, color }) {
     if (!font || !label || !label.trim()) return null;
     const shapes = font.generateShapes(label, size, 2);
@@ -162,9 +250,66 @@ function createExtrudedTextGroup(label, font, { size, depth, color }) {
     return group;
 }
 
+function applyChosenLabelColorToObject(object, color) {
+    if (!object || !color) return;
+    const applyToMaterial = (material) => {
+        if (!material) return;
+        if (material.color?.copy) material.color.copy(color);
+        if (material.emissive?.copy) {
+            material.emissive.copy(color).multiplyScalar(0.15);
+        }
+        material.needsUpdate = true;
+    };
+
+    if (object.material) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => applyToMaterial(material));
+    }
+    if (typeof object.traverse === 'function') {
+        object.traverse((node) => {
+            if (!node || node === object || !node.material) return;
+            const materials = Array.isArray(node.material) ? node.material : [node.material];
+            materials.forEach((material) => applyToMaterial(material));
+        });
+    }
+}
+
+function refreshChosenLabelGroupColors(barGroup) {
+    const labelGroup = barGroup?.userData?.chosenLabelGroup;
+    const chosenEntries = Array.isArray(barGroup?.userData?.chosenEntries)
+        ? barGroup.userData.chosenEntries
+        : [];
+    if (!labelGroup || !chosenEntries.length) return;
+
+    const activationSource = barGroup?.userData?.activationSource ?? null;
+    const laneTokenIndices = Array.isArray(barGroup?.userData?.laneTokenIndices)
+        ? barGroup.userData.laneTokenIndices
+        : [];
+
+    labelGroup.children.forEach((child) => {
+        const chosenEntryIndex = Number(child?.userData?.chosenEntryIndex);
+        if (!Number.isFinite(chosenEntryIndex)) return;
+        const chosen = chosenEntries[chosenEntryIndex];
+        if (!chosen) return;
+        const color = resolveChosenLogitDisplayColor({
+            activationSource,
+            laneTokenIndices,
+            chosenEntry: chosen.entry,
+            chosenTokenIndex: chosen.tokenIndex,
+            fallbackIndex: chosen.fallbackIndex ?? chosenEntryIndex,
+            fallbackColor: chosen.fallbackColor ?? 0xffffff
+        });
+        applyChosenLabelColorToObject(child, color);
+    });
+}
+
 function buildChosenLogitLabelGroup(barGroup, font) {
     const chosenEntries = barGroup?.userData?.chosenEntries;
     if (!Array.isArray(chosenEntries) || !chosenEntries.length) return null;
+    const activationSource = barGroup?.userData?.activationSource ?? null;
+    const laneTokenIndices = Array.isArray(barGroup?.userData?.laneTokenIndices)
+        ? barGroup.userData.laneTokenIndices
+        : [];
     const barWidth = Number.isFinite(barGroup.userData.barWidth) ? barGroup.userData.barWidth : 1;
     const barDepth = Number.isFinite(barGroup.userData.barDepth) ? barGroup.userData.barDepth : 0;
     const baseX = Number.isFinite(barGroup.userData.baseX) ? barGroup.userData.baseX : null;
@@ -191,13 +336,21 @@ function buildChosenLogitLabelGroup(barGroup, font) {
     const extraY = LOGIT_LABEL_EXTRA_Y;
     const sideGap = LOGIT_LABEL_SIDE_GAP;
 
-    chosenEntries.forEach((chosen) => {
+    chosenEntries.forEach((chosen, chosenEntryIndex) => {
         const labelText = resolveLogitLabelText(chosen.entry);
         if (!labelText) return;
+        const labelColor = resolveChosenLogitDisplayColor({
+            activationSource,
+            laneTokenIndices,
+            chosenEntry: chosen.entry,
+            chosenTokenIndex: chosen.tokenIndex,
+            fallbackIndex: chosen.fallbackIndex ?? chosenEntryIndex,
+            fallbackColor: chosen.fallbackColor ?? 0xffffff
+        });
         const textGroup = createExtrudedTextGroup(labelText, font, {
             size: textSize,
             depth: baseTextDepth,
-            color: chosen.color
+            color: labelColor
         });
         if (!textGroup) return;
 
@@ -222,6 +375,8 @@ function buildChosenLogitLabelGroup(barGroup, font) {
         }
         const labelZ = chosen.z;
         textGroup.position.set(labelX, labelY, labelZ);
+        textGroup.userData = textGroup.userData || {};
+        textGroup.userData.chosenEntryIndex = chosenEntryIndex;
         applyChosenLogitSelectionMetadata(textGroup, chosen, labelText);
         textGroup.traverse((node) => {
             if (node === textGroup) return;
@@ -250,11 +405,13 @@ function buildChosenLogitLabelGroup(barGroup, font) {
         const lineEnd = hasHit ? hit.addScaledVector(lineDir, lineInset) : labelCenter;
         const lineGeometry = new THREE.BufferGeometry().setFromPoints([lineStart, lineEnd]);
         const lineMaterial = new THREE.LineBasicMaterial({
-            color: chosen.color || 0xffffff,
+            color: labelColor || 0xffffff,
             transparent: true,
             opacity: LOGIT_LABEL_LINE_OPACITY
         });
         const line = new THREE.Line(lineGeometry, lineMaterial);
+        line.userData = line.userData || {};
+        line.userData.chosenEntryIndex = chosenEntryIndex;
         applyChosenLogitSelectionMetadata(line, chosen, labelText, { setName: false });
 
         labelGroup.add(line);
@@ -279,6 +436,7 @@ function ensureChosenLabelGroup(barGroup) {
             barGroup.userData.chosenLabelGroup = labelGroup;
             barGroup.add(labelGroup);
             if (barGroup.userData.revealChosenLabels) {
+                refreshChosenLabelGroupColors(barGroup);
                 labelGroup.visible = true;
             }
         })
@@ -294,7 +452,10 @@ function revealChosenLabelGroup(barGroup) {
     if (!barGroup || !barGroup.userData) return;
     barGroup.userData.revealChosenLabels = true;
     const labelGroup = barGroup.userData.chosenLabelGroup;
-    if (labelGroup) labelGroup.visible = true;
+    if (labelGroup) {
+        refreshChosenLabelGroupColors(barGroup);
+        labelGroup.visible = true;
+    }
 }
 
 function queueRevealCompleteCallback(barGroup, callback) {
@@ -414,9 +575,6 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
 
     const laneRows = [];
     let globalMaxProb = 0;
-    const tokenCount = typeof activationSource.getTokenCount === 'function'
-        ? activationSource.getTokenCount()
-        : 0;
     const lastLaneIdx = laneZs.length - 1;
 
     for (let laneIdx = 0; laneIdx < laneZs.length; laneIdx += 1) {
@@ -426,10 +584,6 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
         const limit = Math.min(barCount, logitRow.length);
         let bestIdx = -1;
         let bestProb = -Infinity;
-        let pickedIdx = -1;
-        const nextTokenRaw = (Number.isFinite(tokenCount) && tokenIndex + 1 < tokenCount)
-            ? activationSource.getTokenString(tokenIndex + 1)
-            : null;
         for (let i = 0; i < limit; i += 1) {
             const entry = logitRow[i];
             const prob = Number(entry?.prob);
@@ -439,16 +593,25 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                 bestProb = prob;
                 bestIdx = i;
             }
-            if (pickedIdx === -1 && nextTokenRaw && typeof entry?.token === 'string' && entry.token === nextTokenRaw) {
-                pickedIdx = i;
-            }
         }
-        const chosenIdx = pickedIdx !== -1 ? pickedIdx : bestIdx;
-        laneRows.push({ laneIdx, logitRow, bestIdx: chosenIdx });
+        const chosenToken = resolveChosenTokenCandidateForToken(activationSource, tokenIndex, {
+            logitLimit: barCount
+        });
+        const chosenIdx = Number.isFinite(chosenToken?.logitEntryIndex) && chosenToken.logitEntryIndex >= 0
+            ? chosenToken.logitEntryIndex
+            : bestIdx;
+        laneRows.push({
+            laneIdx,
+            logitRow,
+            bestIdx: chosenIdx,
+            chosenTokenIndex: Number.isFinite(chosenToken?.tokenIndex)
+                ? Math.floor(chosenToken.tokenIndex)
+                : null
+        });
     }
 
     for (let rowIdx = 0; rowIdx < laneRows.length; rowIdx += 1) {
-        const { laneIdx, logitRow, bestIdx } = laneRows[rowIdx];
+        const { laneIdx, logitRow, bestIdx, chosenTokenIndex } = laneRows[rowIdx];
         const laneZ = laneZs[laneIdx] ?? 0;
 
         for (let i = 0; i < Math.min(barCount, logitRow.length); i += 1) {
@@ -490,14 +653,13 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     chosenEntries.push({
                         laneIdx,
                         entry,
-                        tokenIndex: Number.isFinite(tokenIndices[laneIdx])
-                            ? Math.floor(tokenIndices[laneIdx]) + 1
-                            : null,
+                        tokenIndex: chosenTokenIndex,
                         x: xPos,
                         z: laneZ,
                         baseY,
                         targetHeight: height,
-                        color: barColor
+                        fallbackColor: barColor.clone(),
+                        fallbackIndex: i
                     });
                 }
             } else {
@@ -516,14 +678,13 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     chosenEntries.push({
                         laneIdx,
                         entry,
-                        tokenIndex: Number.isFinite(tokenIndices[laneIdx])
-                            ? Math.floor(tokenIndices[laneIdx]) + 1
-                            : null,
+                        tokenIndex: chosenTokenIndex,
                         x: xPos,
                         z: laneZ,
                         baseY,
                         targetHeight: height,
-                        color: barColor
+                        fallbackColor: barColor.clone(),
+                        fallbackIndex: i
                     });
                 }
             }
@@ -559,6 +720,8 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
     barGroup.userData.baseX = baseX;
     barGroup.userData.barSpacing = barSpacing;
     barGroup.userData.barCount = barCount;
+    barGroup.userData.activationSource = activationSource;
+    barGroup.userData.laneTokenIndices = tokenIndices.slice();
     barGroup.userData.chosenEntries = chosenEntries;
     barGroup.add(instanced);
 

@@ -975,6 +975,33 @@ def parse_token_list(value: Optional[str], label: str) -> List[int]:
         raise ValueError(f"Invalid {label}: expected JSON list or comma-separated ints.") from exc
 
 
+def split_hidden_terminal_token(
+    tokenizer: GPT2TokenizerFast,
+    completion_ids: Sequence[int],
+    *,
+    keep_terminal_eos_pass: bool = False,
+) -> Tuple[List[int], Optional[Dict[str, object]]]:
+    """Hide a trailing GPT-2 EOS token from the visible capture sequence."""
+
+    visible_completion_ids = [int(token_id) for token_id in completion_ids]
+    if keep_terminal_eos_pass or not visible_completion_ids:
+        return visible_completion_ids, None
+
+    eos_token_id = tokenizer.eos_token_id
+    if eos_token_id is None or visible_completion_ids[-1] != int(eos_token_id):
+        return visible_completion_ids, None
+
+    hidden_token_id = int(visible_completion_ids.pop())
+    hidden_token_text = decode_token_text(tokenizer, hidden_token_id)
+    hidden_token_hf = encode_token_texts_hf(tokenizer, [hidden_token_id])[0]
+    return visible_completion_ids, {
+        "token_id": hidden_token_id,
+        "token": hidden_token_text,
+        "token_display": visible_token_text(hidden_token_text),
+        "token_hf": hidden_token_hf,
+    }
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -1035,6 +1062,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--logit-round-decimals", type=int, default=4, help="Round stored logits to this many decimal places (defaults to 4).")
     parser.add_argument("--prob-round-decimals", type=int, default=4, help="Round stored probabilities to this many decimal places.")
     parser.add_argument("--inspect-next-top-k", type=int, default=None, help="Print top-k next-token candidates for the prompt.")
+    parser.add_argument(
+        "--keep-terminal-eos-pass",
+        action="store_true",
+        help="Keep a trailing GPT-2 EOS token in the visible sequence instead of storing it as a hidden terminal chosen token.",
+    )
 
     args = parser.parse_args(argv)
 
@@ -1153,6 +1185,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if completion_text:
                 break
 
+    completion_id_list, hidden_terminal_token = split_hidden_terminal_token(
+        tokenizer,
+        completion_id_list,
+        keep_terminal_eos_pass=args.keep_terminal_eos_pass,
+    )
+    completion_text = tokenizer.decode(completion_id_list, clean_up_tokenization_spaces=False)
     all_token_ids = torch.tensor([prompt_id_list + completion_id_list], dtype=torch.long)
 
     capture_config = CaptureConfig(
@@ -1192,6 +1230,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "token_strings": all_token_strings,
             "token_hf_strings": all_token_hf_strings,
             "token_display_strings": [visible_token_text(token) for token in all_token_strings],
+            **({"hidden_terminal_token": hidden_terminal_token} if hidden_terminal_token else {}),
             "logit_top_k": args.logit_top_k,
             "logit_round_decimals": logit_round_decimals,
             "prob_round_decimals": prob_round_decimals,

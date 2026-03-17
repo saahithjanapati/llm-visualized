@@ -1,3 +1,5 @@
+import { consoleInfo } from './runtimeConsole.js';
+
 function isBrowserWindowAvailable() {
     return typeof window !== 'undefined';
 }
@@ -43,8 +45,8 @@ export function logRandomColorDebug(event, details = null) {
     }
 
     if (payload !== null && payload !== undefined) {
-        console.info(`[RandomColorDebug] ${event}`, payload);
+        consoleInfo(`[RandomColorDebug] ${event}`, payload);
     } else {
-        console.info(`[RandomColorDebug] ${event}`);
+        consoleInfo(`[RandomColorDebug] ${event}`);
     }
 }

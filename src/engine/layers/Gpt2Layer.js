@@ -84,6 +84,10 @@ import { sliceMlpActivationIntoSegments } from './gpt2MlpActivationSegments.js';
 import { computeMlpMatrixPassEmissive } from './gpt2MlpMatrixVisualUtils.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 import {
+    consoleInfo,
+    consoleLog
+} from '../../utils/runtimeConsole.js';
+import {
     applyLayerNormParamVectorForLayer,
     createPrismVectorForLayer,
     getAttentionOutputProjectionDataForLane,
@@ -372,14 +376,14 @@ export default class Gpt2Layer extends BaseLayer {
 
     _debugLayerLifecycleLog(message) {
         if (!this._isLayerLifecycleDebugEnabled()) return;
-        console.log(message);
+        consoleLog(message);
     }
 
     _debugLanePhaseTransition(lane, key, from, to, reason = '') {
         if (!this._isLanePhaseDebugEnabled()) return;
         const laneId = lane && Number.isFinite(lane.laneIndex) ? lane.laneIndex : '?';
         const why = reason ? ` (${reason})` : '';
-        console.info(`[LanePhase][L${this.index} lane ${laneId}] ${key}: ${from || 'na'} -> ${to || 'na'}${why}`);
+        consoleInfo(`[LanePhase][L${this.index} lane ${laneId}] ${key}: ${from || 'na'} -> ${to || 'na'}${why}`);
     }
 
     _setLanePhase(lane, key, nextValue, reason = '') {

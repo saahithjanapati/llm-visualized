@@ -5,6 +5,7 @@ import { BatchedPrismVectorSet } from '../components/BatchedPrismVectorSet.js';
 import { SegmentTrailBatch, StraightLineTrail, mergeTrailsIntoLineSegments } from '../utils/trailUtils.js';
 import { TRAIL_COLOR, TRAIL_MIN_SEGMENT_DISTANCE, TRAIL_OPACITY } from '../utils/trailConstants.js';
 import { logRandomColorDebug } from '../utils/randomColorDebug.js';
+import { consoleLog } from '../utils/runtimeConsole.js';
 
 
 
@@ -77,7 +78,7 @@ function isMhsaDebugEnabled() {
 
 function logMhsaDebug(...args) {
     if (!isMhsaDebugEnabled()) return;
-    console.log(...args);
+    consoleLog(...args);
 }
 
 const SOFTENED_MATRIX_UNIFORMS = {

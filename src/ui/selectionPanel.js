@@ -4,6 +4,7 @@ import { WeightMatrixVisualization } from '../components/WeightMatrixVisualizati
 import { VectorVisualizationInstancedPrism } from '../components/VectorVisualizationInstancedPrism.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { appState } from '../state/appState.js';
+import { consoleInfo } from '../utils/runtimeConsole.js';
 import { createSciFiMaterial, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 import { buildHueRangeOptions, mapAttentionPostScoreToColor, mapValueToColor } from '../utils/colors.js';
 import { resolveLogitEntryText } from '../utils/logitTokenText.js';
@@ -13319,7 +13320,7 @@ export class SelectionPanel {
         const signature = JSON.stringify(payload);
         if (signature !== this._mhsaTokenMatrixCanvasDebugSignature) {
             this._mhsaTokenMatrixCanvasDebugSignature = signature;
-            console.info('MHSA canvas debug state:', payload);
+            consoleInfo('MHSA canvas debug state:', payload);
         }
     }
 

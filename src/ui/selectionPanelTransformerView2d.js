@@ -152,11 +152,15 @@ function resolveView2dSelectedTokenContext({
     semanticTarget = null
 } = {}) {
     const selectedTokenIndex = normalizeView2dTokenChipIndex(semanticTarget?.tokenIndex);
+    const selectedTokenId = normalizeView2dTokenChipIndex(semanticTarget?.tokenId);
+    const selectedTokenLabel = typeof semanticTarget?.tokenLabel === 'string'
+        ? semanticTarget.tokenLabel
+        : '';
     if (!Number.isFinite(selectedTokenIndex)) {
         return {
             tokenIndex: null,
-            tokenId: null,
-            tokenText: ''
+            tokenId: selectedTokenId,
+            tokenText: selectedTokenLabel
         };
     }
 
@@ -183,13 +187,13 @@ function resolveView2dSelectedTokenContext({
         if (typeof resolvedTokenText === 'string') tokenText = resolvedTokenText;
     }
 
-    const selectedTokenId = typeof activationSource?.getTokenId === 'function'
+    const resolvedTokenId = typeof activationSource?.getTokenId === 'function'
         ? normalizeView2dTokenChipIndex(activationSource.getTokenId(selectedTokenIndex))
-        : null;
+        : selectedTokenId;
 
     return {
         tokenIndex: selectedTokenIndex,
-        tokenId: selectedTokenId,
+        tokenId: resolvedTokenId,
         tokenText
     };
 }

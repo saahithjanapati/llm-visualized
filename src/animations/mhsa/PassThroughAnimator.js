@@ -1,9 +1,10 @@
 import { NUM_HEAD_SETS_LAYER } from '../../utils/constants.js';
+import { consoleLog } from '../../utils/runtimeConsole.js';
 import { getSideCopyEntry } from './laneIndex.js';
 
 function logMhsaDebug(...args) {
     if (typeof window === 'undefined' || window.__MHSA_DEBUG !== true) return;
-    console.log(...args);
+    consoleLog(...args);
 }
 
 export class PassThroughAnimator {

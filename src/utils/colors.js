@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { VECTOR_LENGTH } from './constants.js'; // Added import for logging
+import { consoleLog } from './runtimeConsole.js';
 
 const MONO_MIN_LIGHTNESS = 0.45;
 const MONO_MAX_LIGHTNESS = 0.35;
@@ -246,7 +247,7 @@ export function mapValueToColor_LOG(value, index) {
     );
 
     if (shouldLog) {
-        console.log(`mapValueToColor_LOG (idx ${index}, call #${mapValueToColorCallCount}): input=${value !== undefined && value !== null ? value.toFixed(3) : value}`);
+        consoleLog(`mapValueToColor_LOG (idx ${index}, call #${mapValueToColorCallCount}): input=${value !== undefined && value !== null ? value.toFixed(3) : value}`);
     }
 
     // Original logic from mapValueToColor
@@ -260,7 +261,7 @@ export function mapValueToColor_LOG(value, index) {
     const finalColor = new THREE.Color().setHSL(hue, saturation, lightness);
 
     if (shouldLog) {
-        console.log(` -> clamped=${clampedValue.toFixed(3)}, curved=${curved.toFixed(3)}, hue=${hue.toFixed(3)}, L=0.6, RGB=(${finalColor.r.toFixed(3)}, ${finalColor.g.toFixed(3)}, ${finalColor.b.toFixed(3)})`);
+        consoleLog(` -> clamped=${clampedValue.toFixed(3)}, curved=${curved.toFixed(3)}, hue=${hue.toFixed(3)}, L=0.6, RGB=(${finalColor.r.toFixed(3)}, ${finalColor.g.toFixed(3)}, ${finalColor.b.toFixed(3)})`);
     }
     return finalColor;
 }

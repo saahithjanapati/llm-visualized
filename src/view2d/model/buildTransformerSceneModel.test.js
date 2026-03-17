@@ -19,7 +19,8 @@ function createVector(seed = 0, length = D_MODEL) {
 
 function createMockActivationSource({
     promptTokenCount = 2,
-    completionTokenCount = 1
+    completionTokenCount = 1,
+    hiddenTerminalToken = null
 } = {}) {
     const safePromptTokenCount = Math.max(0, Math.floor(promptTokenCount));
     const safeCompletionTokenCount = Math.max(0, Math.floor(completionTokenCount));
@@ -27,13 +28,22 @@ function createMockActivationSource({
     return {
         meta: {
             prompt_tokens: Array.from({ length: safePromptTokenCount }, (_, index) => 101 + index),
-            completion_tokens: Array.from({ length: safeCompletionTokenCount }, (_, index) => 401 + index)
+            completion_tokens: Array.from({ length: safeCompletionTokenCount }, (_, index) => 401 + index),
+            ...(hiddenTerminalToken ? { hidden_terminal_token: hiddenTerminalToken } : {})
         },
         getTokenCount() {
             return tokenCount;
         },
         getTokenId(tokenIndex = 0) {
             return 100 + tokenIndex;
+        },
+        getHiddenTerminalToken() {
+            return hiddenTerminalToken ? {
+                tokenId: hiddenTerminalToken.token_id ?? hiddenTerminalToken.tokenId ?? null,
+                tokenRaw: hiddenTerminalToken.token ?? hiddenTerminalToken.tokenRaw ?? '',
+                tokenDisplay: hiddenTerminalToken.token_display ?? hiddenTerminalToken.tokenDisplay ?? '',
+                tokenHf: hiddenTerminalToken.token_hf ?? hiddenTerminalToken.tokenHf ?? ''
+            } : null;
         },
         getLayerIncoming(_layerIndex = 0, tokenIndex = 0, targetLength = D_MODEL) {
             return createVector(0.1 + tokenIndex, targetLength);
@@ -494,6 +504,43 @@ describe('buildTransformerSceneModel', () => {
         }, 2, { lookup: promptColorState.lookup }).border;
 
         expect(chosenTokenChipNode?.visual?.accent).toBe(expectedAccent);
+    });
+
+    it('uses the hidden terminal token as the final chosen-token chip without creating another visible token row', () => {
+        const scene = buildTransformerSceneModel({
+            activationSource: createMockActivationSource({
+                promptTokenCount: 2,
+                completionTokenCount: 1,
+                hiddenTerminalToken: {
+                    token_id: 50256,
+                    token: '<|endoftext|>',
+                    token_display: '<|endoftext|>'
+                }
+            }),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['Token A', 'Token B', 'Token C'],
+            layerCount: 1
+        });
+
+        const nodes = flattenSceneNodes(scene);
+        const chosenTokenChipNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'chosen-token-chip'
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'output'
+        ));
+        const chosenTokenChipLabelNodes = nodes.filter((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.TEXT
+            && typeof node?.role === 'string'
+            && node.role.startsWith('chosen-token-chip-label')
+            && node?.semantic?.componentKind === 'logits'
+            && node?.semantic?.stage === 'output'
+        ));
+
+        expect(chosenTokenChipNodes).toHaveLength(2);
+        expect(
+            chosenTokenChipLabelNodes.map((node) => String(node?.text || '').replace(/\u00A0/g, ' '))
+        ).toEqual(['NA', 'Token C', '<|endoftext|>']);
     });
 
     it('scales embedding and unembedding stream heights plus the vocab-position gap for denser token windows', () => {

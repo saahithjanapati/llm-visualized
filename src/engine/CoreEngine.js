@@ -11,6 +11,7 @@ import {
 } from '../utils/constants.js';
 import { resolveZoomOutSupersampleCeiling } from '../utils/renderPixelRatioUtils.js';
 import { perfStats } from '../utils/perfStats.js';
+import { consoleInfo } from '../utils/runtimeConsole.js';
 import { refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import {
     TRAIL_LINE_WIDTH,
@@ -1035,7 +1036,7 @@ export class CoreEngine {
                 }
             });
         }
-        console.info('[trail-debug]', {
+        consoleInfo('[trail-debug]', {
             reason,
             dpr,
             rendererPixelRatio: renderRatio,

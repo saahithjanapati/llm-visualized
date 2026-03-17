@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { WeightMatrixVisualization } from '../components/WeightMatrixVisualization.js';
 import { LayerNormalizationVisualization } from '../components/LayerNormalizationVisualization.js';
 import { USE_PRECOMPUTED_GEOMETRIES, USE_GLB_MATERIALS } from './constants.js';
+import { consoleLog } from './runtimeConsole.js';
 
 function isPrecomputedGeometryDebugEnabled() {
     return typeof window !== 'undefined' && window.__PRECOMPUTED_GEOMETRY_DEBUG === true;
@@ -35,7 +36,7 @@ export function loadPrecomputedGeometries(url = '../precomputed_components.glb')
 
     if (!globalToggle || queryDisables) {
         if (debugEnabled) {
-            console.log('[PrecomputedGeometryLoader] Skipping pre-baked geometry load (flag disabled)');
+            consoleLog('[PrecomputedGeometryLoader] Skipping pre-baked geometry load (flag disabled)');
         }
         return Promise.resolve();
     }
@@ -46,7 +47,7 @@ export function loadPrecomputedGeometries(url = '../precomputed_components.glb')
         if (debugEnabled) {
             console.time(timerLabel);
             timed = true;
-            console.log(`[PrecomputedGeometryLoader] Fetching pre-baked geometries from ${url} …`);
+            consoleLog(`[PrecomputedGeometryLoader] Fetching pre-baked geometries from ${url} …`);
         }
 
         const loader = new GLTFLoader();
@@ -72,7 +73,7 @@ export function loadPrecomputedGeometries(url = '../precomputed_components.glb')
 
                 if (timed) {
                     console.timeEnd(timerLabel);
-                    console.log(`[PrecomputedGeometryLoader] Registered ${wmCount} WeightMatrix and ${lnCount} LayerNorm geometries.`);
+                    consoleLog(`[PrecomputedGeometryLoader] Registered ${wmCount} WeightMatrix and ${lnCount} LayerNorm geometries.`);
                 }
                 resolve();
             },

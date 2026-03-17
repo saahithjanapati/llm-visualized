@@ -132,6 +132,10 @@ export function setActivePromptTokenChipEntries(entries = []) {
     return state;
 }
 
+export function getActivePromptTokenChipLookup() {
+    return new Map(activePromptTokenChipLookup);
+}
+
 export function resolveTokenChipColorKey(entry = null, fallbackIndex = 0, { lookup = null } = {}) {
     const explicitColorKey = Number(entry?.colorKey ?? entry?.color_key);
     if (Number.isFinite(explicitColorKey)) {

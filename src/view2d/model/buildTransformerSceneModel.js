@@ -59,6 +59,7 @@ import {
     resolvePromptTokenChipColorState
 } from '../../ui/tokenChipColorUtils.js';
 import { formatTokenLabel } from '../../app/gpt-tower/tokenLabels.js';
+import { resolveHiddenTerminalToken } from '../../utils/captureTokenSelection.js';
 
 const DEFAULT_VISIBLE_TOKEN_COUNT = 5;
 const SUMMARY_MODEL_COLS = 18;
@@ -456,6 +457,7 @@ function resolveUnembeddingOutputTokenRefs(tokenRefs = [], activationSource = nu
 
     const promptTokenCount = resolvePromptTokenCount(activationSource);
     const knownTokenCount = resolveKnownTokenCount(activationSource);
+    const hiddenTerminalToken = resolveHiddenTerminalToken(activationSource);
 
     return safeTokenRefs.map((tokenRef, rowIndex) => {
         const currentTokenIndex = normalizeIndex(tokenRef?.tokenIndex);
@@ -472,6 +474,15 @@ function resolveUnembeddingOutputTokenRefs(tokenRefs = [], activationSource = nu
         );
 
         if (!nextTokenKnown) {
+            if (hiddenTerminalToken && Number.isFinite(currentTokenIndex)) {
+                return {
+                    rowIndex,
+                    tokenIndex: null,
+                    tokenId: hiddenTerminalToken.tokenId,
+                    positionIndex: null,
+                    tokenLabel: hiddenTerminalToken.tokenDisplay || hiddenTerminalToken.tokenRaw
+                };
+            }
             return {
                 rowIndex,
                 displayMode: 'text',
@@ -556,19 +567,33 @@ function resolveChosenTokenChipRefs(tokenRefs = [], activationSource = null) {
             )) || null
             : null
     );
-    const promptWithGeneratedEntries = nextVisibleContinuationRef
+    const hiddenTerminalToken = resolveHiddenTerminalToken(activationSource);
+    const generatedContinuationRef = nextVisibleContinuationRef || (
+        !nextVisibleContinuationRef
+        && hiddenTerminalToken
+        && Number.isFinite(lastVisibleTokenRef?.tokenIndex)
+        && Number.isFinite(resolveKnownTokenCount(activationSource))
+        && Math.floor(lastVisibleTokenRef.tokenIndex) === resolveKnownTokenCount(activationSource) - 1
+            ? {
+                tokenIndex: null,
+                tokenId: hiddenTerminalToken.tokenId,
+                tokenLabel: hiddenTerminalToken.tokenDisplay || hiddenTerminalToken.tokenRaw
+            }
+            : null
+    );
+    const promptWithGeneratedEntries = generatedContinuationRef
         ? buildPromptTokenChipEntries({
             tokenLabels: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenLabel || ''),
             tokenIndices: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenIndex ?? null),
             tokenIds: visibleTokenRefs.map((tokenRef) => tokenRef?.tokenId ?? null),
             generatedToken: {
-                tokenLabel: nextVisibleContinuationRef.tokenLabel,
-                tokenIndex: nextVisibleContinuationRef.tokenIndex,
-                tokenId: nextVisibleContinuationRef.tokenId
+                tokenLabel: generatedContinuationRef.tokenLabel,
+                tokenIndex: generatedContinuationRef.tokenIndex,
+                tokenId: generatedContinuationRef.tokenId
             }
         })
         : [];
-    const promptWithGeneratedColorState = nextVisibleContinuationRef
+    const promptWithGeneratedColorState = generatedContinuationRef
         ? resolvePromptTokenChipColorState(promptWithGeneratedEntries)
         : null;
 

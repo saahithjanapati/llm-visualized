@@ -100,6 +100,34 @@ function normalizeTokenIdArray(values) {
     });
 }
 
+function normalizeTokenText(value) {
+    return typeof value === 'string' && value.length ? value : '';
+}
+
+function normalizeHiddenTerminalToken(rawToken = null) {
+    if (!rawToken || typeof rawToken !== 'object') return null;
+    const tokenId = Number(rawToken.token_id ?? rawToken.tokenId);
+    const resolvedTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
+    const tokenRaw = normalizeTokenText(
+        rawToken.token
+        ?? rawToken.token_raw
+        ?? rawToken.tokenRaw
+        ?? rawToken.token_string
+        ?? rawToken.tokenString
+    );
+    const tokenDisplay = normalizeTokenText(rawToken.token_display ?? rawToken.tokenDisplay);
+    const tokenHf = normalizeTokenText(rawToken.token_hf ?? rawToken.tokenHf);
+    if (!Number.isFinite(resolvedTokenId) && !tokenRaw && !tokenDisplay && !tokenHf) {
+        return null;
+    }
+    return {
+        tokenId: resolvedTokenId,
+        tokenRaw: tokenRaw || tokenDisplay || tokenHf,
+        tokenDisplay: tokenDisplay || tokenRaw || tokenHf,
+        tokenHf
+    };
+}
+
 function inferTriangularTokenCount(flatLength) {
     const length = Number(flatLength);
     if (!Number.isFinite(length) || length <= 0) return 0;
@@ -167,6 +195,7 @@ export class CaptureActivationSource {
             ? [...promptTokenIds, ...completionTokenIds]
             : [];
         this.tokenIds = explicitTokenIds.length ? explicitTokenIds : combinedTokenIds;
+        this.hiddenTerminalToken = normalizeHiddenTerminalToken(this.meta.hidden_terminal_token);
         this.logits = Array.isArray(this.data.logits) ? this.data.logits : [];
         this._laneTokenCache = new Map();
         this._vectorCache = new Map();
@@ -221,6 +250,10 @@ export class CaptureActivationSource {
         if (idx < 0 || idx >= this.tokenIds.length) return null;
         const tokenId = this.tokenIds[idx];
         return Number.isFinite(tokenId) ? tokenId : null;
+    }
+
+    getHiddenTerminalToken() {
+        return this.hiddenTerminalToken ? { ...this.hiddenTerminalToken } : null;
     }
 
     getLogitTopK() {

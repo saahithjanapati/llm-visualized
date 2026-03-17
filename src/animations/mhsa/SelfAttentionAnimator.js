@@ -4,6 +4,7 @@ import { VectorVisualizationInstancedPrism } from '../../components/VectorVisual
 import { mapValueToColor, mapValueToGrayscale, buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 import { logRandomColorDebug } from '../../utils/randomColorDebug.js';
+import { consoleLog } from '../../utils/runtimeConsole.js';
 import {
     MHA_VALUE_SPECTRUM_COLOR,
     MHA_VALUE_HUE_SPREAD,
@@ -23,7 +24,7 @@ import {
 
 function logMhsaDebug(...args) {
     if (typeof window === 'undefined' || window.__MHSA_DEBUG !== true) return;
-    console.log(...args);
+    consoleLog(...args);
 }
 
 function getAttentionRowValue(row = null, keyTokenIndex = null) {

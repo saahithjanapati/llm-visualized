@@ -3,6 +3,7 @@ import { CSG } from 'three-csg-ts';
 import { NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS } from '../utils/constants.js';
 import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
+import { consoleLog } from '../utils/runtimeConsole.js';
 
 // A visualization for the Layer Normalization operation.
 // It renders an extruded ellipse (like a squashed cylinder) with a hollow interior
@@ -490,7 +491,7 @@ export class LayerNormalizationVisualization {
 
         if (isGeometryPerfDebugEnabled()) {
             const dt = (performance.now() - t0).toFixed(1);
-            console.log(`[Perf] LayerNormalizationVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+            consoleLog(`[Perf] LayerNormalizationVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
         }
     }
 

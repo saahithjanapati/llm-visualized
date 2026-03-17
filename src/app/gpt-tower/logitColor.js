@@ -234,3 +234,10 @@ export function getLogitTokenChipColorCss(colorKey, alpha = 1) {
     const opacity = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
     return `rgb(${red} ${green} ${blue} / ${opacity.toFixed(3)})`;
 }
+
+export function getLogitTokenChipColorHex(colorKey) {
+    const paletteSize = LOGIT_TOKEN_CHIP_PALETTE.length;
+    const safeKey = normalizeLogitTokenChipColorKey(colorKey, paletteSize);
+    const [red, green, blue] = LOGIT_TOKEN_CHIP_PALETTE[safeKey] || [255, 255, 255];
+    return (red << 16) | (green << 8) | blue;
+}

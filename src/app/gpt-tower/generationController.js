@@ -26,6 +26,7 @@ import {
     resolveKvPrefillBaseLaneCount
 } from './kvCachePassMode.js';
 import { initTouchClickFallback } from '../../ui/touchClickFallback.js';
+import { resolveChosenTokenCandidateForToken } from '../../utils/captureTokenSelection.js';
 
 const DEFAULT_ADVANCE_SECONDS = 10;
 const KV_DECODE_SINGLE_LANE_TRAIL_WIDTH_MULTIPLIER = 8.0;
@@ -117,31 +118,6 @@ function resolveGeneratedLogitTokenId(entry) {
     return Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
 }
 
-function findMatchingGeneratedLogitEntryIndex(logitRow, {
-    nextTokenRaw = null,
-    nextTokenId = null
-} = {}) {
-    if (!Array.isArray(logitRow) || !logitRow.length) return -1;
-
-    if (Number.isFinite(nextTokenId)) {
-        for (let i = 0; i < logitRow.length; i += 1) {
-            if (resolveGeneratedLogitTokenId(logitRow[i]) === Math.floor(nextTokenId)) {
-                return i;
-            }
-        }
-    }
-
-    if (typeof nextTokenRaw === 'string' && nextTokenRaw.length) {
-        for (let i = 0; i < logitRow.length; i += 1) {
-            if (typeof logitRow[i]?.token === 'string' && logitRow[i].token === nextTokenRaw) {
-                return i;
-            }
-        }
-    }
-
-    return -1;
-}
-
 function buildResolvedGeneratedToken({
     tokenRaw = null,
     tokenId = null,
@@ -190,57 +166,19 @@ export function resolveGeneratedLogitToken(activationSource, laneTokenIndices = 
         ? activationSource.getLogitTopK()
         : null;
     const safeTopK = Number.isFinite(logitTopK) && logitTopK > 0 ? Math.floor(logitTopK) : null;
-    const logitRow = activationSource.getLogitsForToken(lastTokenIndex, safeTopK);
-    if (!Array.isArray(logitRow) || !logitRow.length) return null;
+    const chosenToken = resolveChosenTokenCandidateForToken(activationSource, lastTokenIndex, {
+        logitLimit: safeTopK
+    });
+    if (!chosenToken) return null;
 
-    const tokenCount = typeof activationSource.getTokenCount === 'function'
-        ? activationSource.getTokenCount()
+    const chosenIdx = Number.isFinite(chosenToken.logitEntryIndex) && chosenToken.logitEntryIndex >= 0
+        ? chosenToken.logitEntryIndex
         : 0;
-    const nextTokenIndex = lastTokenIndex + 1;
-    const hasNextToken = Number.isFinite(tokenCount) && nextTokenIndex < tokenCount;
-    const nextTokenRaw = hasNextToken && typeof activationSource.getTokenString === 'function'
-        ? activationSource.getTokenString(nextTokenIndex)
-        : null;
-    const nextTokenId = hasNextToken && typeof activationSource.getTokenId === 'function'
-        ? activationSource.getTokenId(nextTokenIndex)
-        : null;
-
-    let bestIdx = -1;
-    let bestProb = -Infinity;
-    for (let i = 0; i < logitRow.length; i += 1) {
-        const entry = logitRow[i];
-        const prob = Number(entry?.prob);
-        if (Number.isFinite(prob) && prob > bestProb) {
-            bestProb = prob;
-            bestIdx = i;
-        }
-    }
-
-    const matchedNextIdx = hasNextToken
-        ? findMatchingGeneratedLogitEntryIndex(logitRow, {
-            nextTokenRaw,
-            nextTokenId
-        })
-        : -1;
-    if (hasNextToken) {
-        const matchedEntry = matchedNextIdx !== -1 ? logitRow[matchedNextIdx] : null;
-        return buildResolvedGeneratedToken({
-            tokenRaw: nextTokenRaw,
-            tokenId: nextTokenId,
-            tokenIndex: nextTokenIndex,
-            logitEntry: matchedEntry,
-            seedFallbackIndex: matchedNextIdx !== -1 ? matchedNextIdx : nextTokenIndex
-        });
-    }
-
-    const chosenIdx = bestIdx !== -1 ? bestIdx : 0;
-    const chosenEntry = logitRow[chosenIdx];
-    if (!chosenEntry || typeof chosenEntry !== 'object') return null;
     return buildResolvedGeneratedToken({
-        tokenRaw: chosenEntry.token,
-        tokenId: resolveGeneratedLogitTokenId(chosenEntry),
-        tokenIndex: null,
-        logitEntry: chosenEntry,
+        tokenRaw: chosenToken.tokenRaw || chosenToken.tokenDisplay,
+        tokenId: chosenToken.tokenId,
+        tokenIndex: chosenToken.tokenIndex,
+        logitEntry: chosenToken.logitEntry,
         seedFallbackIndex: chosenIdx
     });
 }

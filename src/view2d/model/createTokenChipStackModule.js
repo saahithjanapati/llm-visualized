@@ -160,6 +160,7 @@ export function buildTokenChipStackModule({
         const tokenMetadata = displayMode === 'chip'
             ? mergeMetadata(
                 tokenLabel.length ? { tokenLabel } : null,
+                Number.isFinite(tokenId) ? { tokenId } : null,
                 Number.isFinite(positionIndex) ? { positionIndex } : null
             )
             : null;
@@ -236,6 +237,7 @@ export function buildTokenChipStackModule({
             role: chipRole,
             rowIndex: index,
             ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+            ...(Number.isFinite(tokenId) ? { tokenId } : {}),
             ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
         });
 
@@ -268,6 +270,7 @@ export function buildTokenChipStackModule({
                 role: chipLabelRole,
                 rowIndex: index,
                 ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                ...(Number.isFinite(tokenId) ? { tokenId } : {}),
                 ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
             }),
             text: displayText,
@@ -293,6 +296,7 @@ export function buildTokenChipStackModule({
                     role: chipGroupRole,
                     rowIndex: index,
                     ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                    ...(Number.isFinite(tokenId) ? { tokenId } : {}),
                     ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
                 }),
                 direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,

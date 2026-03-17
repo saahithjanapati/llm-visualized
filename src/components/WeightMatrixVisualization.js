@@ -4,6 +4,7 @@ import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.j
 import { QUALITY_PRESET, NUM_VECTOR_LANES, VECTOR_DEPTH_SPACING, USE_GLB_MATERIALS, USE_INSTANCED_MATRIX_SLICES } from '../utils/constants.js';
 import { createSciFiMaterial, updateSciFiDimensions, updateSciFiMaterialColor } from '../utils/sciFiMaterial.js';
 import { scaleGlobalEmissiveIntensity } from '../utils/materialUtils.js';
+import { consoleLog } from '../utils/runtimeConsole.js';
 
 // ------------------------------------------------------------------
 // Geometry cache (module-level) – keyed by a stringified set of the main
@@ -515,7 +516,7 @@ export class WeightMatrixVisualization {
 
         if (isGeometryPerfDebugEnabled()) {
             const dt = (performance.now() - t0).toFixed(1);
-            console.log(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
+            consoleLog(`[Perf] WeightMatrixVisualization (${cacheHit ? 'cache' : 'built'}) – ${dt} ms.`);
         }
 
         // Ensure transparent objects are rendered in a predictable order to
@@ -854,7 +855,7 @@ export class WeightMatrixVisualization {
     updateData(data) {
         // Placeholder for updating visualization based on data
         if (isGeometryPerfDebugEnabled()) {
-            console.log('Updating weight matrix with data:', data);
+            consoleLog('Updating weight matrix with data:', data);
         }
         // Example: Change color based on data
         // const averageValue = data.reduce((sum, val) => sum + val, 0) / data.length;

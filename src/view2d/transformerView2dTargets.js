@@ -610,6 +610,14 @@ function resolveSemanticPositionIndex(hit = null, tokenIndex = null) {
     return Number.isFinite(tokenIndex) ? tokenIndex + 1 : null;
 }
 
+function resolveSemanticTokenId(hit = null) {
+    const rawTokenId = hit?.entry?.semantic?.tokenId
+        ?? hit?.node?.semantic?.tokenId
+        ?? hit?.entry?.metadata?.tokenId
+        ?? hit?.node?.metadata?.tokenId;
+    return Number.isFinite(rawTokenId) ? Math.floor(rawTokenId) : null;
+}
+
 function buildSemanticTokenChipLabel(tokenLabel = '', tokenIndex = null) {
     const safeTokenLabel = typeof tokenLabel === 'string' ? tokenLabel.trim() : '';
     const fallbackLabel = Number.isFinite(tokenIndex)
@@ -732,6 +740,7 @@ export function buildSemanticNodeHoverPayload(hit = null) {
         || role === 'chosen-token-chip-group'
     ) {
         const tokenIndex = normalizeOptionalIndex(semantic.tokenIndex);
+        const tokenId = resolveSemanticTokenId(hit);
         const tokenLabel = resolveSemanticTokenLabel(hit, tokenIndex);
         const positionIndex = resolveSemanticPositionIndex(hit, tokenIndex);
         const label = buildSemanticChosenTokenChipLabel(tokenLabel, tokenIndex);
@@ -739,12 +748,14 @@ export function buildSemanticNodeHoverPayload(hit = null) {
             label,
             info: {
                 ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                ...(Number.isFinite(tokenId) ? { tokenId } : {}),
                 ...(tokenLabel.length ? { tokenLabel } : {}),
                 ...(Number.isFinite(positionIndex) ? { positionIndex } : {}),
                 activationData: {
                     label,
                     stage: 'generation.chosen',
                     ...(Number.isFinite(tokenIndex) ? { tokenIndex } : {}),
+                    ...(Number.isFinite(tokenId) ? { tokenId } : {}),
                     ...(tokenLabel.length ? { tokenLabel } : {}),
                     ...(Number.isFinite(positionIndex) ? { positionIndex } : {})
                 }
