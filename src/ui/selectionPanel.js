@@ -1834,7 +1834,7 @@ function resolveLogitEntryProbability(entry) {
     return Number.isFinite(rawProbability) ? rawProbability : null;
 }
 
-function resolveLogitPreviewTokenText(label, selectionInfo) {
+export function resolveLogitPreviewTokenText(label, selectionInfo) {
     const entry = resolveLogitSelectionEntry(selectionInfo);
     const previewTokenId = resolveLogitSelectionTokenId(label, entry, selectionInfo);
     const incompleteDisplay = getIncompleteUtf8TokenDisplay(previewTokenId);
@@ -1844,7 +1844,11 @@ function resolveLogitPreviewTokenText(label, selectionInfo) {
         const formatted = formatTokenLabelForPreview(sanitizeLogitTokenForPreview(entryTokenText));
         if (formatted) return formatted;
     }
-    if (Number.isFinite(previewTokenId)) return `#${previewTokenId}`;
+    const explicitTokenLabel = findUserDataString(selectionInfo, 'tokenLabel');
+    if (typeof explicitTokenLabel === 'string' && explicitTokenLabel.trim().length) {
+        const formatted = formatTokenLabelForPreview(sanitizeLogitTokenForPreview(explicitTokenLabel));
+        if (formatted) return formatted;
+    }
     const labelTokenMatch = String(label || '').match(/token\s+"([^"]+)"/i);
     if (labelTokenMatch && labelTokenMatch[1]) {
         const formatted = formatTokenLabelForPreview(labelTokenMatch[1]);
@@ -1855,6 +1859,7 @@ function resolveLogitPreviewTokenText(label, selectionInfo) {
         const formatted = formatTokenLabelForPreview(chosenTokenMatch[1]);
         if (formatted) return formatted;
     }
+    if (Number.isFinite(previewTokenId)) return `#${previewTokenId}`;
     const labelIdMatch = String(label || '').match(/\bid\s+(-?\d+)/i);
     if (labelIdMatch) {
         const parsed = Number(labelIdMatch[1]);

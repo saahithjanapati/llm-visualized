@@ -105,6 +105,12 @@ function applyChosenLogitSelectionMetadata(object, chosen, labelText, { setName 
     object.userData = object.userData || {};
     object.userData.label = `Chosen token: ${labelText}`;
     if (setName) object.name = `Chosen token: ${labelText}`;
+    const tokenLabel = (typeof chosen?.tokenLabel === 'string' && chosen.tokenLabel.length)
+        ? chosen.tokenLabel
+        : ((typeof labelText === 'string' && labelText.length) ? labelText : '');
+    if (tokenLabel) {
+        object.userData.tokenLabel = tokenLabel;
+    }
     object.userData.logitEntry = chosen.entry;
     if (Number.isFinite(chosen.tokenIndex)) {
         object.userData.tokenIndex = Math.floor(chosen.tokenIndex);
@@ -303,6 +309,40 @@ function refreshChosenLabelGroupColors(barGroup) {
     });
 }
 
+function refreshChosenBarGroupColors(barGroup) {
+    const instancedMesh = barGroup?.userData?.instancedMesh;
+    const chosenEntries = Array.isArray(barGroup?.userData?.chosenEntries)
+        ? barGroup.userData.chosenEntries
+        : [];
+    if (!instancedMesh || !instancedMesh.isInstancedMesh || !chosenEntries.length) return;
+
+    const activationSource = barGroup?.userData?.activationSource ?? null;
+    const laneTokenIndices = Array.isArray(barGroup?.userData?.laneTokenIndices)
+        ? barGroup.userData.laneTokenIndices
+        : [];
+    let changed = false;
+
+    chosenEntries.forEach((chosen, chosenEntryIndex) => {
+        if (chosen?.useChipColor !== true) return;
+        const instanceIndex = Number(chosen?.instanceIndex);
+        if (!Number.isFinite(instanceIndex) || instanceIndex < 0) return;
+        const color = resolveChosenLogitDisplayColor({
+            activationSource,
+            laneTokenIndices,
+            chosenEntry: chosen.entry,
+            chosenTokenIndex: chosen.tokenIndex,
+            fallbackIndex: chosen.fallbackIndex ?? chosenEntryIndex,
+            fallbackColor: chosen.fallbackColor ?? 0xffffff
+        });
+        instancedMesh.setColorAt(Math.floor(instanceIndex), color);
+        changed = true;
+    });
+
+    if (changed && instancedMesh.instanceColor) {
+        instancedMesh.instanceColor.needsUpdate = true;
+    }
+}
+
 function buildChosenLogitLabelGroup(barGroup, font) {
     const chosenEntries = barGroup?.userData?.chosenEntries;
     if (!Array.isArray(chosenEntries) || !chosenEntries.length) return null;
@@ -337,7 +377,12 @@ function buildChosenLogitLabelGroup(barGroup, font) {
     const sideGap = LOGIT_LABEL_SIDE_GAP;
 
     chosenEntries.forEach((chosen, chosenEntryIndex) => {
-        const labelText = resolveLogitLabelText(chosen.entry);
+        const labelText = (
+            typeof chosen?.tokenLabel === 'string'
+            && chosen.tokenLabel.length
+        )
+            ? chosen.tokenLabel
+            : resolveLogitLabelText(chosen.entry);
         if (!labelText) return;
         const labelColor = resolveChosenLogitDisplayColor({
             activationSource,
@@ -451,6 +496,7 @@ function ensureChosenLabelGroup(barGroup) {
 function revealChosenLabelGroup(barGroup) {
     if (!barGroup || !barGroup.userData) return;
     barGroup.userData.revealChosenLabels = true;
+    refreshChosenBarGroupColors(barGroup);
     const labelGroup = barGroup.userData.chosenLabelGroup;
     if (labelGroup) {
         refreshChosenLabelGroupColors(barGroup);
@@ -597,13 +643,23 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
         const chosenToken = resolveChosenTokenCandidateForToken(activationSource, tokenIndex, {
             logitLimit: barCount
         });
-        const chosenIdx = Number.isFinite(chosenToken?.logitEntryIndex) && chosenToken.logitEntryIndex >= 0
-            ? chosenToken.logitEntryIndex
-            : bestIdx;
+        const hasVisibleChosenEntry = Number.isFinite(chosenToken?.logitEntryIndex) && chosenToken.logitEntryIndex >= 0;
+        const chosenIdx = hasVisibleChosenEntry ? chosenToken.logitEntryIndex : bestIdx;
+        const chosenTokenLabel = hasVisibleChosenEntry
+            ? formatTokenLabel(
+                sanitizeLogitToken(
+                    chosenToken?.tokenDisplay
+                    || chosenToken?.tokenRaw
+                    || ''
+                )
+            )
+            : '';
         laneRows.push({
             laneIdx,
             logitRow,
             bestIdx: chosenIdx,
+            chosenTokenLabel,
+            useChosenColor: hasVisibleChosenEntry,
             chosenTokenIndex: Number.isFinite(chosenToken?.tokenIndex)
                 ? Math.floor(chosenToken.tokenIndex)
                 : null
@@ -611,7 +667,14 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
     }
 
     for (let rowIdx = 0; rowIdx < laneRows.length; rowIdx += 1) {
-        const { laneIdx, logitRow, bestIdx, chosenTokenIndex } = laneRows[rowIdx];
+        const {
+            laneIdx,
+            logitRow,
+            bestIdx,
+            chosenTokenIndex,
+            chosenTokenLabel,
+            useChosenColor
+        } = laneRows[rowIdx];
         const laneZ = laneZs[laneIdx] ?? 0;
 
         for (let i = 0; i < Math.min(barCount, logitRow.length); i += 1) {
@@ -620,10 +683,21 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
             if (!Number.isFinite(prob)) continue;
             const height = computeLogitBarHeight(prob, globalMaxProb);
             const seed = resolveLogitTokenSeed(entry, i);
-            const barColor = getBrightTokenColor(seed, colorCache);
+            let barColor = getBrightTokenColor(seed, colorCache);
             const startHeight = Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
             const xPos = baseX + i * barSpacing;
             if (entry) {
+                const isChosenBar = i === bestIdx && laneIdx === lastLaneIdx;
+                if (isChosenBar && useChosenColor) {
+                    barColor = resolveChosenLogitDisplayColor({
+                        activationSource,
+                        laneTokenIndices: tokenIndices,
+                        chosenEntry: entry,
+                        chosenTokenIndex,
+                        fallbackIndex: i,
+                        fallbackColor: barColor
+                    });
+                }
                 const tokenTextRaw = resolveLogitEntryText(entry);
                 const tokenText = tokenTextRaw
                     ? formatTokenLabel(tokenTextRaw.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
@@ -653,7 +727,10 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     chosenEntries.push({
                         laneIdx,
                         entry,
+                        instanceIndex,
+                        tokenLabel: chosenTokenLabel,
                         tokenIndex: chosenTokenIndex,
+                        useChipColor: useChosenColor,
                         x: xPos,
                         z: laneZ,
                         baseY,
@@ -678,7 +755,10 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                     chosenEntries.push({
                         laneIdx,
                         entry,
+                        instanceIndex,
+                        tokenLabel: chosenTokenLabel,
                         tokenIndex: chosenTokenIndex,
+                        useChipColor: useChosenColor,
                         x: xPos,
                         z: laneZ,
                         baseY,
