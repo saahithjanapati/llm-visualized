@@ -2178,6 +2178,21 @@ function extractPreviewVectorData(selectionInfo) {
     return null;
 }
 
+function extractExplicitPreviewVectorData(selectionInfo) {
+    const candidates = [
+        selectionInfo?.info?.activationData?.values,
+        selectionInfo?.info?.values,
+        selectionInfo?.info?.vectorData
+    ];
+    for (const candidate of candidates) {
+        const normalized = normalizePreviewVectorDataArray(candidate);
+        if (normalized?.length) {
+            return normalized;
+        }
+    }
+    return null;
+}
+
 function normalizePreviewVectorDataArray(values) {
     if (!(Array.isArray(values) || ArrayBuffer.isView(values)) || values.length <= 0) {
         return null;
@@ -7094,6 +7109,21 @@ export class SelectionPanel {
     }
 
     _preferTransformerView2dFallbackVectorSelection(selection = null, fallbackSelection = null) {
+        const fallbackStage = normalizePostLayerNormResidualStage(
+            getActivationDataFromSelection(fallbackSelection)?.stage
+            || getActivationDataFromSelection(fallbackSelection)?.sourceStage
+            || ''
+        );
+        const fallbackHasHeadContext = Number.isFinite(findUserDataNumber(fallbackSelection, 'headIndex'));
+        const fallbackExplicitValues = extractExplicitPreviewVectorData(fallbackSelection);
+        if (
+            fallbackStage
+            && fallbackHasHeadContext
+            && fallbackExplicitValues?.length
+        ) {
+            return fallbackSelection || selection;
+        }
+
         if (!this._isBroadTransformerView2dSceneVectorSelection(selection)) {
             return selection;
         }

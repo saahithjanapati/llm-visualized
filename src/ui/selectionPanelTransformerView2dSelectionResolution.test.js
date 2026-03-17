@@ -526,6 +526,85 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.kind).toBe('vector');
     });
 
+    it('keeps data-backed MHSA detail x_ln selections on their sampled residual values instead of narrowing to head-width runtime copies', () => {
+        const panel = createPanelContext();
+        const headVectorMesh = createSceneNode('Query Vector', {
+            isVector: true,
+            activationData: {
+                label: 'Query Vector',
+                stage: 'qkv.q',
+                layerIndex: 1,
+                headIndex: 4,
+                tokenIndex: 2,
+                tokenLabel: 'source'
+            }
+        });
+        const headVectorGroup = new THREE.Object3D();
+        headVectorGroup.userData = {
+            isVector: true,
+            label: 'Query Vector'
+        };
+        headVectorGroup.add(headVectorMesh);
+        const headVectorRef = {
+            isBatchedVectorRef: false,
+            instanceCount: 1,
+            rawData: [0.25],
+            userData: {
+                activationData: {
+                    label: 'Query Vector',
+                    stage: 'qkv.q',
+                    layerIndex: 1,
+                    headIndex: 4,
+                    tokenIndex: 2,
+                    tokenLabel: 'source'
+                }
+            },
+            mesh: headVectorMesh,
+            group: headVectorGroup
+        };
+        panel.engine._layers = [
+            null,
+            {
+                lanes: [{
+                    tokenIndex: 2,
+                    tokenLabel: 'source',
+                    sideCopies: [{
+                        headIndex: 4,
+                        type: 'Q',
+                        vec: headVectorRef
+                    }]
+                }]
+            }
+        ];
+
+        const selection = {
+            label: 'Post LayerNorm 1 Residual Vector',
+            info: {
+                activationData: {
+                    label: 'Post LayerNorm 1 Residual Vector',
+                    stage: 'ln1.output',
+                    sourceStage: 'ln1.shift',
+                    layerIndex: 1,
+                    headIndex: 4,
+                    tokenIndex: 2,
+                    tokenLabel: 'source',
+                    values: [0.7, 0.8, 0.9]
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.label).toBe('Post LayerNorm 1 Residual Vector');
+        expect(resolved?.object).toBeUndefined();
+        expect(resolved?.hit).toBeUndefined();
+        expect(resolved?.info?.vectorRef).toBeUndefined();
+        expect(resolved?.info?.activationData?.stage).toBe('ln1.output');
+        expect(resolved?.info?.activationData?.sourceStage).toBe('ln1.shift');
+        expect(resolved?.info?.activationData?.values).toEqual([0.7, 0.8, 0.9]);
+        expect(resolved?.info?.headIndex).toBe(4);
+    });
+
     it('keeps layer norm input residual selections on activation-source data when only a broad scene vector exists', () => {
         const scene = new THREE.Scene();
         const sharedResidualMesh = new THREE.InstancedMesh(
