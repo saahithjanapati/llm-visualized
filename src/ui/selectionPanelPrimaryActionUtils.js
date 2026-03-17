@@ -1,4 +1,4 @@
-import { TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN } from './selectionPanelTransformerView2d.js';
+import { TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN } from './selectionPanelTransformerView2dConstants.js';
 
 const DEFAULT_TRANSFORMER_VIEW2D_ACTION_LABEL = 'View in 2D / matrix form';
 

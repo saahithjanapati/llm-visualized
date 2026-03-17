@@ -12,6 +12,7 @@ import {
 import { resolveZoomOutSupersampleCeiling } from '../utils/renderPixelRatioUtils.js';
 import { perfStats } from '../utils/perfStats.js';
 import { consoleInfo } from '../utils/runtimeConsole.js';
+import { loadStatsConstructor } from '../utils/statsJsLoader.js';
 import { refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import {
     TRAIL_LINE_WIDTH,
@@ -559,23 +560,10 @@ export class CoreEngine {
             };
         }
 
-        // ────────────────────────────────────────────────────────────────────
-        // Performance stats overlay (FPS, MS, MB) – injected if Stats.js is
-        // available on the global scope.  This keeps the CoreEngine agnostic
-        // of the hosting environment while providing useful runtime metrics
-        // during interactive demos.
-        // -------------------------------------------------------------------
         this._stats = null;
-        if (typeof Stats !== 'undefined') {
-            this._stats = new Stats();
-            this._stats.showPanel(0); // 0 = FPS, 1 = ms/frame, 2 = MB
-            this._stats.dom.style.position = 'fixed';
-            this._stats.dom.style.left = '0px';
-            this._stats.dom.style.top = 'auto';
-            this._stats.dom.style.bottom = '0px';
-            this._stats.dom.style.pointerEvents = 'none';
-            this._stats.dom.style.display = this._devMode ? 'block' : 'none';
-            document.body.appendChild(this._stats.dom);
+        this._statsLoadPromise = null;
+        if (this._devMode) {
+            void this._ensureStatsOverlay();
         }
 
         // Kick off RAF loop
@@ -620,9 +608,44 @@ export class CoreEngine {
 
     setDevMode(enabled) {
         this._devMode = !!enabled;
+        if (this._devMode) {
+            void this._ensureStatsOverlay();
+        }
         if (this._stats && this._stats.dom) {
             this._stats.dom.style.display = this._devMode ? 'block' : 'none';
         }
+    }
+
+    async _ensureStatsOverlay() {
+        if (this._stats) return this._stats;
+        if (this._statsLoadPromise) return this._statsLoadPromise;
+
+        this._statsLoadPromise = loadStatsConstructor()
+            .then((StatsConstructor) => {
+                if (!this._devMode || this._stats || typeof StatsConstructor !== 'function') {
+                    return this._stats;
+                }
+                const stats = new StatsConstructor();
+                stats.showPanel(0); // 0 = FPS, 1 = ms/frame, 2 = MB
+                stats.dom.style.position = 'fixed';
+                stats.dom.style.left = '0px';
+                stats.dom.style.top = 'auto';
+                stats.dom.style.bottom = '0px';
+                stats.dom.style.pointerEvents = 'none';
+                stats.dom.style.display = this._devMode ? 'block' : 'none';
+                document.body.appendChild(stats.dom);
+                this._stats = stats;
+                return stats;
+            })
+            .catch((error) => {
+                console.warn('Failed to load Stats.js overlay:', error);
+                return null;
+            })
+            .finally(() => {
+                this._statsLoadPromise = null;
+            });
+
+        return this._statsLoadPromise;
     }
 
     setCameraDebugEnabled(enabled) {

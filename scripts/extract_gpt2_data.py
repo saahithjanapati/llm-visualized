@@ -728,7 +728,7 @@ class CaptureConfig:
     mlp_stride: int = 32
     quantisation: str = "float16"
     round_decimals: Optional[int] = None
-    attention_score_round_decimals: Optional[int] = 4
+    attention_score_round_decimals: Optional[int] = 3
     attention_scores_format: str = "packed"
     store_pre_attention_upper: bool = True
     store_embedding_sum: bool = False
@@ -1028,7 +1028,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--mlp-stride", type=int, default=64, help="Stride for 3072-d MLP activations.")
     parser.add_argument("--quantisation", type=str, default="float16", choices=["float16", "float32", "int8"], help="Quantisation mode for stored activations.")
     parser.add_argument("--round-decimals", type=int, default=2, help="Round stored floats to this many decimal places.")
-    parser.add_argument("--attention-score-round-decimals", type=int, default=4, help="Round stored attention scores to this many decimal places.")
+    parser.add_argument("--attention-score-round-decimals", type=int, default=3, help="Round stored attention scores to this many decimal places.")
     parser.add_argument(
         "--attention-scores-format",
         type=str,

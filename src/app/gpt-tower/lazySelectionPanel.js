@@ -127,8 +127,9 @@ export function createLazySelectionPanel(options = {}) {
     const withPanel = async (mode, action) => {
         try {
             const resolvedPanel = await loadPanel({ mode });
+            const result = await action(resolvedPanel);
             hideSelectionPanelLoadingState();
-            return action(resolvedPanel);
+            return result;
         } catch (error) {
             hideSelectionPanelLoadingState({ closePanel: true });
             throw error;

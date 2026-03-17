@@ -86,9 +86,10 @@ import {
     normalizeTransformerView2dDetailInteractionTargets,
     resolveTransformerView2dDetailInteractionHoverState
 } from '../view2d/transformerView2dDetailInteractionTargets.js';
+import { TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN } from './selectionPanelTransformerView2dConstants.js';
 
-export const TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN = 'open-transformer-view2d';
 export {
+    TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN,
     describeTransformerView2dTarget,
     resolveTransformerView2dActionContext,
     resolveTransformerView2dOpenTransitionMode,

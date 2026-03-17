@@ -68,13 +68,14 @@ import {
     resolveSoftmaxPreviewContext,
     setDescriptionSoftmaxAction
 } from './selectionPanelSoftmaxPreview.js';
+import { TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN } from './selectionPanelTransformerView2dConstants.js';
 import {
-    createTransformerView2dDetailView,
     describeTransformerView2dTarget,
-    resolveTransformerView2dActionContext,
-    syncTransformerView2dRoute,
-    TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN
-} from './selectionPanelTransformerView2d.js';
+    resolveTransformerView2dActionContext
+} from '../view2d/transformerView2dTargets.js';
+import {
+    syncTransformerView2dRoute
+} from '../view2d/transformerView2dRoute.js';
 import {
     normalizeTransformerView2dDetailInteractionTargets,
     resolveTransformerView2dDetailInteractionTargets
@@ -338,6 +339,16 @@ import {
     LN_PARAMS
 } from '../animations/LayerAnimationConstants.js';
 import { getLayerNormParamData } from '../data/layerNormParams.js';
+import './selectionPanel.css';
+
+let transformerView2dDetailViewModulePromise = null;
+
+function loadTransformerView2dDetailViewModule() {
+    if (!transformerView2dDetailViewModulePromise) {
+        transformerView2dDetailViewModulePromise = import('./selectionPanelTransformerView2d.js');
+    }
+    return transformerView2dDetailViewModulePromise;
+}
 import {
     getAttentionBiasVectorSample,
     getAttentionBiasHeadSample,
@@ -3890,17 +3901,8 @@ export class SelectionPanel {
         this._softmaxDetailView = createSoftmaxDetailView(this.panel);
         this._softmaxDetailOpen = false;
         this._softmaxSourceSelection = null;
-        this._transformerView2dDetailView = createTransformerView2dDetailView(this.panel, {
-            onExitTo3d: () => {
-                this.close({ clearHistory: false });
-            },
-            onOpenSelection: (selection) => {
-                return this._openTransformerView2dCanvasSelection(selection);
-            },
-            onCloseSelection: () => {
-                return this._closeTransformerView2dSelectionSidebar();
-            }
-        });
+        this._transformerView2dDetailView = null;
+        this._transformerView2dDetailViewPromise = null;
         this._transformerView2dDetailOpen = false;
         this._transformerView2dSourceSelection = null;
         this._currentTransformerView2dContext = null;
@@ -9040,7 +9042,13 @@ export class SelectionPanel {
             return this._openSoftmaxDetailPreview();
         }
         if (action === TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN) {
-            return this._openTransformerView2dPreview();
+            const openResult = this._openTransformerView2dPreview();
+            if (openResult && typeof openResult.then === 'function') {
+                void openResult.catch((error) => {
+                    console.error('Failed to open transformer 2D view:', error);
+                });
+            }
+            return true;
         }
         if (action === MHSA_INFO_PANEL_ACTION_OPEN) {
             return this._openMhsaInfoFromAction();
@@ -9128,6 +9136,40 @@ export class SelectionPanel {
             this._updateHistoryNavigationControls();
         }
         return true;
+    }
+
+    async _ensureTransformerView2dDetailView() {
+        if (this._transformerView2dDetailView) {
+            return this._transformerView2dDetailView;
+        }
+        if (this._transformerView2dDetailViewPromise) {
+            return this._transformerView2dDetailViewPromise;
+        }
+
+        this._transformerView2dDetailViewPromise = loadTransformerView2dDetailViewModule()
+            .then(({ createTransformerView2dDetailView }) => {
+                if (this._transformerView2dDetailView) {
+                    return this._transformerView2dDetailView;
+                }
+                const detailView = createTransformerView2dDetailView(this.panel, {
+                    onExitTo3d: () => {
+                        this.close({ clearHistory: false });
+                    },
+                    onOpenSelection: (selection) => {
+                        return this._openTransformerView2dCanvasSelection(selection);
+                    },
+                    onCloseSelection: () => {
+                        return this._closeTransformerView2dSelectionSidebar();
+                    }
+                });
+                this._transformerView2dDetailView = detailView;
+                return detailView;
+            })
+            .finally(() => {
+                this._transformerView2dDetailViewPromise = null;
+            });
+
+        return this._transformerView2dDetailViewPromise;
     }
 
     openTransformerView2d({
@@ -9323,7 +9365,16 @@ export class SelectionPanel {
         return true;
     }
 
-    _openTransformerView2dPreview({
+    _openTransformerView2dPreview(args = {}) {
+        if (this._transformerView2dDetailView) {
+            return this._openTransformerView2dPreviewWithDetailView(this._transformerView2dDetailView, args);
+        }
+        return this._ensureTransformerView2dDetailView().then((detailView) => {
+            return this._openTransformerView2dPreviewWithDetailView(detailView, args);
+        });
+    }
+
+    _openTransformerView2dPreviewWithDetailView(detailView, {
         fromHistory = false,
         sourceSelection = null,
         view2dContext = null,
@@ -9380,8 +9431,8 @@ export class SelectionPanel {
         this._setSubtitleTertiaryText('Prototype view. Drag or use one finger to pan, and pinch or scroll to zoom.');
         this.open();
         this._setHoverLabelSuppression(true);
-        this._transformerView2dDetailView?.setVisible(true);
-        this._transformerView2dDetailView?.open({
+        detailView?.setVisible(true);
+        detailView?.open({
             activationSource: this.activationSource,
             tokenIndices: Array.isArray(this.attentionTokenIndices) ? this.attentionTokenIndices : this.laneTokenIndices,
             tokenLabels: Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels : this.tokenLabels,
@@ -9400,7 +9451,7 @@ export class SelectionPanel {
         if (shouldAutoOpenSelectionSidebar) {
             this._showTransformerView2dSelectionSidebar({ scrollToTop: true });
             if (selectionSidebarHeaderContent) {
-                this._transformerView2dDetailView?.setSelectionSidebarHeaderContent?.(
+                detailView?.setSelectionSidebarHeaderContent?.(
                     selectionSidebarHeaderContent
                 );
             }
