@@ -4306,7 +4306,10 @@ export class SelectionPanel {
     _resolveSelectionPrimaryActionConfig({
         view2dContext = null
     } = {}) {
-        return resolveSelectionPrimaryActionConfig({ view2dContext });
+        return resolveSelectionPrimaryActionConfig({
+            view2dContext,
+            isSmallScreen: this._isSmallScreen()
+        });
     }
 
     _setCopyContextButtonLabel(text) {
@@ -5625,6 +5628,9 @@ export class SelectionPanel {
         } else {
             document.body.classList.remove('detail-mobile-focus');
         }
+        this._setTransformerView2dActionButtonState(this._resolveSelectionPrimaryActionConfig({
+            view2dContext: this._currentTransformerView2dContext
+        }));
     }
 
     _syncSceneShift({ immediate = false } = {}) {

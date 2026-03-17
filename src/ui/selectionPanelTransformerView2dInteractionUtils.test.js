@@ -9,19 +9,19 @@ import {
 } from './selectionPanelTransformerView2dInteractionUtils.js';
 
 describe('selectionPanelTransformerView2dInteractionUtils', () => {
-    it('uses a tighter click slop for touch pointers', () => {
+    it('uses a more forgiving click slop for touch pointers', () => {
         expect(resolveView2dClickSlopPx('mouse')).toBe(6);
-        expect(resolveView2dClickSlopPx('touch')).toBe(2);
+        expect(resolveView2dClickSlopPx('touch')).toBe(12);
     });
 
-    it('treats short touch drags as pans before desktop would', () => {
+    it('allows minor touch drift without suppressing taps', () => {
         expect(hasView2dPointerExceededClickSlop({
             pointerType: 'touch',
             startClientX: 100,
             startClientY: 120,
             clientX: 103,
             clientY: 120
-        })).toBe(true);
+        })).toBe(false);
 
         expect(hasView2dPointerExceededClickSlop({
             pointerType: 'mouse',
@@ -30,6 +30,16 @@ describe('selectionPanelTransformerView2dInteractionUtils', () => {
             clientX: 103,
             clientY: 120
         })).toBe(false);
+    });
+
+    it('still converts larger touch drifts into pans', () => {
+        expect(hasView2dPointerExceededClickSlop({
+            pointerType: 'touch',
+            startClientX: 100,
+            startClientY: 120,
+            clientX: 113,
+            clientY: 120
+        })).toBe(true);
     });
 
     it('still allows stationary touch taps to behave like clicks', () => {
@@ -42,7 +52,7 @@ describe('selectionPanelTransformerView2dInteractionUtils', () => {
         })).toBe(false);
     });
 
-    it('waits for touch drags to exceed slop before panning', () => {
+    it('waits for touch drags to exceed the larger slop before panning', () => {
         expect(resolveView2dPointerMoveIntent({
             pointerType: 'touch',
             startClientX: 100,
@@ -68,6 +78,24 @@ describe('selectionPanelTransformerView2dInteractionUtils', () => {
             previousClientX: 101,
             previousClientY: 120,
             clientX: 103,
+            clientY: 120,
+            moved: false,
+            suppressClick: false
+        })).toEqual({
+            deltaX: 2,
+            deltaY: 0,
+            moved: false,
+            suppressClick: false,
+            shouldPan: false
+        });
+
+        expect(resolveView2dPointerMoveIntent({
+            pointerType: 'touch',
+            startClientX: 100,
+            startClientY: 120,
+            previousClientX: 111,
+            previousClientY: 120,
+            clientX: 113,
             clientY: 120,
             moved: false,
             suppressClick: false

@@ -1,10 +1,21 @@
+function isSmallScreenViewport() {
+    if (typeof window === 'undefined') return false;
+    if (typeof window.matchMedia === 'function') {
+        return window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+    }
+    return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
+}
+
 export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
     const updateFollowButton = (enabled) => {
         if (!followModeBtn) return;
         const isOn = !!enabled;
+        const visibleLabel = isSmallScreenViewport()
+            ? 'Follow Mode'
+            : (isOn ? 'Follow mode on' : 'Enable Follow Mode');
         followModeBtn.dataset.state = isOn ? 'enabled' : 'disabled';
         followModeBtn.setAttribute('aria-pressed', String(isOn));
-        followModeBtn.textContent = isOn ? 'Follow mode on' : 'Enable Follow Mode';
+        followModeBtn.textContent = visibleLabel;
         followModeBtn.setAttribute('aria-label', isOn ? 'Follow mode enabled' : 'Enable follow mode');
         followModeBtn.setAttribute('title', isOn ? 'Follow mode enabled' : 'Enable follow mode');
         followModeBtn.disabled = isOn;
@@ -206,6 +217,9 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
             if (!enabled) {
                 setFollowMode(false);
             }
+        });
+        window.addEventListener('resize', () => {
+            updateFollowButton(pipeline?.isAutoCameraFollowEnabled?.());
         });
     }
 

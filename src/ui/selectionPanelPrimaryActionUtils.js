@@ -1,9 +1,11 @@
 import { TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN } from './selectionPanelTransformerView2d.js';
 
 const DEFAULT_TRANSFORMER_VIEW2D_ACTION_LABEL = 'View in 2D / matrix form';
+const MOBILE_TRANSFORMER_VIEW2D_ACTION_LABEL = '2D';
 
 export function resolveSelectionPrimaryActionConfig({
-    view2dContext = null
+    view2dContext = null,
+    isSmallScreen = false
 } = {}) {
     if (!view2dContext) return null;
     const focusLabel = String(view2dContext?.focusLabel || '').trim();
@@ -12,7 +14,7 @@ export function resolveSelectionPrimaryActionConfig({
         : DEFAULT_TRANSFORMER_VIEW2D_ACTION_LABEL;
     return {
         action: TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN,
-        label: DEFAULT_TRANSFORMER_VIEW2D_ACTION_LABEL,
+        label: isSmallScreen ? MOBILE_TRANSFORMER_VIEW2D_ACTION_LABEL : DEFAULT_TRANSFORMER_VIEW2D_ACTION_LABEL,
         ariaLabel: actionLabel,
         title: actionLabel
     };

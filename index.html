@@ -75,6 +75,13 @@
                 <circle cx="12" cy="12" r="3.5"></circle>
             </svg>
         </button>
+        <button id="infoBtn" type="button" aria-label="Open project info page" title="Open project info page">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M12 10.2V16"></path>
+                <circle cx="12" cy="7.35" r="0.85" fill="currentColor" stroke="none"></circle>
+            </svg>
+        </button>
     </div>
 
     <!-- Consolidated HUD + selection stack -->
@@ -371,6 +378,15 @@
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
                     <div class="settings-spacer" aria-hidden="true"></div>
+                    <label class="toggle-row">
+                        <span class="toggle-copy">
+                            <span class="toggle-text">Enable dev mode</span>
+                            <span class="toggle-description">Shows vector sampling values and indices in the selection panel.</span>
+                        </span>
+                        <input id="toggleDevMode" type="checkbox">
+                        <span class="toggle-track" aria-hidden="true"></span>
+                    </label>
+                    <div class="settings-spacer settings-spacer--compact" aria-hidden="true"></div>
                     <div class="slider-row">
                         <div class="slider-header">
                             <span class="toggle-text">Global animation speed</span>
@@ -447,15 +463,6 @@
                             aria-label="Global brightness"
                         >
                     </div>
-                    <div class="settings-spacer settings-spacer--compact" aria-hidden="true"></div>
-                    <label class="toggle-row">
-                        <span class="toggle-copy">
-                            <span class="toggle-text">Enable dev mode</span>
-                            <span class="toggle-description">Shows vector sampling values and indices in the selection panel.</span>
-                        </span>
-                        <input id="toggleDevMode" type="checkbox">
-                        <span class="toggle-track" aria-hidden="true"></span>
-                    </label>
                 </div>
             </div>
         </div>

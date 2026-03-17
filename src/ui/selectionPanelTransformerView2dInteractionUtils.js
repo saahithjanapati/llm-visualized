@@ -1,5 +1,5 @@
 const VIEW2D_DEFAULT_CLICK_SLOP_PX = 6;
-const VIEW2D_TOUCH_CLICK_SLOP_PX = 2;
+const VIEW2D_TOUCH_CLICK_SLOP_PX = 12;
 
 export function isView2dTouchPointerType(pointerType = '') {
     return String(pointerType || '').toLowerCase() === 'touch';

@@ -733,6 +733,82 @@ describe('createTransformerView2dDetailView', () => {
         );
     });
 
+    it('still opens overview sidebar selections on touch after normal finger drift', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const embeddingEntry = {
+            role: 'vocabulary-embedding-card',
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'vocabulary-embedding-card'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: embeddingEntry,
+            node: embeddingEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            isSmallScreen: true
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerType: 'touch',
+            clientX: 120,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            pointerType: 'touch',
+            clientX: 126,
+            clientY: 184
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerType: 'touch',
+            clientX: 126,
+            clientY: 184
+        }));
+
+        expect(onOpenSelection).not.toHaveBeenCalled();
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerType: 'touch',
+            clientX: 122,
+            clientY: 182
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            pointerType: 'touch',
+            clientX: 128,
+            clientY: 186
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerType: 'touch',
+            clientX: 128,
+            clientY: 186
+        }));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'Vocabulary Embedding Matrix'
+            })
+        );
+    });
+
     it('opens canvas chosen-token chip clicks as sidebar selections', async () => {
         const panelEl = document.getElementById('detailPanel');
         const onOpenSelection = vi.fn(() => true);
@@ -942,6 +1018,96 @@ describe('createTransformerView2dDetailView', () => {
 
         canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
         canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'MLP Up Weight Matrix',
+                signature: 'node-a'
+            })
+        );
+        expect(view.hasSelectionLock()).toBe(true);
+    });
+
+    it('still opens deep-detail sidebar selections on touch after normal finger drift', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-weight'
+            }],
+            detailFocusLabel: 'MLP Up Weight Matrix',
+            transitionMode: 'staged-detail',
+            isSmallScreen: true
+        });
+
+        await vi.advanceTimersByTimeAsync(1200);
+
+        detailHoverStateOverride = {
+            label: 'MLP Up Weight Matrix',
+            signature: 'node-a',
+            focusState: {
+                activeNodeIds: ['node-a']
+            }
+        };
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerType: 'touch',
+            clientX: 280,
+            clientY: 210
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            pointerType: 'touch',
+            clientX: 287,
+            clientY: 214
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerType: 'touch',
+            clientX: 287,
+            clientY: 214
+        }));
+
+        expect(onOpenSelection).not.toHaveBeenCalled();
+        expect(view.hasSelectionLock()).toBe(false);
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerType: 'touch',
+            clientX: 282,
+            clientY: 212
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            pointerType: 'touch',
+            clientX: 289,
+            clientY: 216
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerType: 'touch',
+            clientX: 289,
+            clientY: 216
+        }));
 
         expect(onOpenSelection).toHaveBeenCalledTimes(1);
         expect(onOpenSelection).toHaveBeenCalledWith(

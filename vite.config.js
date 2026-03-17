@@ -1,5 +1,9 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import basicSsl from '@vitejs/plugin-basic-ssl';
+
+const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   root: '.',
@@ -14,6 +18,10 @@ export default defineConfig({
     // Keep warnings focused on unexpected regressions in app-owned chunks.
     chunkSizeWarningLimit: 700,
     rollupOptions: {
+      input: {
+        main: resolve(projectRoot, 'index.html'),
+        info: resolve(projectRoot, 'info/index.html')
+      },
       output: {
         manualChunks(id) {
           if (!id) return undefined;

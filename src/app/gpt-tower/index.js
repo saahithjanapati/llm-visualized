@@ -268,6 +268,7 @@ const followModeControls = initFollowModeControls({
     followModeBtn
 });
 const transformerView2dBtn = document.getElementById('transformerView2dBtn');
+const infoBtn = document.getElementById('infoBtn');
 
 const topControls = document.getElementById('topControls');
 const settingsOverlay = document.getElementById('settingsOverlay');
@@ -289,6 +290,11 @@ transformerView2dBtn?.addEventListener('click', (event) => {
         semanticTarget: null,
         focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_LABEL
     });
+});
+
+infoBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    window.location.assign('/info/');
 });
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {

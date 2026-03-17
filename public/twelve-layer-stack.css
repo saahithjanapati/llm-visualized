@@ -573,7 +573,8 @@ body.touch-ui * {
 #settingsBtn {
     padding-inline: 10px;
 }
-#settingsBtn svg {
+#settingsBtn svg,
+#infoBtn svg {
     width: 18px;
     height: 18px;
     display: block;
@@ -582,6 +583,16 @@ body.touch-ui * {
     stroke-width: 1.6;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+#infoBtn {
+    padding-inline: 10px;
+    background: rgba(94, 154, 255, 0.12);
+    border-color: rgba(148, 193, 255, 0.34);
+}
+#infoBtn:hover,
+#infoBtn:focus-visible {
+    background: rgba(94, 154, 255, 0.2);
+    border-color: rgba(173, 210, 255, 0.52);
 }
 
 /* Forward-pass auto-advance overlay */

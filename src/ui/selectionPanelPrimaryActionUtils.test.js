@@ -24,4 +24,20 @@ describe('resolveSelectionPrimaryActionConfig', () => {
     it('disables the primary action when there is no 2D focus context', () => {
         expect(resolveSelectionPrimaryActionConfig()).toBeNull();
     });
+
+    it('uses a short mobile label while keeping the full accessibility text', () => {
+        const config = resolveSelectionPrimaryActionConfig({
+            view2dContext: {
+                focusLabel: 'Layer 3 Attention Head 6'
+            },
+            isSmallScreen: true
+        });
+
+        expect(config).toEqual({
+            action: TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN,
+            label: '2D',
+            ariaLabel: 'View Layer 3 Attention Head 6 in 2D / matrix form',
+            title: 'View Layer 3 Attention Head 6 in 2D / matrix form'
+        });
+    });
 });
