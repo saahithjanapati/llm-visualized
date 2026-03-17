@@ -1,5 +1,7 @@
 const DEFAULT_TAP_SLOP_PX = 16;
 const DEFAULT_PENDING_MS = 1200;
+const DEFAULT_RETARGET_SUPPRESSION_MS = 420;
+const DEFAULT_RETARGET_SLOP_PX = 28;
 const MAX_PENDING_CLICKS = 24;
 
 const isTouchLikeEvent = (event) => {
@@ -78,12 +80,40 @@ export function initTouchClickFallback(
         }
     };
 
-    const registerPendingClick = (target) => {
+    const registerPendingClick = (target, {
+        clientX = null,
+        clientY = null
+    } = {}) => {
         prunePendingClicks();
-        pendingClicks.push({ target, until: Date.now() + DEFAULT_PENDING_MS });
+        pendingClicks.push({
+            target,
+            until: Date.now() + DEFAULT_PENDING_MS,
+            activatedAt: Date.now(),
+            clientX: Number.isFinite(clientX) ? clientX : null,
+            clientY: Number.isFinite(clientY) ? clientY : null
+        });
         if (pendingClicks.length > MAX_PENDING_CLICKS) {
             pendingClicks.splice(0, pendingClicks.length - MAX_PENDING_CLICKS);
         }
+    };
+
+    const findRetargetedPendingClickIndex = (target, event) => {
+        const clickX = Number.isFinite(event?.clientX) ? event.clientX : null;
+        const clickY = Number.isFinite(event?.clientY) ? event.clientY : null;
+        if (!Number.isFinite(clickX) || !Number.isFinite(clickY)) return -1;
+        const now = Date.now();
+        for (let idx = pendingClicks.length - 1; idx >= 0; idx -= 1) {
+            const pending = pendingClicks[idx];
+            if (!pending || pending.target === target) continue;
+            if (now - pending.activatedAt > DEFAULT_RETARGET_SUPPRESSION_MS) continue;
+            if (!Number.isFinite(pending.clientX) || !Number.isFinite(pending.clientY)) continue;
+            const dx = clickX - pending.clientX;
+            const dy = clickY - pending.clientY;
+            if (dx * dx + dy * dy <= DEFAULT_RETARGET_SLOP_PX * DEFAULT_RETARGET_SLOP_PX) {
+                return idx;
+            }
+        }
+        return -1;
     };
 
     const onPointerDown = (event) => {
@@ -92,7 +122,10 @@ export function initTouchClickFallback(
         if (!target || isElementDisabled(target)) return;
         if (shouldActivateOnPointerDown(target)) {
             active = null;
-            registerPendingClick(target);
+            registerPendingClick(target, {
+                clientX: event.clientX,
+                clientY: event.clientY
+            });
             const activationTarget = resolveActivationTarget(target);
             if (event.cancelable) event.preventDefault();
             event.stopPropagation();
@@ -126,7 +159,10 @@ export function initTouchClickFallback(
         const { target, moved } = active;
         active = null;
         if (moved || !target || isElementDisabled(target)) return;
-        registerPendingClick(target);
+        registerPendingClick(target, {
+            clientX: event.clientX,
+            clientY: event.clientY
+        });
         const activationTarget = resolveActivationTarget(target);
         if (activationTarget && typeof activationTarget.click === 'function') {
             activationTarget.click();
@@ -144,7 +180,10 @@ export function initTouchClickFallback(
         if (!pendingClicks.length) return;
         const target = resolveClosestTarget(container, event, selector);
         if (!target) return;
-        const pendingIndex = pendingClicks.findIndex((pending) => pending.target === target);
+        let pendingIndex = pendingClicks.findIndex((pending) => pending.target === target);
+        if (pendingIndex < 0) {
+            pendingIndex = findRetargetedPendingClickIndex(target, event);
+        }
         if (pendingIndex < 0) return;
         pendingClicks.splice(pendingIndex, 1);
         event.preventDefault();

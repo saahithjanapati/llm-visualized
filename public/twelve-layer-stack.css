@@ -2218,6 +2218,143 @@ body.detail-panel-resizing * {
     box-sizing: border-box;
 }
 
+/* Shared hover-label styles must load with the tower. The 3D scene creates
+   these token chips before the lazy selection panel bundle is imported. */
+.detail-subtitle-token-chip {
+    --token-color-border: rgba(255,255,255,0.92);
+    --token-color-fill: rgba(255,255,255,0.2);
+    --token-color-fill-hover: rgba(255,255,255,0.28);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 19px;
+    max-width: 150px;
+    padding: 1px 7px;
+    border-radius: 6px;
+    border: 1px solid var(--token-color-border);
+    background: var(--token-color-fill);
+    color: #fff;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: var(--detail-font-chip);
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.scene-hover-label__content {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    max-width: min(360px, calc(100vw - 48px));
+}
+.scene-hover-label__top-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+.scene-hover-label__text {
+    color: #fff;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.15;
+}
+.scene-hover-label__separator {
+    color: #6c7583;
+    line-height: 1;
+}
+.scene-hover-label__text[hidden],
+.scene-hover-label__separator[hidden],
+.scene-hover-label__token-chip[hidden],
+.scene-hover-label__detail-text[hidden],
+.scene-hover-label__subtitle[hidden],
+.scene-hover-label__attention-details[hidden],
+.scene-hover-label__attention-row[hidden],
+.scene-hover-label__attention-metrics[hidden],
+.scene-hover-label__attention-metric[hidden] {
+    display: none !important;
+}
+.scene-hover-label__token-chip {
+    max-width: min(180px, 42vw);
+    flex: 0 1 auto;
+}
+.scene-hover-label__detail-text {
+    color: #d4dae2;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+.scene-hover-label__subtitle {
+    color: #98a2b3;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+.scene-hover-label__attention-details {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    max-width: 100%;
+}
+.scene-hover-label__attention-metrics {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    max-width: 100%;
+}
+.scene-hover-label__attention-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+.scene-hover-label__attention-role {
+    color: #98a2b3;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+.scene-hover-label__attention-chip {
+    max-width: min(180px, 42vw);
+    flex: 0 1 auto;
+}
+.scene-hover-label__attention-position {
+    color: #d4dae2;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+.scene-hover-label__attention-metric {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+}
+.scene-hover-label__attention-metric-role {
+    color: #98a2b3;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+.scene-hover-label__attention-metric-value {
+    color: #eef2f8;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
 /* Detail side panel styles lazy-load with the selection panel bundle. */
 #detailPanel {
     display: none;
