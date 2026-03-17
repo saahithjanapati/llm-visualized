@@ -50,8 +50,10 @@ function createPanelContext() {
         setVisible: vi.fn(),
         open: vi.fn(),
         setSelectionSidebarHeaderContent: vi.fn(),
-        isSelectionSidebarVisible: vi.fn(() => true)
+        isSelectionSidebarVisible: vi.fn(() => true),
+        clearSelectionLock: vi.fn(() => false)
     };
+    panel.close = vi.fn();
     panel._closeTransformerView2dSelectionSidebar = vi.fn();
     panel._showTransformerView2dSelectionSidebar = vi.fn();
     panel._syncMhsaViewRoute = vi.fn();
@@ -197,5 +199,45 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         expect(panel._showTransformerView2dSelectionSidebar).not.toHaveBeenCalled();
         expect(panel._transformerView2dDetailView.setSelectionSidebarHeaderContent).not.toHaveBeenCalled();
         expect(panel._stopLoop).toHaveBeenCalled();
+    });
+
+    it('uses the header close action to dismiss the 2D selection sidebar before closing the panel', () => {
+        const panel = createPanelContext();
+        panel._transformerView2dDetailOpen = true;
+        panel._closeTransformerView2dSelectionSidebar = vi.fn(() => true);
+
+        const handled = panel._handleCloseButtonAction({
+            preventDefault: vi.fn(),
+            stopPropagation: vi.fn(),
+            cancelable: true
+        });
+
+        expect(handled).toBe(true);
+        expect(panel._closeTransformerView2dSelectionSidebar).toHaveBeenCalledWith({
+            restoreSections: false,
+            restartLoop: false
+        });
+        expect(panel._transformerView2dDetailView.clearSelectionLock).not.toHaveBeenCalled();
+        expect(panel.close).not.toHaveBeenCalled();
+    });
+
+    it('uses the header close action to clear the 2D selection lock before closing the panel', () => {
+        const panel = createPanelContext();
+        panel._transformerView2dDetailOpen = true;
+        panel._closeTransformerView2dSelectionSidebar = vi.fn(() => false);
+        panel._transformerView2dDetailView.clearSelectionLock = vi.fn(() => true);
+
+        const handled = panel._handleCloseButtonAction({
+            preventDefault: vi.fn(),
+            stopPropagation: vi.fn(),
+            cancelable: true
+        });
+
+        expect(handled).toBe(true);
+        expect(panel._closeTransformerView2dSelectionSidebar).toHaveBeenCalled();
+        expect(panel._transformerView2dDetailView.clearSelectionLock).toHaveBeenCalledWith({
+            scheduleRender: true
+        });
+        expect(panel.close).not.toHaveBeenCalled();
     });
 });

@@ -3906,6 +3906,7 @@ export class SelectionPanel {
         this._transformerView2dSelectionSidebarDockRecords = [];
         this._transformerView2dSelectionSidebarDocked = false;
         this._transformerView2dSelectionSidebarRestoreTimer = null;
+        this._suppressNextCloseClick = false;
         this._setTransformerView2dActionButtonState(null);
         this._lastSelection = null;
         this._lastSelectionLabel = '';
@@ -3919,6 +3920,7 @@ export class SelectionPanel {
         this._onKeyup = this._onKeyup.bind(this);
         this._onCopyContextClick = this._onCopyContextClick.bind(this);
         this._onFullscreenToggleClick = this._onFullscreenToggleClick.bind(this);
+        this._onCloseClick = this._onCloseClick.bind(this);
         this._onClosePointerDown = this._onClosePointerDown.bind(this);
         this._onDocumentPointerDown = this._onDocumentPointerDown.bind(this);
         this._onDocumentFocusIn = this._onDocumentFocusIn.bind(this);
@@ -4115,7 +4117,7 @@ export class SelectionPanel {
         };
         this._applyAttentionCollapseState();
 
-        this.closeBtn?.addEventListener('click', () => this.close({ clearHistory: false }));
+        this.closeBtn?.addEventListener('click', this._onCloseClick);
         this.copyContextBtn?.addEventListener('click', this._onCopyContextClick);
         this.fullscreenToggleBtn?.addEventListener('click', this._onFullscreenToggleClick);
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
@@ -5352,11 +5354,58 @@ export class SelectionPanel {
         this._setMhsaFullscreen(!this._mhsaFullscreenActive);
     }
 
+    _handleCloseButtonAction(event = null) {
+        if (!this.isOpen) return false;
+        if (this._transformerView2dDetailOpen) {
+            const didCloseTransformerView2dSelectionSidebar = this._closeTransformerView2dSelectionSidebar({
+                restoreSections: false,
+                restartLoop: false
+            });
+            if (didCloseTransformerView2dSelectionSidebar) {
+                if (event?.cancelable) event.preventDefault();
+                event?.stopPropagation?.();
+                return true;
+            }
+            const didClearTransformerView2dLock = this._transformerView2dDetailView?.clearSelectionLock?.({
+                scheduleRender: true
+            }) === true;
+            if (didClearTransformerView2dLock) {
+                if (event?.cancelable) event.preventDefault();
+                event?.stopPropagation?.();
+                return true;
+            }
+            if (event?.cancelable) event.preventDefault();
+            event?.stopPropagation?.();
+            this.close({ clearHistory: false });
+            return true;
+        }
+        if (this._mhsaFullscreenActive && this.fullscreenToggleBtn) {
+            if (event?.cancelable) event.preventDefault();
+            event?.stopPropagation?.();
+            this._setMhsaFullscreen(false);
+            return true;
+        }
+        if (event?.cancelable) event.preventDefault();
+        event?.stopPropagation?.();
+        this.close({ clearHistory: false });
+        return true;
+    }
+
+    _onCloseClick(event) {
+        if (this._suppressNextCloseClick) {
+            this._suppressNextCloseClick = false;
+            if (event?.cancelable) event.preventDefault();
+            event?.stopPropagation?.();
+            return;
+        }
+        this._handleCloseButtonAction(event);
+    }
+
     _onClosePointerDown(event) {
         if (!this.isOpen) return;
-        event.preventDefault();
-        event.stopPropagation();
-        this.close({ clearHistory: false });
+        if (event?.pointerType === 'mouse' && Number.isFinite(event.button) && event.button !== 0) return;
+        this._suppressNextCloseClick = true;
+        this._handleCloseButtonAction(event);
     }
 
     _blockPreviewGesture(event) {
