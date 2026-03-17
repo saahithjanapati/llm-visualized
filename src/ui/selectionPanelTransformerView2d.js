@@ -609,8 +609,8 @@ export function createTransformerView2dDetailView(panelEl, {
         state.overviewSelectionArmSignature = '';
     }
 
-    function shouldRequireTouchSelectionConfirmation(event = null, armSignature = '') {
-        return event?.pointerType === 'touch'
+    function shouldRequireTouchSelectionConfirmation(_event = null, armSignature = '') {
+        return state.isSmallScreen === true
             && typeof armSignature === 'string'
             && armSignature.length > 0
             && state.overviewSelectionArmSignature !== armSignature;
@@ -3716,6 +3716,10 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function onPointerLeave() {
         cancelScheduledHoverUpdate();
+        if (state.isSmallScreen && state.overviewSelectionArmSignature) {
+            updateCanvasCursor(null);
+            return;
+        }
         clearCanvasHover();
         updateCanvasCursor(null);
     }

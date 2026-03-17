@@ -733,6 +733,51 @@ describe('createTransformerView2dDetailView', () => {
         );
     });
 
+    it('opens an overview sidebar selection on the first touch tap on large screens', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const embeddingEntry = {
+            role: 'vocabulary-embedding-card',
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'vocabulary-embedding-card'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: embeddingEntry,
+            node: embeddingEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            isSmallScreen: false
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'Vocabulary Embedding Matrix'
+            })
+        );
+    });
+
     it('still opens overview sidebar selections on touch after normal finger drift', async () => {
         const panelEl = document.getElementById('detailPanel');
         const onOpenSelection = vi.fn(() => true);
@@ -844,6 +889,9 @@ describe('createTransformerView2dDetailView', () => {
 
         canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
         canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
+        canvas.dispatchEvent(new Event('pointerleave', {
+            bubbles: true
+        }));
         await vi.advanceTimersByTimeAsync(32);
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
@@ -853,6 +901,127 @@ describe('createTransformerView2dDetailView', () => {
         await vi.advanceTimersByTimeAsync(500);
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+    });
+
+    it('opens overview head detail on the first touch tap on large screens', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const headEntry = {
+            role: 'head',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: headEntry,
+            node: headEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            isSmallScreen: false
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+    });
+
+    it('keeps compact-screen overview row selections armed across pointerleave so a second tap opens the sidebar', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            layerCount: 1
+        });
+        const residualNode = flattenSceneNodes(scene).find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+        ));
+
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: residualNode,
+            node: residualNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: residualNode?.rowItems?.[1]
+            }
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            isSmallScreen: true
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerType: 'touch',
+            clientX: 220,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerType: 'touch',
+            clientX: 220,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(new Event('pointerleave', {
+            bubbles: true
+        }));
+
+        expect(onOpenSelection).not.toHaveBeenCalled();
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerType: 'touch',
+            clientX: 220,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerType: 'touch',
+            clientX: 220,
+            clientY: 180
+        }));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'Residual Stream Vector'
+            })
+        );
     });
 
     it('opens canvas chosen-token chip clicks as sidebar selections', async () => {
