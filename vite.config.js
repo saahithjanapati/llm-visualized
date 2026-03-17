@@ -8,7 +8,7 @@ const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig({
   root: '.',
   publicDir: 'public',
-  assetsInclude: ['**/*.exr'],
+  assetsInclude: ['**/*.exr', '**/*.glb'],
   plugins: [basicSsl()],
   build: {
     outDir: 'dist',

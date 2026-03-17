@@ -1,5 +1,6 @@
 import { CaptureActivationSource } from '../../data/CaptureActivationSource.js';
 import { precomputeActivationCaches } from '../../utils/activationPrecompute.js';
+import { DEFAULT_CAPTURE_FILE, resolveCaptureAssetUrl } from './runtimeAssetUrls.js';
 
 function getFullTokenMode() {
     if (typeof window === 'undefined') return false;
@@ -26,10 +27,8 @@ export async function loadActivationState({
 
     try {
         const params = new URLSearchParams(window.location.search);
-        const captureFile = params.get('capture') || params.get('file') || 'capture.json';
-        const captureUrl = captureFile.startsWith('http')
-            ? captureFile
-            : `/${captureFile.replace(/^\/+/, '')}`;
+        const captureFile = params.get('capture') || params.get('file') || DEFAULT_CAPTURE_FILE;
+        const captureUrl = resolveCaptureAssetUrl(captureFile);
         activationSource = await CaptureActivationSource.load(captureUrl);
         const tokensInCapture = typeof activationSource.getTokenCount === 'function'
             ? activationSource.getTokenCount()

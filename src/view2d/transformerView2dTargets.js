@@ -25,7 +25,7 @@ import {
 } from '../utils/layerNormLabels.js';
 import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
-export const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT 2 124M';
+export const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT-2 (124M)';
 const OVERVIEW_HOVER_FOCUS_RESULT_CACHE = new WeakMap();
 
 function isResidualOverviewStreamNode(node = null) {

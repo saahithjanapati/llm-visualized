@@ -15,10 +15,10 @@
         function gtag(){dataLayer.push(arguments);}
         gtag('js', new Date());
 
-        gtag('config', 'G-E0WWTHCQQF');
+        gtag('config', 'G-E0WWTHCQQF', { send_page_view: false });
     </script>
     <title>LLM-Visualized</title>
-    <link rel="stylesheet" href="/twelve-layer-stack.css">
+    <link rel="stylesheet" href="/src/app/gpt-tower/styles.css" />
     <!-- KaTeX for equation rendering (fallbacks to plain text if blocked) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
@@ -369,14 +369,6 @@
                         <span class="toggle-track" aria-hidden="true"></span>
                     </label>
                     <div id="kvCacheStatusHint" class="settings-hint" hidden>KV cache enabled for prefill and decode.</div>
-                    <label class="toggle-row">
-                        <span class="toggle-copy">
-                            <span class="toggle-text">Enable hover labels (raycasting)</span>
-                            <span class="toggle-description">Shows token and component labels when you hover scene objects.</span>
-                        </span>
-                        <input id="toggleRaycast" type="checkbox" checked>
-                        <span class="toggle-track" aria-hidden="true"></span>
-                    </label>
                     <div class="settings-spacer" aria-hidden="true"></div>
                     <label class="toggle-row">
                         <span class="toggle-copy">

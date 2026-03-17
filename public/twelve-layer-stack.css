@@ -4395,12 +4395,6 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     min-height: 30px;
     padding: 6px 10px;
     border-radius: 9px;
-    border: 1px solid rgba(143, 210, 255, 0.5);
-    background: rgba(255,255,255,0.08);
-    box-shadow:
-        0 0 0 1px rgba(143, 210, 255, 0.26),
-        0 0 10px rgba(143, 210, 255, 0.14);
-    color: #eef8ff;
     transform: none;
 }
 .detail-copy-context-btn--view2d .detail-copy-context-copy {
@@ -4418,22 +4412,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.detail-copy-context-btn--view2d:hover {
-    border-color: rgba(143, 210, 255, 0.72);
-    background: rgba(143, 210, 255, 0.18);
-    box-shadow:
-        0 0 0 1px rgba(143, 210, 255, 0.34),
-        0 0 16px rgba(143, 210, 255, 0.24);
-    color: #f7fbff;
-    filter: saturate(1.08) brightness(1.04);
-}
 .detail-copy-context-btn--view2d:active {
     transform: none;
-    filter: brightness(0.95);
-}
-.detail-copy-context-btn--view2d:focus-visible {
-    outline: 2px solid rgba(143, 210, 255, 0.88);
-    outline-offset: 2px;
 }
 
 .detail-equations {
@@ -6902,18 +6882,52 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         padding-bottom: max(18px, calc(env(safe-area-inset-bottom) + 8px));
     }
     #topControls {
-        gap: 10px;
-        max-width: calc(100vw - 16px);
-        flex-wrap: wrap;
+        gap: 4px;
+        max-width: calc(100vw - 8px);
+        flex-wrap: nowrap;
         justify-content: flex-end;
+        align-items: center;
     }
     #skipMenu {
-        margin-inline: 1px;
+        margin-inline: 0;
+    }
+    #topControls button {
+        padding: 7px 8px;
+        font-size: 12px;
+        border-radius: 9px;
+    }
+    #pauseBtn,
+    #skipMenuToggle,
+    #settingsBtn,
+    #infoBtn {
+        width: 36px;
+        min-width: 36px;
+        height: 36px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
     }
     #pauseBtn,
     #followModeBtn,
     #transformerView2dBtn {
         min-width: 0;
+    }
+    #pauseBtn {
+        font-size: 13px;
+    }
+    #followModeBtn,
+    #transformerView2dBtn {
+        white-space: nowrap;
+        padding-inline: 8px;
+        font-size: 12px;
+    }
+    #settingsBtn svg,
+    #infoBtn svg,
+    #skipMenuToggle .skip-toggle-icon {
+        width: 16px;
+        height: 16px;
     }
     body.detail-mobile-focus #topControls {
         opacity: 0;

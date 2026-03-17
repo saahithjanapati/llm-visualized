@@ -366,10 +366,6 @@ export function initSettingsModal(pipeline, {
         document.body.style.overflow = 'hidden';
         pipeline?.engine?.pause?.('modal');
         appState.modalPaused = true;
-        const rc = document.getElementById('toggleRaycast');
-        if (rc && pipeline?.engine?.isRaycastingEnabled) {
-            rc.checked = !!pipeline.engine.isRaycastingEnabled();
-        }
         const eq = document.getElementById('toggleEquations');
         if (eq) eq.checked = !!appState.showEquations;
         const promptTokenStrip = document.getElementById('togglePromptTokenStrip');
@@ -417,11 +413,6 @@ export function initSettingsModal(pipeline, {
         if (e.key === 'Escape' && isSettingsOpen()) {
             closeSettings();
         }
-    });
-
-    const rayToggle = document.getElementById('toggleRaycast');
-    rayToggle?.addEventListener('change', () => {
-        pipeline?.engine?.setRaycastingEnabled?.(!!rayToggle.checked);
     });
 
     const eqToggle = document.getElementById('toggleEquations');

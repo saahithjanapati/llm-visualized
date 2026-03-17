@@ -42,7 +42,15 @@ import { resolveHoverTokenChipSyncEntries } from '../../engine/coreHoverTokenCon
 import { loadActivationState } from './activation.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
 import { buildPassState, initGenerationController } from './generationController.js';
-import { resolveGenerationRoute } from './generationRoute.js';
+import {
+    PRECOMPUTED_COMPONENTS_QKV_URL,
+    PRECOMPUTED_COMPONENTS_SLICE_URL
+} from './runtimeAssetUrls.js';
+import {
+    resolveGenerationRoute,
+    syncMainEntryToFirstGenerationRoute
+} from './generationRoute.js';
+import { initGoogleAnalyticsPageTracking } from './googleAnalytics.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { initPassIntroOverlay } from './passIntroOverlay.js';
 import {
@@ -97,12 +105,17 @@ function shouldSkipInitialPassIntro() {
     return isEnabledUrlFlag(params.get('skipPassIntro'));
 }
 
+const initialAppView = resolveInitialAppView();
+const googleAnalyticsPageTracker = initGoogleAnalyticsPageTracking({
+    trackInitialPage: false
+});
+
 // Optionally load pre-baked geometries to skip heavy procedural work.
-await loadPrecomputedGeometries('/precomputed_components_slice.glb');
+await loadPrecomputedGeometries(PRECOMPUTED_COMPONENTS_SLICE_URL);
 // Skip full-depth QKV/output precompute when instanced slices are active,
 // otherwise those matrices will appear longer than the rest.
 if (!USE_INSTANCED_MATRIX_SLICES) {
-    await loadPrecomputedGeometries('/precomputed_components_qkv.glb');
+    await loadPrecomputedGeometries(PRECOMPUTED_COMPONENTS_QKV_URL);
 }
 
 const statusDiv = document.getElementById('statusOverlay');
@@ -133,12 +146,20 @@ if (!isFullTokenMode && activationSource && typeof activationSource.getTokenCoun
     }
 }
 const baseLaneCount = initialLaneCount;
+const maxInitialRouteLaneCount = activationSource && typeof activationSource.getTokenCount === 'function'
+    ? activationSource.getTokenCount()
+    : initialLaneCount;
+if (!initialAppView) {
+    syncMainEntryToFirstGenerationRoute({
+        baseLaneCount,
+        maxLaneCount: maxInitialRouteLaneCount
+    });
+}
+googleAnalyticsPageTracker?.trackCurrentPageView?.();
 const initialGenerationRoute = resolveGenerationRoute(window.location, {
     defaultLaneCount: initialLaneCount,
     baseLaneCount,
-    maxLaneCount: activationSource && typeof activationSource.getTokenCount === 'function'
-        ? activationSource.getTokenCount()
-        : initialLaneCount
+    maxLaneCount: maxInitialRouteLaneCount
 });
 initialLaneCount = initialGenerationRoute.laneCount;
 
@@ -453,7 +474,6 @@ function waitForAnimationFrames(frameCount = 1) {
     });
 }
 
-const initialAppView = resolveInitialAppView();
 const shouldOpenMhsaDirectly = initialAppView?.kind === 'mhsa';
 const initialTransformerView2dRoute = initialAppView?.kind === 'transformer-view2d'
     ? initialAppView

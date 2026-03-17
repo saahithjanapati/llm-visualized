@@ -2,6 +2,7 @@ const GENERATION_ROUTE_PARAM_TOKEN = 'token';
 const GENERATION_ROUTE_PARAM_GENERATION = 'generation';
 const GENERATION_ROUTE_PARAM_KV_CACHE = 'kvCache';
 const GENERATION_ROUTE_PARAM_KV_CACHE_LEGACY = 'kv';
+const MAIN_ENTRY_ROUTE_PATHS = new Set(['/', '/index.html']);
 
 function resolveUrlLike(urlLike = null) {
     let candidate = urlLike;
@@ -42,6 +43,30 @@ function clampLaneCount(value, {
     return safeMax == null
         ? Math.max(safeMin, floored)
         : Math.min(safeMax, Math.max(safeMin, floored));
+}
+
+function normalizeRoutePathname(pathname = '') {
+    const raw = String(pathname || '').trim();
+    if (!raw.length || raw === '/') return '/';
+    const trimmed = raw.replace(/\/+$/, '');
+    return trimmed.length ? trimmed : '/';
+}
+
+function isMainEntryRoutePath(pathname = '') {
+    return MAIN_ENTRY_ROUTE_PATHS.has(normalizeRoutePathname(pathname));
+}
+
+function hasExplicitGenerationPositionRouteParams(searchParams) {
+    if (!searchParams) return false;
+    return searchParams.has(GENERATION_ROUTE_PARAM_TOKEN)
+        || searchParams.has(GENERATION_ROUTE_PARAM_GENERATION);
+}
+
+function hasExplicitGenerationRouteParams(searchParams) {
+    if (!searchParams) return false;
+    return hasExplicitGenerationPositionRouteParams(searchParams)
+        || searchParams.has(GENERATION_ROUTE_PARAM_KV_CACHE)
+        || searchParams.has(GENERATION_ROUTE_PARAM_KV_CACHE_LEGACY);
 }
 
 function readRouteIndex(searchParams, key, {
@@ -149,7 +174,8 @@ export function syncGenerationRoute({
     baseLaneCount = 1,
     maxLaneCount = null,
     kvCacheModeEnabled = false,
-    historyMode = 'replace'
+    historyMode = 'replace',
+    forceExplicitRouteState = false
 } = {}) {
     if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return false;
 
@@ -162,8 +188,12 @@ export function syncGenerationRoute({
         maxLaneCount
     });
     const generation = Math.max(0, safeLaneCount - safeBaseLaneCount);
+    const hadExplicitGenerationPositionRoute = hasExplicitGenerationPositionRouteParams(nextUrl.searchParams);
+    const hadExplicitGenerationRoute = hasExplicitGenerationRouteParams(nextUrl.searchParams);
+    const shouldPersistExplicitGenerationPosition = forceExplicitRouteState || hadExplicitGenerationPositionRoute;
+    const shouldPersistExplicitKvRoute = forceExplicitRouteState || hadExplicitGenerationRoute;
 
-    if (safeLaneCount <= safeBaseLaneCount) {
+    if (safeLaneCount <= safeBaseLaneCount && !shouldPersistExplicitGenerationPosition) {
         nextUrl.searchParams.delete(GENERATION_ROUTE_PARAM_TOKEN);
         nextUrl.searchParams.delete(GENERATION_ROUTE_PARAM_GENERATION);
     } else {
@@ -173,6 +203,8 @@ export function syncGenerationRoute({
     nextUrl.searchParams.delete(GENERATION_ROUTE_PARAM_KV_CACHE_LEGACY);
     if (kvCacheModeEnabled) {
         nextUrl.searchParams.set(GENERATION_ROUTE_PARAM_KV_CACHE, '1');
+    } else if (shouldPersistExplicitKvRoute) {
+        nextUrl.searchParams.set(GENERATION_ROUTE_PARAM_KV_CACHE, '0');
     } else {
         nextUrl.searchParams.delete(GENERATION_ROUTE_PARAM_KV_CACHE);
     }
@@ -188,6 +220,33 @@ export function syncGenerationRoute({
 
     window.history.replaceState(window.history.state, '', nextHref);
     return true;
+}
+
+export function syncMainEntryToFirstGenerationRoute({
+    baseLaneCount = 1,
+    maxLaneCount = null,
+    kvCacheModeEnabled = false,
+    historyMode = 'replace'
+} = {}) {
+    if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return false;
+
+    const currentUrl = resolveUrlLike(window.location);
+    if (!currentUrl || !isMainEntryRoutePath(currentUrl.pathname)) return false;
+    if (hasExplicitGenerationRouteParams(currentUrl.searchParams)) return false;
+
+    const safeBaseLaneCount = clampLaneCount(baseLaneCount, { maxLaneCount });
+    const safeMaxLaneCount = Number.isFinite(maxLaneCount)
+        ? Math.max(safeBaseLaneCount, Math.floor(maxLaneCount))
+        : null;
+
+    return syncGenerationRoute({
+        laneCount: safeBaseLaneCount,
+        baseLaneCount: safeBaseLaneCount,
+        maxLaneCount: safeMaxLaneCount,
+        kvCacheModeEnabled,
+        historyMode,
+        forceExplicitRouteState: true
+    });
 }
 
 export default resolveGenerationRoute;

@@ -4,11 +4,15 @@
   "description": "3d visualization of gpt2",
   "main": "src/app/gpt-tower/index.js",
   "scripts": {
+    "predev": "node scripts/prepareRuntimeAssets.mjs",
     "dev": "vite",
     "precompute": "node scripts/generate_precomputed_components.mjs",
+    "prebuild": "node scripts/prepareRuntimeAssets.mjs",
     "build": "vite build",
     "preview": "vite preview",
+    "pretest": "node scripts/prepareRuntimeAssets.mjs",
     "test": "vitest run",
+    "pretest:watch": "node scripts/prepareRuntimeAssets.mjs",
     "test:watch": "vitest",
     "test:activation-integrity": "node scripts/run_activation_integrity_suite.mjs"
   },

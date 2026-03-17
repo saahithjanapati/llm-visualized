@@ -25,7 +25,7 @@ describe('resolveSelectionPrimaryActionConfig', () => {
         expect(resolveSelectionPrimaryActionConfig()).toBeNull();
     });
 
-    it('uses a short mobile label while keeping the full accessibility text', () => {
+    it('keeps the full label on small screens while preserving accessibility text', () => {
         const config = resolveSelectionPrimaryActionConfig({
             view2dContext: {
                 focusLabel: 'Layer 3 Attention Head 6'
@@ -35,7 +35,7 @@ describe('resolveSelectionPrimaryActionConfig', () => {
 
         expect(config).toEqual({
             action: TRANSFORMER_VIEW2D_PANEL_ACTION_OPEN,
-            label: '2D',
+            label: 'View in 2D / matrix form',
             ariaLabel: 'View Layer 3 Attention Head 6 in 2D / matrix form',
             title: 'View Layer 3 Attention Head 6 in 2D / matrix form'
         });

@@ -1202,7 +1202,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     }
 
     with open(args.output, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False)
+        json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
 
     print(f"\nSaved capture to {args.output}")
     return 0

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 
-const MLP_MATRIX_EMISSIVE_GROWTH_END_T = 0.92;
-const MLP_MATRIX_EMISSIVE_EXIT_START_T = 0.92;
+const MLP_MATRIX_EMISSIVE_PEAK_T = 0.68;
 
 export function computeMlpMatrixPassEmissive(progress, startIntensity, peakIntensity, finalIntensity) {
     const clampedProgress = THREE.MathUtils.clamp(
@@ -13,19 +12,21 @@ export function computeMlpMatrixPassEmissive(progress, startIntensity, peakInten
     const peak = Number.isFinite(peakIntensity) ? peakIntensity : start;
     const finalValue = Number.isFinite(finalIntensity) ? finalIntensity : peak;
 
-    // Let the glow keep growing through almost the whole pass so longer
-    // matrix traversals read as accumulating energy instead of an early hold.
-    const growthT = THREE.MathUtils.smootherstep(
+    // Let the matrix keep charging through most of the pass, then spend the
+    // last third cooling down so the glow reads as a fade instead of a snap.
+    if (clampedProgress <= MLP_MATRIX_EMISSIVE_PEAK_T) {
+        const riseT = THREE.MathUtils.smootherstep(
+            clampedProgress,
+            0,
+            MLP_MATRIX_EMISSIVE_PEAK_T
+        );
+        return THREE.MathUtils.lerp(start, peak, riseT);
+    }
+
+    const fallT = THREE.MathUtils.smootherstep(
         clampedProgress,
-        0,
-        MLP_MATRIX_EMISSIVE_GROWTH_END_T
-    );
-    const activeEmissive = THREE.MathUtils.lerp(start, peak, growthT);
-    const exitT = THREE.MathUtils.smootherstep(
-        clampedProgress,
-        MLP_MATRIX_EMISSIVE_EXIT_START_T,
+        MLP_MATRIX_EMISSIVE_PEAK_T,
         1
     );
-
-    return THREE.MathUtils.lerp(activeEmissive, finalValue, exitT);
+    return THREE.MathUtils.lerp(peak, finalValue, fallT);
 }
