@@ -133,6 +133,46 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         expect(panel._stopLoop).not.toHaveBeenCalled();
     });
 
+    it('does not auto-open the docked 2D selection sidebar on small screens when entering from a selection', () => {
+        const panel = createPanelContext();
+        panel._isSmallScreen = vi.fn(() => true);
+        panel._transformerView2dDetailView.isSelectionSidebarVisible = vi.fn(() => false);
+        const selection = {
+            label: 'Post-Softmax Attention Score',
+            kind: 'attentionSphere'
+        };
+        const view2dContext = {
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 2 Attention Head 3',
+            detailInteractionTargets: [],
+            transitionMode: 'staged-head-detail'
+        };
+
+        const opened = panel._openTransformerView2dPreview({
+            sourceSelection: selection,
+            view2dContext,
+            syncRoute: false,
+            fromHistory: true
+        });
+
+        expect(opened).toBe(true);
+        expect(panel._transformerView2dDetailView.setVisible).toHaveBeenCalledWith(true);
+        expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
+            expect.objectContaining({
+                isSmallScreen: true
+            })
+        );
+        expect(panel._showTransformerView2dSelectionSidebar).not.toHaveBeenCalled();
+        expect(panel._transformerView2dDetailView.setSelectionSidebarHeaderContent).not.toHaveBeenCalled();
+        expect(panel._stopLoop).toHaveBeenCalled();
+    });
+
     it('does not force the 2D selection sidebar open for context-only entry without a source selection', () => {
         const panel = createPanelContext();
         const view2dContext = {

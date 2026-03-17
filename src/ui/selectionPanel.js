@@ -9337,7 +9337,11 @@ export class SelectionPanel {
             transitionMode: hydratedView2dContext.transitionMode,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
         });
-        if (resolvedSelection) {
+        const shouldAutoOpenSelectionSidebar = !!(
+            resolvedSelection
+            && !(this._isSmallScreen && this._isSmallScreen())
+        );
+        if (shouldAutoOpenSelectionSidebar) {
             this._showTransformerView2dSelectionSidebar({ scrollToTop: true });
             if (selectionSidebarHeaderContent) {
                 this._transformerView2dDetailView?.setSelectionSidebarHeaderContent?.(
