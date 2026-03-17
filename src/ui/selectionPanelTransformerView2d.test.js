@@ -601,9 +601,12 @@ describe('createTransformerView2dDetailView', () => {
         expect(worldCenterAfter.y).toBeCloseTo(worldCenterBefore.y, 6);
     });
 
-    it('opens canvas attention-head clicks directly into the head-detail scene', async () => {
+    it('opens canvas attention-head clicks as sidebar selections and keeps the overview highlight locked', async () => {
         const panelEl = document.getElementById('detailPanel');
-        const view = createTransformerView2dDetailView(panelEl);
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
         const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
 
         const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
@@ -635,6 +638,51 @@ describe('createTransformerView2dDetailView', () => {
 
         canvas.dispatchEvent(createPointerEvent('pointerdown'));
         canvas.dispatchEvent(createPointerEvent('pointerup'));
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'Attention Head 3'
+            })
+        );
+        expect(view.hasSelectionLock()).toBe(true);
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+    });
+
+    it('opens canvas attention-head double clicks into the head-detail scene', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const headEntry = {
+            role: 'head',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: headEntry,
+            node: headEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C']
+        });
+
+        canvas.dispatchEvent(createPointerEvent('dblclick'));
         await vi.advanceTimersByTimeAsync(500);
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
@@ -807,6 +855,59 @@ describe('createTransformerView2dDetailView', () => {
                 label: 'Vocabulary Embedding Matrix'
             })
         );
+    });
+
+    it('requires a second touch tap before opening an overview component selection for MLP cards', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const mlpEntry = {
+            role: 'module-card',
+            semantic: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: mlpEntry,
+            node: mlpEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            isSmallScreen: true
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
+
+        expect(onOpenSelection).not.toHaveBeenCalled();
+        expect(view.hasSelectionLock()).toBe(false);
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'Multilayer Perceptron'
+            })
+        );
+        expect(view.hasSelectionLock()).toBe(true);
     });
 
     it('opens canvas chosen-token chip clicks as sidebar selections', async () => {

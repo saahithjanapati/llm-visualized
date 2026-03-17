@@ -6959,6 +6959,7 @@ export class SelectionPanel {
             lower === 'layernorm'
             || lower === 'layernorm (top)'
             || lower === 'multilayer perceptron'
+            || lower.startsWith('attention head')
         ) {
             return 'label';
         }

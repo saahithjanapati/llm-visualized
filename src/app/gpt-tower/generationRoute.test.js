@@ -109,7 +109,7 @@ describe('generationRoute', () => {
     });
 
     it('preserves unrelated query params when canonicalizing the main entry URL', () => {
-        window.history.replaceState({}, '', '/index.html?capture=capture_2.json&fresh=1');
+        window.history.replaceState({}, '', '/index.html?capture=capture.json&fresh=1');
 
         const changed = syncMainEntryToFirstGenerationRoute({
             baseLaneCount: 4,
@@ -119,7 +119,7 @@ describe('generationRoute', () => {
         const url = new URL(window.location.href);
         expect(changed).toBe(true);
         expect(url.pathname).toBe('/index.html');
-        expect(url.searchParams.get('capture')).toBe('capture_2.json');
+        expect(url.searchParams.get('capture')).toBe('capture.json');
         expect(url.searchParams.get('fresh')).toBe('1');
         expect(url.searchParams.get('token')).toBe('4');
         expect(url.searchParams.get('generation')).toBe('0');

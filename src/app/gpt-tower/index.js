@@ -30,10 +30,8 @@ import {
     MHSA_INFO_REQUEST_EVENT,
     buildMhsaInfoSelection
 } from '../../ui/mhsaInfoUtils.js';
-import { initSelectionPanel } from '../../ui/selectionPanel.js';
-import { resolveTransformerView2dRoute } from '../../ui/selectionPanelTransformerView2d.js';
 import { initPromptTokenStrip } from '../../ui/promptTokenStrip.js';
-import { TRANSFORMER_VIEW2D_OVERVIEW_LABEL } from '../../view2d/transformerView2dTargets.js';
+import { resolveTransformerView2dRoute } from '../../view2d/transformerView2dRoute.js';
 import {
     dispatchTokenChipHoverSync,
     tokenChipEntryListsMatch
@@ -53,6 +51,7 @@ import {
 import { initGoogleAnalyticsPageTracking } from './googleAnalytics.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { initPassIntroOverlay } from './passIntroOverlay.js';
+import { createLazySelectionPanel } from './lazySelectionPanel.js';
 import {
     NUM_LAYERS,
     PROMPT_TOKENS,
@@ -63,6 +62,7 @@ import {
 
 const vec3 = (arr) => new THREE.Vector3(arr[0], arr[1], arr[2]);
 const SCENE_RAYCAST_TOKEN_HOVER_SOURCE = 'scene-raycast';
+const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT-2 (124M)';
 
 function hideLoadingOverlay() {
     const overlay = document.getElementById('loadingOverlay');
@@ -295,7 +295,7 @@ const topControls = document.getElementById('topControls');
 const settingsOverlay = document.getElementById('settingsOverlay');
 const { showTopControls } = initTopControlsAutohide({ topControls, settingsOverlay });
 
-const selectionPanel = initSelectionPanel({
+const selectionPanel = createLazySelectionPanel({
     activationSource,
     laneTokenIndices: initialPassState.laneTokenIndices,
     tokenLabels: initialPassState.tokenLabels,
@@ -307,7 +307,7 @@ const selectionPanel = initSelectionPanel({
 transformerView2dBtn?.addEventListener('click', (event) => {
     event.preventDefault();
     showTopControls();
-    selectionPanel.openTransformerView2d({
+    void selectionPanel.openTransformerView2d({
         semanticTarget: null,
         focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_LABEL
     });
@@ -325,7 +325,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     }
     const handleKvCacheInfoRequest = (event) => {
         const phase = event?.detail?.phase;
-        selectionPanel.handleSelection(buildKvCacheInfoSelection({ phase }));
+        void selectionPanel.handleSelection(buildKvCacheInfoSelection({ phase }));
     };
     window.__llmVisualizedKvCacheInfoListener = handleKvCacheInfoRequest;
     window.addEventListener(KV_CACHE_INFO_REQUEST_EVENT, handleKvCacheInfoRequest);
@@ -337,7 +337,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     const handleMhsaInfoRequest = (event) => {
         const layerIndex = Number(event?.detail?.layerIndex);
         const headIndex = Number(event?.detail?.headIndex);
-        selectionPanel.handleSelection(buildMhsaInfoSelection({
+        void selectionPanel.handleSelection(buildMhsaInfoSelection({
             layerIndex: Number.isFinite(layerIndex) ? Math.floor(layerIndex) : null,
             headIndex: Number.isFinite(headIndex) ? Math.floor(headIndex) : null
         }));
@@ -394,7 +394,7 @@ const promptTokenStrip = initPromptTokenStrip({
             kind: 'label'
         };
         if (selectionObject) selection.object = selectionObject;
-        selectionPanel.handleSelection(selection);
+        void selectionPanel.handleSelection(selection);
     }
 });
 let hoveredSceneTokenEntries = [];
@@ -423,7 +423,7 @@ if (pipeline.engine && typeof pipeline.engine.setRaycastSelectionHandler === 'fu
             return;
         }
         followModeControls?.suppressPendingFollowDisable?.();
-        selectionPanel.handleSelection(selection);
+        void selectionPanel.handleSelection(selection);
     });
 }
 if (pipeline.engine && typeof pipeline.engine.setRaycastHoverHandler === 'function') {
@@ -489,7 +489,7 @@ Promise.resolve().then(async () => {
             hideLoadingOverlay();
             pipeline?.engine?.resume?.('initial-pass-intro');
             await waitForAnimationFrames(1);
-            selectionPanel.handleSelection(buildMhsaInfoSelection());
+            await selectionPanel.handleSelection(buildMhsaInfoSelection());
         } catch (err) {
             console.error('Direct MHSA startup failed:', err);
             hideLoadingOverlay();
@@ -503,7 +503,7 @@ Promise.resolve().then(async () => {
             hideLoadingOverlay();
             pipeline?.engine?.resume?.('initial-pass-intro');
             await waitForAnimationFrames(1);
-            selectionPanel.openTransformerView2d({
+            await selectionPanel.openTransformerView2d({
                 semanticTarget: initialTransformerView2dRoute.semanticTarget
             });
         } catch (err) {

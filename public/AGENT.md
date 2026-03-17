@@ -7,7 +7,7 @@ Static assets served directly by Vite.
 
 ## Key Files
 - `twelve-layer-stack.css`: core tower styling.
-- `capture.json` and `capture_2.json`: captured activation datasets.
+- `capture.json`: captured activation dataset.
 - `flops_per_step.csv` and `flops_per_step.svg`: stats/visualization assets.
 - `position_embeddings_grid*.png`: embedding reference images.
 

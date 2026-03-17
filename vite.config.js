@@ -30,7 +30,6 @@ export default defineConfig({
           if (id.includes('/node_modules/three/src/renderers/')) return 'vendor-three-renderers';
           if (id.includes('/node_modules/three/')) return 'vendor-three-core';
           if (id.includes('/node_modules/')) return 'vendor';
-          if (id.includes('/src/ui/selectionPanel')) return 'ui-selection-panel';
           if (id.includes('/src/engine/layers/') || id.includes('/src/animations/')) return 'scene-runtime';
           return undefined;
         }

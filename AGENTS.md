@@ -35,11 +35,12 @@ This repo is a Three.js visualization of GPT-2 internals, centered on a 12-layer
 - `npm run build`
 
 ## Build Notes
-- `vite.config.js` uses `manualChunks` to keep app-owned runtime code split (`index`, `scene-runtime`, `ui-selection-panel`) and isolate large vendor domains (`vendor-three-core`, `vendor-three-examples`).
+- `vite.config.js` uses `manualChunks` to keep app-owned runtime code split (`index`, `scene-runtime`) and isolate large vendor domains (`vendor-three-core`, `vendor-three-examples`).
+- The selection panel now lazy-loads from the main app entry instead of being forced into a dedicated manual chunk, so it no longer appears in the initial modulepreload set.
 
 ## Activation Capture Semantics
 - `scripts/extract_gpt2_data.py` captures compact activations with stride sampling, not pooled 64-d buckets. The helper `sample_tensor()` selects coordinates `0, stride, 2 * stride, ...` along the last dimension.
-- The current shipped captures (`public/capture.json`, `public/capture_2.json`) use `residual_stride=64`, `attention_stride=64`, and `mlp_stride=64`, so a 768-d residual is stored as 12 sampled GPT coordinates at dims `0, 64, 128, ..., 704`.
+- The current shipped capture (`public/capture.json`) uses `residual_stride=64`, `attention_stride=64`, and `mlp_stride=64`, so a 768-d residual is stored as 12 sampled GPT coordinates at dims `0, 64, 128, ..., 704`.
 - For the residual `X` summaries in 2D and the related sidebar/vector previews, the 12 stored values are the color-driving values. The visible strip/card gradient interpolates between the 12 resulting colors; it is not a 64-d average per bucket.
 - If a future capture is regenerated with a different stride, the sampled-coordinate interpretation changes with that config. Check `meta.config` in the capture file before assuming the meaning of a stored vector length.
 

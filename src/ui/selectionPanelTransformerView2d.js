@@ -685,20 +685,8 @@ export function createTransformerView2dDetailView(panelEl, {
         return requestSelectionOpen(selection);
     }
 
-    function isCanvasSidebarSelection(selection = null) {
-        const lower = String(selection?.label || '').trim().toLowerCase();
-        return lower.startsWith('token:')
-            || lower.startsWith('position:')
-            || lower.startsWith('chosen token:')
-            || lower === 'chosen token'
-            || lower === 'vocabulary embedding matrix'
-            || lower === 'position embedding matrix'
-            || lower === 'vocabulary unembedding matrix';
-    }
-
     function resolveCanvasSemanticSelection(hit = null) {
-        const selection = buildSemanticNodeHoverPayload(hit);
-        return isCanvasSidebarSelection(selection) ? selection : null;
+        return buildSemanticNodeHoverPayload(hit);
     }
 
     function setSelectionSidebarLine(element, {
@@ -3101,6 +3089,16 @@ export function createTransformerView2dDetailView(panelEl, {
         ) ? 'pointer' : '';
     }
 
+    function shouldOpenCanvasSceneNode(entry = null) {
+        return !!(
+            isMhsaHeadOverviewEntry(entry)
+            || isConcatOverviewEntry(entry)
+            || isOutputProjectionOverviewEntry(entry)
+            || isMlpOverviewEntry(entry)
+            || isLayerNormOverviewEntry(entry)
+        );
+    }
+
     function onSceneNodeClick(entry = null) {
         resetOverviewSelectionArm();
         clearStagedHeadDetailTransition();
@@ -3670,6 +3668,9 @@ export function createTransformerView2dDetailView(panelEl, {
                 }
             }
             const semanticSelection = resolveCanvasSemanticSelection(clickedHit);
+            const semanticSelectionFocusState = semanticSelection
+                ? buildSemanticNodeHoverFocusState(state.scene, clickedHit)
+                : null;
             const semanticArmSignature = semanticSelection
                 ? buildCanvasHoverTargetKey(clickedHit, 'overview-node-selection')
                 : '';
@@ -3682,17 +3683,20 @@ export function createTransformerView2dDetailView(panelEl, {
                 }
                 resetOverviewSelectionArm();
                 if (requestSelectionOpen(semanticSelection)) {
-                    clearPinnedOverviewSceneFocus({ scheduleRender: true });
+                    if (semanticSelectionFocusState?.focusState) {
+                        lockPinnedOverviewSceneFocus({
+                            ...semanticSelection,
+                            ...semanticSelectionFocusState
+                        }, {
+                            scheduleRender: true
+                        });
+                    } else {
+                        clearPinnedOverviewSceneFocus({ scheduleRender: true });
+                    }
                     return;
                 }
             }
-            const shouldOpenSceneNode = !!(
-                isMhsaHeadOverviewEntry(clickedEntry)
-                || isConcatOverviewEntry(clickedEntry)
-                || isOutputProjectionOverviewEntry(clickedEntry)
-                || isMlpOverviewEntry(clickedEntry)
-                || isLayerNormOverviewEntry(clickedEntry)
-            );
+            const shouldOpenSceneNode = shouldOpenCanvasSceneNode(clickedEntry);
             if (shouldOpenSceneNode) {
                 clearPinnedOverviewSceneFocus({ scheduleRender: false });
                 onSceneNodeClick(clickedEntry);
@@ -3720,6 +3724,14 @@ export function createTransformerView2dDetailView(panelEl, {
     canvas?.addEventListener('wheel', onWheel, { passive: false });
     canvas?.addEventListener('dblclick', (event) => {
         focusCanvasSurface();
+        const clickedHit = resolveCanvasScreenHit(event);
+        const clickedEntry = clickedHit?.entry || null;
+        if (shouldOpenCanvasSceneNode(clickedEntry)) {
+            clearPinnedOverviewSceneFocus({ scheduleRender: false });
+            onSceneNodeClick(clickedEntry);
+            event?.preventDefault?.();
+            return;
+        }
         if (shouldSuppressView2dDoubleClickFocus({
             headDetailDepthActive: state.headDetailDepthActive,
             hasActiveDetailTarget: hasActiveDetailTarget(),

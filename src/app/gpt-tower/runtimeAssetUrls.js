@@ -1,22 +1,20 @@
-import captureUrl from '../../assets/captures/capture.json?url';
-import capture2Url from '../../assets/captures/capture_2.json?url';
 import precomputedComponentsQkvUrl from '../../../precomputed_components_qkv.glb?url';
 import precomputedComponentsSliceUrl from '../../../precomputed_components_slice.glb?url';
 
 export const DEFAULT_CAPTURE_FILE = 'capture.json';
 export const PRECOMPUTED_COMPONENTS_QKV_URL = precomputedComponentsQkvUrl;
 export const PRECOMPUTED_COMPONENTS_SLICE_URL = precomputedComponentsSliceUrl;
+const DEFAULT_CAPTURE_PATH = '/capture.json';
 
 const LOCAL_CAPTURE_URL_BASE = 'https://llm-visualized.local';
 const CAPTURE_URL_BY_FILE = new Map([
-    ['capture.json', captureUrl],
-    ['capture_2.json', capture2Url]
+    ['capture.json', DEFAULT_CAPTURE_PATH]
 ]);
 
 export function resolveCaptureAssetUrl(captureFile = DEFAULT_CAPTURE_FILE) {
     const rawValue = String(captureFile || DEFAULT_CAPTURE_FILE).trim();
     if (!rawValue) {
-        return captureUrl;
+        return DEFAULT_CAPTURE_PATH;
     }
 
     try {
@@ -35,8 +33,8 @@ export function resolveCaptureAssetUrl(captureFile = DEFAULT_CAPTURE_FILE) {
         return `${localUrl.pathname}${localUrl.search}${localUrl.hash}`;
     }
 
-    const hashedUrl = new URL(mappedUrl, LOCAL_CAPTURE_URL_BASE);
-    hashedUrl.search = localUrl.search;
-    hashedUrl.hash = localUrl.hash;
-    return `${hashedUrl.pathname}${hashedUrl.search}${hashedUrl.hash}`;
+    const captureUrl = new URL(mappedUrl, LOCAL_CAPTURE_URL_BASE);
+    captureUrl.search = localUrl.search;
+    captureUrl.hash = localUrl.hash;
+    return `${captureUrl.pathname}${captureUrl.search}${captureUrl.hash}`;
 }
