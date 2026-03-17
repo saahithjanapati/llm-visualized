@@ -4,8 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { D_HEAD, D_MODEL } from './selectionPanelConstants.js';
 import { TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS } from './selectionPanelTransformerView2dTransitionUtils.js';
+import { TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT } from './selectionPanelTransformerView2dViewportUtils.js';
 import { TRANSFORMER_VIEW2D_OVERVIEW_LABEL } from '../view2d/transformerView2dTargets.js';
+import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
+import { resolveSemanticTargetBounds } from '../view2d/layout/resolveSemanticTargetBounds.js';
 import { buildTransformerSceneModel } from '../view2d/model/buildTransformerSceneModel.js';
+import { resolveViewportFitTransform } from '../view2d/runtime/View2dViewportController.js';
 import { flattenSceneNodes, VIEW2D_NODE_KINDS } from '../view2d/schema/sceneTypes.js';
 
 function createRect(width = 960, height = 600) {
@@ -385,6 +389,54 @@ describe('createTransformerView2dDetailView', () => {
 
         expect(stage?.textContent).toBe(TRANSFORMER_VIEW2D_OVERVIEW_LABEL);
         expect(layer?.hidden).toBe(true);
+    });
+
+    it('uses a looser initial frame when opening a focused external target', () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const semanticTarget = {
+            componentKind: 'embedding',
+            stage: 'embedding.token',
+            role: 'module'
+        };
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const focusBounds = resolveSemanticTargetBounds(layout.registry, semanticTarget);
+        const legacyTightFocusTransform = resolveViewportFitTransform(focusBounds, {
+            width: 960,
+            height: 600
+        }, {
+            padding: 36,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget,
+            focusLabel: 'Token embeddings',
+            transitionMode: 'direct'
+        });
+
+        expect(view.getViewportState().scale).toBeLessThan(legacyTightFocusTransform.scale);
     });
 
     it('stages scene-backed MLP targets from overview focus into the detail scene', async () => {
@@ -1498,5 +1550,117 @@ describe('createTransformerView2dDetailView', () => {
         expect(onCloseSelection).toHaveBeenCalledTimes(1);
         expect(view.hasSelectionLock()).toBe(false);
         expect(view.isSelectionSidebarVisible()).toBe(false);
+    });
+
+    it('switches a locked deep-detail highlight even when the mouse click has slight drift', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        let view = null;
+        const onOpenSelection = vi.fn((selection) => {
+            view?.setSelectionSidebarHeaderContent({
+                titleHtml: selection?.label || '',
+                titleClassName: 'detail-transformer-view2d-selection-sidebar-title detail-title'
+            });
+            view?.setSelectionSidebarVisible(true);
+            return true;
+        });
+        view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection,
+            onCloseSelection: vi.fn(() => true)
+        });
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const selectionSidebar = panelEl.querySelector('.detail-transformer-view2d-selection-sidebar');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+        setElementRectAt(selectionSidebar, {
+            left: 560,
+            top: 56,
+            width: 384,
+            height: 544
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-weight'
+            }],
+            detailFocusLabel: 'MLP Up Weight Matrix',
+            transitionMode: 'staged-detail'
+        });
+
+        await vi.advanceTimersByTimeAsync(1200);
+
+        detailHoverStateOverride = {
+            label: 'MLP Up Weight Matrix',
+            signature: 'node-a',
+            focusState: {
+                activeNodeIds: ['node-a']
+            }
+        };
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            clientX: 240,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            clientX: 242,
+            clientY: 181
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            clientX: 242,
+            clientY: 181
+        }));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                label: 'MLP Up Weight Matrix',
+                signature: 'node-a'
+            })
+        );
+        expect(view.hasSelectionLock()).toBe(true);
+
+        detailHoverStateOverride = {
+            label: 'MLP Down Weight Matrix',
+            signature: 'node-b',
+            focusState: {
+                activeNodeIds: ['node-b']
+            }
+        };
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            clientX: 286,
+            clientY: 214
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            clientX: 288,
+            clientY: 215
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            clientX: 288,
+            clientY: 215
+        }));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(2);
+        expect(onOpenSelection).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                label: 'MLP Down Weight Matrix',
+                signature: 'node-b'
+            })
+        );
+        expect(view.hasSelectionLock()).toBe(true);
+        expect(view.isSelectionSidebarVisible()).toBe(true);
     });
 });

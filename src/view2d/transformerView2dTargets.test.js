@@ -128,6 +128,117 @@ describe('transformerView2dTargets', () => {
         });
     });
 
+    it('maps embedding-sum vector selections to the incoming residual overview row', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Embedding Sum - Token B',
+            info: {
+                layerIndex: 0,
+                tokenIndex: 1,
+                tokenLabel: 'Token B',
+                activationData: {
+                    stage: 'embedding.sum',
+                    layerIndex: 0,
+                    tokenIndex: 1,
+                    tokenLabel: 'Token B'
+                }
+            }
+        }, 'Residual Stream Vector');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module'
+            },
+            initialOverviewSelectionLockTarget: {
+                semanticTarget: {
+                    componentKind: 'residual',
+                    layerIndex: 0,
+                    stage: 'incoming',
+                    role: 'module'
+                },
+                tokenIndex: 1,
+                tokenLabel: 'Token B'
+            }
+        });
+        expect(context?.transitionMode || '').toBe('staged-focus');
+    });
+
+    it('maps intermediate post-MLP residual selections to the next layer incoming residual overview row', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Post-MLP Residual - Token B',
+            info: {
+                layerIndex: 4,
+                tokenIndex: 1,
+                tokenLabel: 'Token B',
+                activationData: {
+                    stage: 'residual.post_mlp',
+                    layerIndex: 4,
+                    tokenIndex: 1,
+                    tokenLabel: 'Token B'
+                }
+            }
+        }, 'Residual Stream Vector');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 5,
+                stage: 'incoming',
+                role: 'module'
+            },
+            initialOverviewSelectionLockTarget: {
+                semanticTarget: {
+                    componentKind: 'residual',
+                    layerIndex: 5,
+                    stage: 'incoming',
+                    role: 'module'
+                },
+                tokenIndex: 1,
+                tokenLabel: 'Token B'
+            }
+        });
+        expect(context?.transitionMode || '').toBe('staged-focus');
+    });
+
+    it('maps final post-MLP residual selections to the outgoing residual overview row', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Post-MLP Residual - Token B',
+            info: {
+                layerIndex: 11,
+                tokenIndex: 1,
+                tokenLabel: 'Token B',
+                activationData: {
+                    stage: 'residual.post_mlp',
+                    layerIndex: 11,
+                    tokenIndex: 1,
+                    tokenLabel: 'Token B'
+                }
+            }
+        }, 'Residual Stream Vector');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 11,
+                stage: 'outgoing',
+                role: 'module'
+            },
+            initialOverviewSelectionLockTarget: {
+                semanticTarget: {
+                    componentKind: 'residual',
+                    layerIndex: 11,
+                    stage: 'outgoing',
+                    role: 'module'
+                },
+                tokenIndex: 1,
+                tokenLabel: 'Token B'
+            }
+        });
+        expect(context?.transitionMode || '').toBe('staged-focus');
+    });
+
     it('builds a row-scoped overview focus state for residual selections', () => {
         const scene = buildTransformerSceneModel({
             tokenIndices: [0, 1],
@@ -238,6 +349,30 @@ describe('transformerView2dTargets', () => {
                 componentKind: 'layer-norm',
                 layerIndex: 0,
                 stage: 'ln2',
+                role: 'module'
+            }
+        ]);
+    });
+
+    it('prefers the actual residual matrix card for post-MLP overview focus targets', () => {
+        expect(resolveFocusSemanticTargets({
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 4,
+                stage: 'post-mlp-residual',
+                role: 'module'
+            }
+        })).toEqual([
+            {
+                componentKind: 'residual',
+                layerIndex: 5,
+                stage: 'incoming',
+                role: 'module-card'
+            },
+            {
+                componentKind: 'residual',
+                layerIndex: 5,
+                stage: 'incoming',
                 role: 'module'
             }
         ]);

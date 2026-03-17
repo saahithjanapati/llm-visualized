@@ -8,6 +8,7 @@ import {
     isValueSelection,
     isWeightedSumSelection
 } from '../ui/selectionPanelSelectionUtils.js';
+import { NUM_LAYERS } from '../app/gpt-tower/config.js';
 import {
     flattenSceneNodes,
     VIEW2D_NODE_KINDS
@@ -27,6 +28,9 @@ import { resolvePreferredTokenLabel } from '../utils/tokenLabelResolution.js';
 
 export const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT-2 (124M)';
 const OVERVIEW_HOVER_FOCUS_RESULT_CACHE = new WeakMap();
+const TRANSFORMER_VIEW2D_OVERVIEW_LAYER_COUNT = Number.isFinite(NUM_LAYERS)
+    ? Math.max(1, Math.floor(NUM_LAYERS))
+    : 12;
 
 function isResidualOverviewStreamNode(node = null) {
     return (
@@ -171,6 +175,100 @@ function normalizeResidualSemanticStage(stage = '') {
     }
     if (lower === 'outgoing') return 'outgoing';
     return lower;
+}
+
+function buildResidualOverviewSemanticTarget({
+    stage = '',
+    layerIndex = null,
+    role = 'module'
+} = {}) {
+    const safeLayerIndex = normalizeOptionalIndex(layerIndex);
+    const safeRole = typeof role === 'string' && role.trim().length
+        ? role.trim()
+        : 'module';
+    const stageLower = String(stage || '').trim().toLowerCase();
+    if (stageLower.startsWith('embedding.sum')) {
+        return buildSemanticTarget({
+            componentKind: 'residual',
+            layerIndex: Number.isFinite(safeLayerIndex) ? safeLayerIndex : 0,
+            stage: 'incoming',
+            role: safeRole
+        });
+    }
+
+    const normalizedResidualStage = normalizeResidualSemanticStage(stageLower);
+    if (!Number.isFinite(safeLayerIndex)) {
+        return normalizedResidualStage === 'incoming'
+            ? buildSemanticTarget({
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: safeRole
+            })
+            : null;
+    }
+
+    if (normalizedResidualStage === 'incoming') {
+        return buildSemanticTarget({
+            componentKind: 'residual',
+            layerIndex: safeLayerIndex,
+            stage: 'incoming',
+            role: safeRole
+        });
+    }
+
+    if (normalizedResidualStage === 'post-attn-residual') {
+        return buildSemanticTarget({
+            componentKind: 'residual',
+            layerIndex: safeLayerIndex,
+            stage: 'post-attn-residual',
+            role: safeRole
+        });
+    }
+
+    if (normalizedResidualStage === 'post-mlp-residual') {
+        if (safeLayerIndex + 1 < TRANSFORMER_VIEW2D_OVERVIEW_LAYER_COUNT) {
+            return buildSemanticTarget({
+                componentKind: 'residual',
+                layerIndex: safeLayerIndex + 1,
+                stage: 'incoming',
+                role: safeRole
+            });
+        }
+        return buildSemanticTarget({
+            componentKind: 'residual',
+            layerIndex: safeLayerIndex,
+            stage: 'outgoing',
+            role: safeRole
+        });
+    }
+
+    if (normalizedResidualStage === 'outgoing') {
+        return buildSemanticTarget({
+            componentKind: 'residual',
+            layerIndex: safeLayerIndex,
+            stage: 'outgoing',
+            role: safeRole
+        });
+    }
+
+    return null;
+}
+
+function canonicalizeResidualOverviewSemanticTarget(target = null, role = null) {
+    const safeTarget = buildSemanticTarget(target);
+    if (safeTarget?.componentKind !== 'residual') return safeTarget;
+    const safeRole = typeof role === 'string' && role.trim().length
+        ? role.trim()
+        : String(safeTarget.role || '').trim() || 'module';
+    return buildResidualOverviewSemanticTarget({
+        stage: safeTarget.stage,
+        layerIndex: safeTarget.layerIndex,
+        role: safeRole
+    }) || buildSemanticTarget({
+        ...safeTarget,
+        role: safeRole
+    });
 }
 
 function buildLayerNormStageMap(layerNormKind = null) {
@@ -548,7 +646,7 @@ export function buildResidualRowSelectionFocusState(scene = null, hit = null) {
 
 function normalizeResidualOverviewSelectionLockTarget(target = null) {
     if (!target || typeof target !== 'object') return null;
-    const semanticTarget = buildSemanticTarget(target.semanticTarget);
+    const semanticTarget = canonicalizeResidualOverviewSemanticTarget(target.semanticTarget);
     const tokenIndex = normalizeOptionalIndex(target.tokenIndex);
     if (
         semanticTarget?.componentKind !== 'residual'
@@ -601,7 +699,7 @@ function findResidualOverviewRowIndex(rowItems = [], tokenIndex = null) {
 }
 
 export function resolveResidualOverviewSelectionLockTarget(selectionInfo = null, semanticTarget = null) {
-    const safeSemanticTarget = buildSemanticTarget(semanticTarget);
+    const safeSemanticTarget = canonicalizeResidualOverviewSemanticTarget(semanticTarget);
     if (safeSemanticTarget?.componentKind !== 'residual') return null;
 
     const tokenIndex = normalizeOptionalIndex(findUserDataNumber(selectionInfo, 'tokenIndex'));
@@ -1555,7 +1653,12 @@ export function resolveFocusSemanticTargets({
                 mlpDetailTarget,
                 layerNormDetailTarget
             });
-        if (activeTarget?.componentKind === 'layer-norm') {
+        if (activeTarget?.componentKind === 'residual') {
+            candidates.push(
+                canonicalizeResidualOverviewSemanticTarget(activeTarget, 'module-card'),
+                canonicalizeResidualOverviewSemanticTarget(activeTarget, 'module')
+            );
+        } else if (activeTarget?.componentKind === 'layer-norm') {
             candidates.push(
                 buildSemanticTarget({
                     ...activeTarget,
@@ -1792,6 +1895,7 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     if (!label.length) return null;
 
     const lower = label.toLowerCase();
+    const rawLower = String(selectionInfo?.label || '').trim().toLowerCase();
     const activationData = getActivationDataFromSelection(selectionInfo);
     const stageLower = String(activationData?.stage || '').toLowerCase();
     const layerIndex = normalizeOptionalIndex(findUserDataNumber(selectionInfo, 'layerIndex'));
@@ -1876,13 +1980,27 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
         || (lower.includes('vocabulary embedding') && !topUnembeddingLabel)
         || (lower.includes('vocab embedding') && !topUnembeddingLabel)
     ) {
-        semanticTarget = buildSemanticTarget({
-            componentKind: 'embedding',
-            stage: stageLower.startsWith('embedding.sum') || lower.includes('embedding sum')
-                ? 'embedding.sum'
-                : 'embedding.token',
-            role: 'module'
-        });
+        const isEmbeddingSumVectorSelection = (
+            stageLower.startsWith('embedding.sum')
+            && Number.isFinite(tokenIndex)
+            && (
+                lower.includes('residual stream vector')
+                || rawLower.includes('embedding sum')
+            )
+        );
+        semanticTarget = isEmbeddingSumVectorSelection
+            ? buildResidualOverviewSemanticTarget({
+                stage: 'embedding.sum',
+                layerIndex,
+                role: 'module'
+            })
+            : buildSemanticTarget({
+                componentKind: 'embedding',
+                stage: stageLower.startsWith('embedding.sum') || lower.includes('embedding sum')
+                    ? 'embedding.sum'
+                    : 'embedding.token',
+                role: 'module'
+            });
     } else if (
         stageLower === 'attention.concatenate'
         || lower === 'concatenate'
@@ -1961,45 +2079,39 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
         stageLower.startsWith('layer.incoming')
         || lower.includes('incoming residual')
     ) {
-        if (Number.isFinite(layerIndex)) {
-            semanticTarget = buildSemanticTarget({
-                componentKind: 'residual',
-                layerIndex,
-                stage: 'incoming',
-                role: 'module'
-            });
-        }
+        semanticTarget = buildResidualOverviewSemanticTarget({
+            stage: stageLower || 'incoming',
+            layerIndex,
+            role: 'module'
+        });
     } else if (
         stageLower.includes('post_attention')
         || lower.includes('post-attention residual')
         || lower.includes('post attention residual')
     ) {
-        if (Number.isFinite(layerIndex)) {
-            semanticTarget = buildSemanticTarget({
-                componentKind: 'residual',
-                layerIndex,
-                stage: 'post-attn-residual',
-                role: 'module'
-            });
-        }
+        semanticTarget = buildResidualOverviewSemanticTarget({
+            stage: stageLower || 'post-attn-residual',
+            layerIndex,
+            role: 'module'
+        });
     } else if (
         stageLower.includes('post_mlp')
         || lower.includes('post-mlp residual')
         || lower.includes('post mlp residual')
     ) {
-        if (Number.isFinite(layerIndex)) {
-            semanticTarget = buildSemanticTarget({
-                componentKind: 'residual',
-                layerIndex,
-                stage: 'post-mlp-residual',
-                role: 'module'
-            });
-        }
-    } else if (lower.includes('residual stream vector') && Number.isFinite(layerIndex)) {
-        semanticTarget = buildSemanticTarget({
-            componentKind: 'residual',
+        semanticTarget = buildResidualOverviewSemanticTarget({
+            stage: stageLower || 'post-mlp-residual',
             layerIndex,
+            role: 'module'
+        });
+    } else if (lower.includes('residual stream vector') && Number.isFinite(layerIndex)) {
+        semanticTarget = buildResidualOverviewSemanticTarget({
+            stage: stageLower || 'incoming',
+            layerIndex,
+            role: 'module'
+        }) || buildResidualOverviewSemanticTarget({
             stage: 'incoming',
+            layerIndex,
             role: 'module'
         });
     }

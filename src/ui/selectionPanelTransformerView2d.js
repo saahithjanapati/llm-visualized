@@ -129,12 +129,26 @@ const VIEW2D_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
     bottom: 6,
     left: 6
 });
+const VIEW2D_ENTRY_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
+    top: 22,
+    right: 22,
+    bottom: 22,
+    left: 22
+});
 const VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
     top: 20,
     right: 24,
     bottom: 20,
     left: 24
 });
+const VIEW2D_ENTRY_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
+    top: 36,
+    right: 40,
+    bottom: 36,
+    left: 40
+});
+const VIEW2D_SELECTION_FOCUS_PADDING = 36;
+const VIEW2D_ENTRY_SELECTION_FOCUS_PADDING = 72;
 const VIEW2D_STAGED_FOCUS_OVERVIEW_HOLD_MS = 280;
 const VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS = 1120;
 const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_HOLD_MS = 300;
@@ -595,6 +609,7 @@ export function createTransformerView2dDetailView(panelEl, {
         autoFrameOnResize: false,
         lastAutoFrameViewportSize: null,
         tokenStripSignature: '',
+        entryFocusPaddingActive: false,
         stagedFocusTransition: null,
         stagedFocusRafId: null,
         stagedHeadDetailTransition: null,
@@ -613,6 +628,34 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function resetOverviewSelectionArm() {
         state.overviewSelectionArmSignature = '';
+    }
+
+    function maybeDisableEntryFocusPadding() {
+        if (
+            state.stagedFocusTransition
+            || state.stagedHeadDetailTransition
+            || state.stagedDetailTransition
+        ) {
+            return;
+        }
+        state.entryFocusPaddingActive = false;
+    }
+
+    function resolveSelectionFocusPadding() {
+        if (!hasActiveDetailTarget()) {
+            return state.entryFocusPaddingActive
+                ? VIEW2D_ENTRY_SELECTION_FOCUS_PADDING
+                : VIEW2D_SELECTION_FOCUS_PADDING;
+        }
+        return state.entryFocusPaddingActive
+            ? VIEW2D_ENTRY_HEAD_DETAIL_FOCUS_PADDING
+            : VIEW2D_HEAD_DETAIL_FOCUS_PADDING;
+    }
+
+    function resolveHeadDetailComponentFocusPadding() {
+        return state.entryFocusPaddingActive
+            ? VIEW2D_ENTRY_HEAD_DETAIL_COMPONENT_FOCUS_PADDING
+            : VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING;
     }
 
     function shouldRequireTouchSelectionConfirmation(_event = null, armSignature = '') {
@@ -984,6 +1027,7 @@ export function createTransformerView2dDetailView(panelEl, {
             state.stagedFocusRafId = null;
         }
         state.stagedFocusTransition = null;
+        maybeDisableEntryFocusPadding();
     }
 
     function clearStagedHeadDetailTransition() {
@@ -992,6 +1036,7 @@ export function createTransformerView2dDetailView(panelEl, {
             state.stagedHeadDetailRafId = null;
         }
         state.stagedHeadDetailTransition = null;
+        maybeDisableEntryFocusPadding();
     }
 
     function clearStagedDetailTransition() {
@@ -1000,6 +1045,7 @@ export function createTransformerView2dDetailView(panelEl, {
             state.stagedDetailRafId = null;
         }
         state.stagedDetailTransition = null;
+        maybeDisableEntryFocusPadding();
     }
 
     function resolveHeadDetailFocusLabel() {
@@ -1345,7 +1391,7 @@ export function createTransformerView2dDetailView(panelEl, {
         if (!state.headDetailDepthActive || !hasSceneBackedDetailTarget()) return false;
         const bounds = resolveHeadDetailFocusBounds();
         if (!bounds) return false;
-        const padding = VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING;
+        const padding = resolveHeadDetailComponentFocusPadding();
         state.focusLabel = resolveHeadDetailFocusLabel();
         updateReadouts();
         if (animate) {
@@ -1356,11 +1402,13 @@ export function createTransformerView2dDetailView(panelEl, {
                 padding
             });
             animateViewport();
+            maybeDisableEntryFocusPadding();
             return true;
         }
         detailViewportController.fitToBounds(bounds, {
             padding
         });
+        maybeDisableEntryFocusPadding();
         return true;
     }
 
@@ -2998,6 +3046,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 if (!didFit) return false;
                 state.focusLabel = resolveActiveFocusLabel(state);
                 updateReadouts();
+                maybeDisableEntryFocusPadding();
                 if (!animate) {
                     render();
                 }
@@ -3016,6 +3065,7 @@ export function createTransformerView2dDetailView(panelEl, {
             if (!didFit) return false;
             state.focusLabel = resolveActiveFocusLabel(state);
             updateReadouts();
+            maybeDisableEntryFocusPadding();
             if (!animate) {
                 render();
             }
@@ -3025,11 +3075,15 @@ export function createTransformerView2dDetailView(panelEl, {
         if (shouldKeepSceneBackedDetailFitView()) {
             state.focusLabel = state.detailFocusLabel || resolveActiveFocusLabel(state);
             updateReadouts();
-            return fitScene({ animate });
+            const didFit = fitScene({ animate });
+            maybeDisableEntryFocusPadding();
+            return didFit;
         }
 
         if (!state.layout?.registry || !state.semanticTarget) {
-            return fitScene({ animate });
+            const didFit = fitScene({ animate });
+            maybeDisableEntryFocusPadding();
+            return didFit;
         }
 
         const bounds = resolveSelectionFocusBounds();
@@ -3037,11 +3091,13 @@ export function createTransformerView2dDetailView(panelEl, {
         if (!bounds) {
             state.focusLabel = `${activeFocusLabel} (focus fallback: full scene)`;
             updateReadouts();
-            return fitScene({ animate });
+            const didFit = fitScene({ animate });
+            maybeDisableEntryFocusPadding();
+            return didFit;
         }
 
         state.focusLabel = activeFocusLabel;
-        const padding = hasActiveDetailTarget() ? VIEW2D_HEAD_DETAIL_FOCUS_PADDING : 36;
+        const padding = resolveSelectionFocusPadding();
         const resolvedDurationMs = Number.isFinite(durationMs)
             ? Math.max(1, Math.floor(durationMs))
             : (hasActiveDetailTarget() ? 520 : 420);
@@ -3065,9 +3121,11 @@ export function createTransformerView2dDetailView(panelEl, {
             });
             animateViewport();
             updateReadouts();
+            maybeDisableEntryFocusPadding();
             return true;
         }
         viewportController.fitToBounds(bounds, { padding });
+        maybeDisableEntryFocusPadding();
         render();
         return true;
     }
@@ -3935,6 +3993,12 @@ export function createTransformerView2dDetailView(panelEl, {
                     phaseStartTime: null
                 };
             }
+            state.entryFocusPaddingActive = !!(
+                buildSemanticTarget(semanticTarget)
+                || shouldStageHeadDetailEntry
+                || shouldStageSceneDetailEntry
+                || shouldStageFocusEntry
+            );
             cancelScheduledHoverUpdate();
             clearPinnedSceneSelectionLocks({ scheduleRender: false });
             clearCanvasHover({ scheduleRender: false, force: true });

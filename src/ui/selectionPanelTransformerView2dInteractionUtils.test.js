@@ -108,6 +108,46 @@ describe('selectionPanelTransformerView2dInteractionUtils', () => {
         });
     });
 
+    it('does not suppress mouse clicks for slight drift below the click slop', () => {
+        expect(resolveView2dPointerMoveIntent({
+            pointerType: 'mouse',
+            startClientX: 100,
+            startClientY: 120,
+            previousClientX: 100,
+            previousClientY: 120,
+            clientX: 101,
+            clientY: 121,
+            moved: false,
+            suppressClick: false
+        })).toEqual({
+            deltaX: 1,
+            deltaY: 1,
+            moved: false,
+            suppressClick: false,
+            shouldPan: false
+        });
+    });
+
+    it('starts mouse panning only after the drag exceeds click slop', () => {
+        expect(resolveView2dPointerMoveIntent({
+            pointerType: 'mouse',
+            startClientX: 100,
+            startClientY: 120,
+            previousClientX: 100,
+            previousClientY: 120,
+            clientX: 107,
+            clientY: 120,
+            moved: false,
+            suppressClick: false
+        })).toEqual({
+            deltaX: 7,
+            deltaY: 0,
+            moved: true,
+            suppressClick: true,
+            shouldPan: true
+        });
+    });
+
     it('treats any completed pan or pinch-follow-up as non-clickable on release', () => {
         expect(shouldTreatView2dPointerReleaseAsClick({
             moved: false,

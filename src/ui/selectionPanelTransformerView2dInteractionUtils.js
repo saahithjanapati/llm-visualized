@@ -61,14 +61,14 @@ export function resolveView2dPointerMoveIntent({
         clientX,
         clientY
     });
-    const hasDelta = Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0;
-    const shouldPan = !isView2dTouchPointerType(pointerType) || nextMoved;
+    const nextSuppressClick = suppressClick === true || nextMoved;
+    const shouldPan = nextSuppressClick;
 
     return {
         deltaX,
         deltaY,
         moved: nextMoved,
-        suppressClick: suppressClick === true || (shouldPan && hasDelta),
+        suppressClick: nextSuppressClick,
         shouldPan
     };
 }
