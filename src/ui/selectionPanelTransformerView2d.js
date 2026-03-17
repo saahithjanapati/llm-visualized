@@ -105,8 +105,10 @@ const VIEW2D_DETAIL_ACTION_CLOSE_SELECTION = 'close-selection';
 const VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS = 220;
 const VIEW2D_SELECTION_SIDEBAR_VIEWPORT_TRANSITION_MS = 240;
 const VIEW2D_INTERACTION_SETTLE_MS = 140;
-const VIEW2D_PREVIEW_DPR_CAP_IDLE = 1.5;
-const VIEW2D_PREVIEW_DPR_CAP_INTERACTING = 1;
+// Keep the backing resolution stable so the first wheel/pinch interaction
+// does not pay a canvas resize/reallocation hitch on entry.
+const VIEW2D_PREVIEW_DPR_CAP_IDLE = 1.25;
+const VIEW2D_PREVIEW_DPR_CAP_INTERACTING = VIEW2D_PREVIEW_DPR_CAP_IDLE;
 const VIEW2D_KEYBOARD_PAN_PX_PER_SEC = 620;
 const VIEW2D_KEYBOARD_ZOOM_RATE = 0.00165;
 const VIEW2D_KEYBOARD_INITIAL_STEP_MS = 16;
@@ -130,10 +132,10 @@ const VIEW2D_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
     left: 6
 });
 const VIEW2D_ENTRY_HEAD_DETAIL_FOCUS_PADDING = Object.freeze({
-    top: 22,
-    right: 22,
-    bottom: 22,
-    left: 22
+    top: 60,
+    right: 60,
+    bottom: 60,
+    left: 60
 });
 const VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
     top: 20,
@@ -142,13 +144,13 @@ const VIEW2D_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
     left: 24
 });
 const VIEW2D_ENTRY_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
-    top: 36,
-    right: 40,
-    bottom: 36,
-    left: 40
+    top: 92,
+    right: 96,
+    bottom: 92,
+    left: 96
 });
 const VIEW2D_SELECTION_FOCUS_PADDING = 36;
-const VIEW2D_ENTRY_SELECTION_FOCUS_PADDING = 72;
+const VIEW2D_ENTRY_SELECTION_FOCUS_PADDING = 180;
 const VIEW2D_STAGED_FOCUS_OVERVIEW_HOLD_MS = 280;
 const VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS = 1120;
 const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_HOLD_MS = 300;
@@ -426,6 +428,22 @@ export function createTransformerView2dDetailView(panelEl, {
                     aria-hidden="true"
                 >
                     <div class="detail-transformer-view2d-selection-sidebar-header">
+                        <div
+                            class="detail-transformer-view2d-selection-sidebar-header-top"
+                            data-transformer-view2d-role="selection-sidebar-header-top"
+                        >
+                            <div class="detail-transformer-view2d-selection-sidebar-header-actions">
+                                <button
+                                    type="button"
+                                    class="detail-transformer-view2d-selection-sidebar-close"
+                                    data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_CLOSE_SELECTION}"
+                                    aria-label="Hide selection details"
+                                    title="Close details"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        </div>
                         <div class="detail-transformer-view2d-selection-sidebar-copy">
                             <div
                                 class="detail-transformer-view2d-selection-sidebar-title detail-title"
@@ -448,15 +466,6 @@ export function createTransformerView2dDetailView(panelEl, {
                                 hidden
                             ></div>
                         </div>
-                        <button
-                            type="button"
-                            class="detail-transformer-view2d-selection-sidebar-close"
-                            data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_CLOSE_SELECTION}"
-                            aria-label="Hide selection details"
-                            title="Close details"
-                        >
-                            ×
-                        </button>
                     </div>
                     <div
                         class="detail-transformer-view2d-selection-sidebar-body"
@@ -481,17 +490,17 @@ export function createTransformerView2dDetailView(panelEl, {
     const tokenStrip = root.querySelector('.detail-transformer-view2d-token-strip');
     const tokenStripTokens = root.querySelector('[data-transformer-view2d-role="token-strip-tokens"]');
     const selectionSidebar = root.querySelector('.detail-transformer-view2d-selection-sidebar');
-    const selectionSidebarHeader = root.querySelector('.detail-transformer-view2d-selection-sidebar-header');
+    const selectionSidebarHeaderTop = root.querySelector('[data-transformer-view2d-role="selection-sidebar-header-top"]');
     const selectionSidebarBody = root.querySelector('[data-transformer-view2d-role="selection-sidebar-body"]');
     const selectionSidebarTitle = root.querySelector('[data-transformer-view2d-role="selection-sidebar-title"]');
     const selectionSidebarSubtitle = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle"]');
     const selectionSidebarSubtitleSecondary = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle-secondary"]');
     const selectionSidebarSubtitleTertiary = root.querySelector('[data-transformer-view2d-role="selection-sidebar-subtitle-tertiary"]');
     const selectionSidebarHistoryNavigation = createSelectionPanelHistoryNavigation(document);
-    if (selectionSidebarHeader && selectionSidebarHistoryNavigation?.nav) {
-        selectionSidebarHeader.insertBefore(
+    if (selectionSidebarHeaderTop && selectionSidebarHistoryNavigation?.nav) {
+        selectionSidebarHeaderTop.insertBefore(
             selectionSidebarHistoryNavigation.nav,
-            selectionSidebarHeader.firstChild || null
+            selectionSidebarHeaderTop.firstChild || null
         );
     }
     const tokenHoverSync = createTransformerView2dTokenHoverSync({
@@ -2954,7 +2963,7 @@ export function createTransformerView2dDetailView(panelEl, {
             canvas,
             projectBounds: (bounds) => renderer.resolveScreenBounds(bounds),
             visible: state.visible,
-            enabled: !viewportAnimationActive,
+            enabled: !viewportAnimationActive && !state.isInteracting,
             focusState: activeSceneFocusState
         });
         syncDetailFrame();

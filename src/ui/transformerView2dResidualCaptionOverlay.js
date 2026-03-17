@@ -502,6 +502,37 @@ function isDomKatexTextNode(node = null) {
         && String(node?.metadata?.renderMode || '').trim().toLowerCase() === 'dom-katex';
 }
 
+function buildOverlayNodeDescriptors(scene = null) {
+    if (!scene) return [];
+    const descriptors = [];
+    flattenSceneNodes(scene).forEach((node) => {
+        if (isResidualCaptionNode(node)) {
+            const lines = resolveView2dCaptionLines(node);
+            if (!lines.length) return;
+            descriptors.push({
+                kind: 'caption',
+                node,
+                lines,
+                captionPosition: resolveView2dCaptionPosition(node),
+                scaleWithNode: node?.metadata?.caption?.scaleWithNode === true,
+                minScreenHeightPx: Number.isFinite(node?.metadata?.caption?.minScreenHeightPx)
+                    && node.metadata.caption.minScreenHeightPx > 0
+                    ? node.metadata.caption.minScreenHeightPx
+                    : 18
+            });
+            return;
+        }
+
+        if (isDomKatexTextNode(node)) {
+            descriptors.push({
+                kind: 'dom-text',
+                node
+            });
+        }
+    });
+    return descriptors;
+}
+
 function createCaptionItem(documentRef) {
     const itemEl = documentRef.createElement('div');
     itemEl.className = 'detail-transformer-view2d-residual-caption';
@@ -547,6 +578,10 @@ export function createTransformerView2dResidualCaptionOverlay({
     parent.appendChild(root);
 
     const itemMap = new Map();
+    let sceneDescriptorCache = {
+        scene: null,
+        descriptors: []
+    };
 
     function ensureItem(nodeId = '') {
         const safeNodeId = String(nodeId || '');
@@ -579,6 +614,18 @@ export function createTransformerView2dResidualCaptionOverlay({
         itemMap.forEach(({ itemEl }) => {
             itemEl.hidden = true;
         });
+    }
+
+    function resolveOverlayNodeDescriptors(scene = null) {
+        if (sceneDescriptorCache.scene === scene) {
+            return sceneDescriptorCache.descriptors;
+        }
+        const descriptors = buildOverlayNodeDescriptors(scene);
+        sceneDescriptorCache = {
+            scene,
+            descriptors
+        };
+        return descriptors;
     }
 
     return {
@@ -616,35 +663,26 @@ export function createTransformerView2dResidualCaptionOverlay({
 
             const seenIds = new Set();
             const captionCandidates = [];
-            flattenSceneNodes(scene).forEach((node) => {
-                if (isResidualCaptionNode(node)) {
+            const overlayNodeDescriptors = resolveOverlayNodeDescriptors(scene);
+            overlayNodeDescriptors.forEach((descriptor) => {
+                const node = descriptor.node;
+                if (descriptor.kind === 'caption') {
                     const entry = layout.registry.getNodeEntry(node.id);
                     if (!entry?.contentBounds) return;
-
-                    const lines = resolveView2dCaptionLines(node);
-                    if (!lines.length) return;
-
                     const contentBounds = projectBounds(entry.contentBounds);
                     if (!contentBounds) return;
                     if (!intersectsCanvas(contentBounds, canvasWidth, canvasHeight)) return;
-                    const captionPosition = resolveView2dCaptionPosition(node);
-                    const scaleWithNode = node?.metadata?.caption?.scaleWithNode === true;
-                    const minScreenHeightPx = Number.isFinite(node?.metadata?.caption?.minScreenHeightPx)
-                        && node.metadata.caption.minScreenHeightPx > 0
-                        ? node.metadata.caption.minScreenHeightPx
-                        : 18;
                     captionCandidates.push(buildCaptionCandidate({
                         node,
-                        lines,
+                        lines: descriptor.lines,
                         contentBounds,
-                        captionPosition,
-                        scaleWithNode,
-                        minScreenHeightPx
+                        captionPosition: descriptor.captionPosition,
+                        scaleWithNode: descriptor.scaleWithNode,
+                        minScreenHeightPx: descriptor.minScreenHeightPx
                     }));
                     return;
                 }
 
-                if (!isDomKatexTextNode(node)) return;
                 const entry = layout.registry.getNodeEntry(node.id);
                 const entryBounds = entry?.contentBounds || entry?.bounds;
                 if (!entryBounds) return;
@@ -1035,6 +1073,10 @@ export function createTransformerView2dResidualCaptionOverlay({
                 root.parentElement.removeChild(root);
             }
             itemMap.clear();
+            sceneDescriptorCache = {
+                scene: null,
+                descriptors: []
+            };
         }
     };
 }

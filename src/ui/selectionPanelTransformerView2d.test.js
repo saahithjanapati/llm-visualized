@@ -171,6 +171,23 @@ function createPointerEvent(type, {
     return event;
 }
 
+function createWheelEvent({
+    clientX = 24,
+    clientY = 24,
+    deltaY = -120
+} = {}) {
+    const event = new Event('wheel', {
+        bubbles: true,
+        cancelable: true
+    });
+    Object.defineProperties(event, {
+        clientX: { configurable: true, value: clientX },
+        clientY: { configurable: true, value: clientY },
+        deltaY: { configurable: true, value: deltaY }
+    });
+    return event;
+}
+
 function createActivationSource() {
     return {
         getTokenCount() {
@@ -299,6 +316,23 @@ describe('createTransformerView2dDetailView', () => {
         document.body.innerHTML = '';
         vi.useRealTimers();
         vi.restoreAllMocks();
+    });
+
+    it('keeps 2D sidebar history controls in a dedicated top row above the title block', () => {
+        const panelEl = document.getElementById('detailPanel');
+        createTransformerView2dDetailView(panelEl);
+
+        const selectionSidebarHeader = panelEl.querySelector('.detail-transformer-view2d-selection-sidebar-header');
+        const selectionSidebarHeaderTop = panelEl.querySelector('[data-transformer-view2d-role="selection-sidebar-header-top"]');
+        const selectionSidebarCopy = panelEl.querySelector('.detail-transformer-view2d-selection-sidebar-copy');
+        const historyNav = selectionSidebarHeaderTop?.querySelector('.detail-history-nav');
+        const closeSelectionBtn = selectionSidebarHeaderTop?.querySelector('[data-transformer-view2d-action="close-selection"]');
+
+        expect(selectionSidebarHeader).toBeTruthy();
+        expect(selectionSidebarHeader?.firstElementChild).toBe(selectionSidebarHeaderTop);
+        expect(selectionSidebarHeaderTop?.nextElementSibling).toBe(selectionSidebarCopy);
+        expect(historyNav).toBeTruthy();
+        expect(closeSelectionBtn).toBeTruthy();
     });
 
     it('stages MHSA entries from the tower overview into the head-detail scene', async () => {
@@ -651,6 +685,59 @@ describe('createTransformerView2dDetailView', () => {
         expect(afterViewportState.scale).toBeGreaterThan(beforeViewportState.scale);
         expect(worldCenterAfter.x).toBeCloseTo(worldCenterBefore.x, 6);
         expect(worldCenterAfter.y).toBeCloseTo(worldCenterBefore.y, 6);
+    });
+
+    it('keeps a stable interaction DPR and hides the DOM caption overlay while zooming', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+        const renderSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'render');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-weight'
+            }],
+            detailFocusLabel: 'MLP Up Weight Matrix',
+            transitionMode: 'direct'
+        });
+
+        const overlay = panelEl.querySelector('.detail-transformer-view2d-caption-overlay');
+        const idleRenderArgs = renderSpy.mock.calls.at(-1)?.[0] || null;
+        expect(idleRenderArgs?.dprCap).toBeTruthy();
+        expect(overlay?.style.display).toBe('block');
+
+        canvas.dispatchEvent(createWheelEvent({
+            clientX: 420,
+            clientY: 260,
+            deltaY: -120
+        }));
+        await vi.advanceTimersByTimeAsync(32);
+
+        const interactionRenderArgs = renderSpy.mock.calls.at(-1)?.[0] || null;
+        expect(interactionRenderArgs?.dprCap).toBe(idleRenderArgs?.dprCap);
+        expect(overlay?.style.display).toBe('none');
+
+        await vi.advanceTimersByTimeAsync(220);
+        expect(overlay?.style.display).toBe('block');
     });
 
     it('opens canvas attention-head clicks directly into the head-detail scene', async () => {

@@ -2455,19 +2455,36 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 }
 .detail-transformer-view2d-selection-sidebar-header {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    flex-direction: column;
     gap: 8px;
     padding: 10px 12px 8px;
 }
-.detail-transformer-view2d-selection-sidebar-header .detail-history-nav {
+.detail-transformer-view2d-selection-sidebar-header-top {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "history spacer close";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 0;
+    min-width: 0;
+}
+.detail-transformer-view2d-selection-sidebar-header-top .detail-history-nav {
+    grid-area: history;
+    justify-self: start;
     flex: 0 0 auto;
+}
+.detail-transformer-view2d-selection-sidebar-header-actions {
+    grid-area: close;
+    justify-self: end;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
 .detail-transformer-view2d-selection-sidebar-copy {
     display: grid;
     gap: 2px;
     min-width: 0;
-    flex: 1 1 auto;
+    width: 100%;
     padding-inline: 2px;
 }
 .detail-transformer-view2d-selection-sidebar-title,
@@ -2969,7 +2986,6 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     position: sticky;
     top: 0;
     z-index: 1;
-    align-items: center;
     background: rgba(10, 10, 12, 0.992);
     box-shadow: 0 10px 24px rgba(0,0,0,0.28);
 }
@@ -3117,7 +3133,6 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-header {
         position: relative;
         z-index: 1;
-        align-items: center;
         padding-top: max(10px, calc(env(safe-area-inset-top) + 4px));
         padding-right: 12px;
         padding-bottom: 10px;
