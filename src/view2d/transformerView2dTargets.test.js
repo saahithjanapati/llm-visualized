@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildTransformerSceneModel } from './model/buildTransformerSceneModel.js';
 import { flattenSceneNodes, VIEW2D_NODE_KINDS } from './schema/sceneTypes.js';
 import {
+    buildResidualOverviewSelectionLockState,
     buildResidualRowHoverPayload,
     buildResidualRowSelectionFocusState,
     buildSemanticNodeHoverFocusState,
@@ -91,6 +92,42 @@ describe('transformerView2dTargets', () => {
         });
     });
 
+    it('includes an initial overview row lock target for residual vector selections', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Residual Stream Vector',
+            info: {
+                layerIndex: 2,
+                tokenIndex: 1,
+                tokenLabel: 'Token B',
+                activationData: {
+                    stage: 'layer.incoming',
+                    layerIndex: 2,
+                    tokenIndex: 1,
+                    tokenLabel: 'Token B'
+                }
+            }
+        }, 'Residual Stream Vector');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 2,
+                stage: 'incoming',
+                role: 'module'
+            },
+            initialOverviewSelectionLockTarget: {
+                semanticTarget: {
+                    componentKind: 'residual',
+                    layerIndex: 2,
+                    stage: 'incoming',
+                    role: 'module'
+                },
+                tokenIndex: 1,
+                tokenLabel: 'Token B'
+            }
+        });
+    });
+
     it('builds a row-scoped overview focus state for residual selections', () => {
         const scene = buildTransformerSceneModel({
             tokenIndices: [0, 1],
@@ -130,6 +167,38 @@ describe('transformerView2dTargets', () => {
             residualNodes.map((node) => node.id)
         ));
         expect(focusResult?.focusState?.activeConnectorIds?.length || 0).toBeGreaterThan(0);
+    });
+
+    it('resolves a residual overview row lock state from a normalized selection target', () => {
+        const scene = buildTransformerSceneModel({
+            tokenIndices: [0, 1],
+            tokenLabels: ['Token A', 'Token B'],
+            layerCount: 1
+        });
+
+        const lockState = buildResidualOverviewSelectionLockState(scene, {
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module'
+            },
+            tokenIndex: 1,
+            tokenLabel: 'Token B'
+        }, {
+            getTokenId(tokenIndex = 0) {
+                return tokenIndex + 100;
+            }
+        });
+
+        expect(lockState?.label).toBe('Residual Stream Vector');
+        expect(lockState?.info?.tokenIndex).toBe(1);
+        expect(lockState?.info?.tokenId).toBe(101);
+        expect(lockState?.focusState?.rowSelections).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                rowIndex: 1
+            })
+        ]));
     });
 
     it('uses the staged head-detail opening flow for attention head targets', () => {

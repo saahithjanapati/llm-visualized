@@ -7,6 +7,14 @@
       "config": { "distDir": "dist" }
     }
   ],
+  "headers": [
+    {
+      "source": "/capture(.*).json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/full", "destination": "/index.html" },
     { "source": "/full/", "destination": "/index.html" }

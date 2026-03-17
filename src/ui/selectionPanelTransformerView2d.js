@@ -12,6 +12,7 @@ import {
     simplifyLayerNormParamHoverLabel
 } from '../engine/coreRaycastLabels.js';
 import {
+    buildResidualOverviewSelectionLockState,
     buildResidualRowHoverPayload,
     buildResidualRowSelectionFocusState,
     buildSemanticNodeHoverFocusState,
@@ -3848,6 +3849,7 @@ export function createTransformerView2dDetailView(panelEl, {
             tokenLabels = null,
             semanticTarget = null,
             focusLabel = TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL,
+            initialOverviewSelectionLockTarget = null,
             detailSemanticTargets = null,
             detailFocusLabel = '',
             detailInteractionTargets = null,
@@ -3946,6 +3948,16 @@ export function createTransformerView2dDetailView(panelEl, {
             syncActiveSelectionState();
             renderTokenStrip();
             rebuildSceneState();
+            const initialOverviewSelectionLockState = buildResidualOverviewSelectionLockState(
+                state.scene,
+                initialOverviewSelectionLockTarget,
+                state.activationSource
+            );
+            if (initialOverviewSelectionLockState?.focusState) {
+                lockPinnedOverviewSceneFocus(initialOverviewSelectionLockState, {
+                    scheduleRender: false
+                });
+            }
             clearPointer(null, { scheduleSettle: false });
             resetTouchGesture();
             resetAutoFrameState({ pendingInitialFocus: true });

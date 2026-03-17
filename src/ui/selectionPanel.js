@@ -9438,6 +9438,7 @@ export class SelectionPanel {
             tokenLabels: Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels : this.tokenLabels,
             semanticTarget: hydratedView2dContext.semanticTarget,
             focusLabel: hydratedView2dContext.focusLabel,
+            initialOverviewSelectionLockTarget: hydratedView2dContext.initialOverviewSelectionLockTarget,
             detailSemanticTargets: hydratedView2dContext.detailSemanticTargets,
             detailFocusLabel: hydratedView2dContext.detailFocusLabel,
             detailInteractionTargets: hydratedView2dContext.detailInteractionTargets,

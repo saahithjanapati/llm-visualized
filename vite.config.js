@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import basicSsl from '@vitejs/plugin-basic-ssl';
@@ -11,12 +11,22 @@ const UNUSED_PUBLIC_ASSETS = [
   'position_embeddings_grid_1024x768_clamped_-0.5_0.5.png',
   'position_embeddings_grid_1024x768_clamped_-1_1.png'
 ];
+const constantsPath = resolve(projectRoot, 'src/utils/constants.js');
 
-function stripUnusedPublicAssets() {
+function shouldStripUnusedQkvAsset() {
+  const constantsSource = readFileSync(constantsPath, 'utf8');
+  const match = constantsSource.match(/export const USE_INSTANCED_MATRIX_SLICES = (true|false);/);
+  return match?.[1] === 'true';
+}
+
+function stripUnusedBuildAssets() {
+  const stripQkvAsset = shouldStripUnusedQkvAsset();
+  const qkvAssetPattern = /^precomputed_components_qkv-.*\.glb$/;
+
   let outDir = resolve(projectRoot, 'dist');
 
   return {
-    name: 'strip-unused-public-assets',
+    name: 'strip-unused-build-assets',
     apply: 'build',
     configResolved(config) {
       outDir = resolve(config.root, config.build.outDir);
@@ -28,6 +38,13 @@ function stripUnusedPublicAssets() {
           rmSync(absolutePath, { force: true });
         }
       }
+      if (!stripQkvAsset) return;
+      const assetsDir = resolve(outDir, 'assets');
+      if (!existsSync(assetsDir)) return;
+      for (const fileName of readdirSync(assetsDir)) {
+        if (!qkvAssetPattern.test(fileName)) continue;
+        rmSync(resolve(assetsDir, fileName), { force: true });
+      }
     }
   };
 }
@@ -36,7 +53,7 @@ export default defineConfig({
   root: '.',
   publicDir: 'public',
   assetsInclude: ['**/*.exr', '**/*.glb'],
-  plugins: [basicSsl(), stripUnusedPublicAssets()],
+  plugins: [basicSsl(), stripUnusedBuildAssets()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

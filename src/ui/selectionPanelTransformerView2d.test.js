@@ -1072,6 +1072,68 @@ describe('createTransformerView2dDetailView', () => {
         );
     });
 
+    it('opens with the matching overview residual row already locked from a source selection target', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+        const renderSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'render');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            layerCount: 1
+        });
+        const residualNode = flattenSceneNodes(scene).find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+        ));
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module'
+            },
+            focusLabel: 'Layer 1 residual stream',
+            initialOverviewSelectionLockTarget: {
+                semanticTarget: {
+                    componentKind: 'residual',
+                    layerIndex: 0,
+                    stage: 'incoming',
+                    role: 'module'
+                },
+                tokenIndex: 1,
+                tokenLabel: 'B'
+            }
+        });
+        await vi.advanceTimersByTimeAsync(32);
+
+        expect(view.hasSelectionLock()).toBe(true);
+        expect(
+            renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.currentFocus?.rowSelections
+        ).toContainEqual({
+            nodeId: residualNode?.id,
+            rowIndex: 1
+        });
+        expect(renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.dimStrength).toBe(1);
+    });
+
     it('keeps overview residual selections dimmed until the sidebar selection closes', async () => {
         const panelEl = document.getElementById('detailPanel');
         let view = null;

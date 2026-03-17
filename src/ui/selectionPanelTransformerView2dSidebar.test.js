@@ -175,6 +175,49 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         expect(panel._stopLoop).toHaveBeenCalled();
     });
 
+    it('passes residual overview lock targets through to the 2D canvas open call', () => {
+        const panel = createPanelContext();
+        const selection = {
+            label: 'Residual Stream Vector',
+            kind: 'laneVector'
+        };
+        const view2dContext = {
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 1,
+                stage: 'incoming',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 residual stream',
+            initialOverviewSelectionLockTarget: {
+                semanticTarget: {
+                    componentKind: 'residual',
+                    layerIndex: 1,
+                    stage: 'incoming',
+                    role: 'module'
+                },
+                tokenIndex: 1,
+                tokenLabel: 'B'
+            },
+            detailInteractionTargets: [],
+            transitionMode: 'staged-focus'
+        };
+
+        const opened = panel._openTransformerView2dPreview({
+            sourceSelection: selection,
+            view2dContext,
+            syncRoute: false,
+            fromHistory: true
+        });
+
+        expect(opened).toBe(true);
+        expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
+            expect.objectContaining({
+                initialOverviewSelectionLockTarget: view2dContext.initialOverviewSelectionLockTarget
+            })
+        );
+    });
+
     it('does not force the 2D selection sidebar open for context-only entry without a source selection', () => {
         const panel = createPanelContext();
         const view2dContext = {

@@ -41,7 +41,6 @@ import { loadActivationState } from './activation.js';
 import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
 import { buildPassState, initGenerationController } from './generationController.js';
 import {
-    PRECOMPUTED_COMPONENTS_QKV_URL,
     PRECOMPUTED_COMPONENTS_SLICE_URL
 } from './runtimeAssetUrls.js';
 import {
@@ -115,6 +114,7 @@ await loadPrecomputedGeometries(PRECOMPUTED_COMPONENTS_SLICE_URL);
 // Skip full-depth QKV/output precompute when instanced slices are active,
 // otherwise those matrices will appear longer than the rest.
 if (!USE_INSTANCED_MATRIX_SLICES) {
+    const { PRECOMPUTED_COMPONENTS_QKV_URL } = await import('./precomputedComponentsQkvAssetUrl.js');
     await loadPrecomputedGeometries(PRECOMPUTED_COMPONENTS_QKV_URL);
 }
 

@@ -546,6 +546,122 @@ export function buildResidualRowSelectionFocusState(scene = null, hit = null) {
     });
 }
 
+function normalizeResidualOverviewSelectionLockTarget(target = null) {
+    if (!target || typeof target !== 'object') return null;
+    const semanticTarget = buildSemanticTarget(target.semanticTarget);
+    const tokenIndex = normalizeOptionalIndex(target.tokenIndex);
+    if (
+        semanticTarget?.componentKind !== 'residual'
+        || !Number.isFinite(tokenIndex)
+    ) {
+        return null;
+    }
+    const tokenLabel = typeof target.tokenLabel === 'string'
+        ? target.tokenLabel.trim()
+        : '';
+    return {
+        semanticTarget,
+        tokenIndex,
+        ...(tokenLabel.length ? { tokenLabel } : {})
+    };
+}
+
+function semanticValueMatches(left = null, right = null) {
+    const leftIsNumber = typeof left === 'number' && Number.isFinite(left);
+    const rightIsNumber = typeof right === 'number' && Number.isFinite(right);
+    if (leftIsNumber || rightIsNumber) {
+        return normalizeOptionalIndex(left) === normalizeOptionalIndex(right);
+    }
+    return String(left ?? '').trim() === String(right ?? '').trim();
+}
+
+function residualOverviewNodeMatchesSelectionLockTarget(node = null, target = null) {
+    if (!isResidualOverviewVectorNode(node)) return false;
+    const semanticTarget = target?.semanticTarget || null;
+    if (!semanticTarget || typeof semanticTarget !== 'object') return false;
+    return Object.entries(semanticTarget).every(([key, value]) => {
+        if (key === 'role') return true;
+        if (value === null || value === undefined || value === '') return true;
+        return semanticValueMatches(node?.semantic?.[key], value);
+    });
+}
+
+function findResidualOverviewRowIndex(rowItems = [], tokenIndex = null) {
+    if (!Array.isArray(rowItems) || !Number.isFinite(tokenIndex)) return null;
+    const matchIndex = rowItems.findIndex((rowItem, index) => {
+        const semanticTokenIndex = normalizeOptionalIndex(rowItem?.semantic?.tokenIndex);
+        const itemTokenIndex = normalizeOptionalIndex(rowItem?.tokenIndex);
+        const itemIndex = normalizeOptionalIndex(rowItem?.index);
+        return semanticTokenIndex === tokenIndex
+            || itemTokenIndex === tokenIndex
+            || itemIndex === tokenIndex
+            || normalizeOptionalIndex(index) === tokenIndex;
+    });
+    return matchIndex >= 0 ? matchIndex : null;
+}
+
+export function resolveResidualOverviewSelectionLockTarget(selectionInfo = null, semanticTarget = null) {
+    const safeSemanticTarget = buildSemanticTarget(semanticTarget);
+    if (safeSemanticTarget?.componentKind !== 'residual') return null;
+
+    const tokenIndex = normalizeOptionalIndex(findUserDataNumber(selectionInfo, 'tokenIndex'));
+    if (!Number.isFinite(tokenIndex)) return null;
+
+    const activationData = getActivationDataFromSelection(selectionInfo);
+    const tokenLabel = resolvePreferredTokenLabel({
+        tokenLabel: findUserDataString(selectionInfo, 'tokenLabel')
+            || activationData?.tokenLabel
+            || '',
+        tokenIndex
+    });
+
+    return normalizeResidualOverviewSelectionLockTarget({
+        semanticTarget: safeSemanticTarget,
+        tokenIndex,
+        tokenLabel
+    });
+}
+
+export function buildResidualOverviewSelectionLockState(
+    scene = null,
+    selectionLockTarget = null,
+    activationSource = null
+) {
+    const normalizedTarget = normalizeResidualOverviewSelectionLockTarget(selectionLockTarget);
+    if (!scene || !normalizedTarget) return null;
+
+    const matchedNode = flattenSceneNodes(scene).find((node) => (
+        residualOverviewNodeMatchesSelectionLockTarget(node, normalizedTarget)
+        && Number.isFinite(findResidualOverviewRowIndex(node?.rowItems, normalizedTarget.tokenIndex))
+    ));
+    if (!matchedNode) return null;
+
+    const rowIndex = findResidualOverviewRowIndex(matchedNode?.rowItems, normalizedTarget.tokenIndex);
+    if (!Number.isFinite(rowIndex)) return null;
+    const rowItem = matchedNode?.rowItems?.[rowIndex] || null;
+    if (!rowItem) return null;
+
+    const hoverPayload = buildResidualRowHoverPayload({
+        rowIndex,
+        rowItem
+    }, activationSource);
+    const focusState = buildResidualRowSelectionFocusState(scene, {
+        node: matchedNode,
+        rowHit: {
+            rowIndex,
+            rowItem
+        }
+    });
+    if (!hoverPayload || !focusState?.focusState) return null;
+
+    return {
+        ...focusState,
+        ...hoverPayload,
+        focusState: focusState.focusState,
+        signature: focusState.signature
+    };
+}
+
 function resolveLayerNormKindFromSemanticStage(stage = '') {
     const lower = String(stage || '').trim().toLowerCase();
     if (lower === 'ln1') return 'ln1';
@@ -1889,6 +2005,10 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     }
 
     if (!semanticTarget) return null;
+    const initialOverviewSelectionLockTarget = resolveResidualOverviewSelectionLockTarget(
+        selectionInfo,
+        semanticTarget
+    );
     const mhsaDetailSemanticTargets = (
         semanticTarget?.componentKind === 'mhsa'
         && Number.isFinite(semanticTarget?.headIndex)
@@ -1919,6 +2039,7 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     return {
         semanticTarget,
         focusLabel,
+        ...(initialOverviewSelectionLockTarget ? { initialOverviewSelectionLockTarget } : {}),
         ...(detailSemanticTargets.length ? { detailSemanticTargets } : {}),
         ...(resolvedDetailFocusLabel.length ? { detailFocusLabel: resolvedDetailFocusLabel } : {}),
         ...(transitionMode ? { transitionMode } : {}),
