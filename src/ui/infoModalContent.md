@@ -49,8 +49,8 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - Khan Academy's black-and-colored visual style
 - Jack Morris' [Transformer visualization thread](https://x.com/jxmnop/status/1757129193442173367?s=20)
 - Will Depue's [WebGPT](https://github.com/0hq/WebGPT)
-- [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
-- [The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)
+- Sasha Rush's [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
+- Jay Alammar's [The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)
 - Aman Sanger's point that [UX design is a form of programming](https://youtu.be/BGgsoIgbT_Y?si=_oV22SkD5jNgDxZH&t=1167)
 - roon's post that [latent space is best explored in person](https://x.com/tszzl/status/1964842112438161707)
 - roon's essay [Text is the universal interface](https://scale.com/blog/text-universal-interface)
