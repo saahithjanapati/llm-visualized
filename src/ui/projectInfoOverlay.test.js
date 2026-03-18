@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let appState;
 let initProjectInfoOverlay;
@@ -17,7 +17,6 @@ function renderOverlayDom() {
                         <div id="projectInfoOverlayTitle" class="project-info-modal-title">LLM-Visualized</div>
                     </div>
                     <div class="project-info-modal-header-actions">
-                        <a id="projectInfoStandaloneLink" href="/info/" target="_blank" rel="noopener noreferrer">Open standalone page</a>
                         <button id="projectInfoClose" type="button">Back to visualization</button>
                     </div>
                 </div>
@@ -45,7 +44,11 @@ describe('projectInfoOverlay', () => {
         appState.modalPaused = false;
     });
 
-    it('opens as an in-scene overlay, pauses the engine, and renders the project info content', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('opens as an in-scene overlay, pushes the info URL, and returns to the prior route on close', () => {
         const pause = vi.fn();
         const resume = vi.fn();
         const resetInteractionState = vi.fn();
@@ -67,6 +70,10 @@ describe('projectInfoOverlay', () => {
                 }
             }
         };
+        const historyBackSpy = vi.spyOn(window.history, 'back').mockImplementation(() => {
+            window.history.replaceState(window.history.state, '', '/?view=2d&component=mhsa&layer=3');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        });
 
         const controller = initProjectInfoOverlay({ pipeline });
         const trigger = document.getElementById('trigger');
@@ -80,18 +87,21 @@ describe('projectInfoOverlay', () => {
         expect(document.getElementById('projectInfoOverlay')?.style.display).toBe('flex');
         expect(document.getElementById('projectInfoOverlay')?.getAttribute('aria-hidden')).toBe('false');
         expect(document.getElementById('projectInfoOverlayContent')?.innerHTML).toContain('<h2>Overview</h2>');
-        expect(document.getElementById('projectInfoStandaloneLink')?.getAttribute('href'))
-            .toBe('/info/?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa%26layer%3D3');
+        expect(window.location.pathname).toBe('/info/');
+        expect(window.location.search).toBe('?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa%26layer%3D3');
         expect(resetInteractionState).toHaveBeenCalledTimes(1);
         expect(pipeline.engine.controls.enabled).toBe(false);
         expect(pipeline.engine.renderer.domElement.style.pointerEvents).toBe('none');
 
         document.getElementById('projectInfoClose')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
+        expect(historyBackSpy).toHaveBeenCalledTimes(1);
         expect(resume).toHaveBeenCalledWith(PROJECT_INFO_OVERLAY_PAUSE_REASON);
         expect(appState.modalPaused).toBe(false);
         expect(document.getElementById('projectInfoOverlay')?.style.display).toBe('none');
         expect(document.getElementById('projectInfoOverlay')?.getAttribute('aria-hidden')).toBe('true');
+        expect(window.location.pathname).toBe('/');
+        expect(window.location.search).toBe('?view=2d&component=mhsa&layer=3');
         expect(pipeline.engine.controls.enabled).toBe(true);
         expect(pipeline.engine.renderer.domElement.style.pointerEvents).toBe('');
         expect(resetInteractionState).toHaveBeenCalledTimes(2);
@@ -114,6 +124,10 @@ describe('projectInfoOverlay', () => {
                 }
             }
         };
+        vi.spyOn(window.history, 'back').mockImplementation(() => {
+            window.history.replaceState(window.history.state, '', '/?view=2d&component=mhsa&layer=3');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        });
 
         const controller = initProjectInfoOverlay({ pipeline });
         controller.open();
@@ -123,5 +137,31 @@ describe('projectInfoOverlay', () => {
         expect(controller.isOpen()).toBe(false);
         expect(resume).toHaveBeenCalledWith(PROJECT_INFO_OVERLAY_PAUSE_REASON);
         expect(appState.modalPaused).toBe(true);
+    });
+
+    it('reopens from browser history when the info route is revisited', () => {
+        const pause = vi.fn();
+        const pipeline = {
+            engine: {
+                pause,
+                resume: vi.fn(),
+                resetInteractionState: vi.fn(),
+                controls: null,
+                renderer: {
+                    domElement: {
+                        style: {}
+                    }
+                }
+            }
+        };
+
+        const controller = initProjectInfoOverlay({ pipeline });
+
+        window.history.pushState({}, '', '/info/?returnTo=%2F%3Fview%3D2d');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+
+        expect(controller.isOpen()).toBe(true);
+        expect(pause).toHaveBeenCalledWith(PROJECT_INFO_OVERLAY_PAUSE_REASON);
+        expect(document.getElementById('projectInfoOverlay')?.getAttribute('aria-hidden')).toBe('false');
     });
 });

@@ -2866,7 +2866,7 @@ export function createTransformerView2dDetailView(panelEl, {
         syncHeadDetailChrome();
         syncFitSceneActionVisibility();
         if (openInfoBtn) {
-            const shouldShowInfoAction = isTransformerView2dGraphOverview();
+            const shouldShowInfoAction = !state.isSmallScreen;
             openInfoBtn.hidden = !shouldShowInfoAction;
             openInfoBtn.setAttribute('aria-hidden', shouldShowInfoAction ? 'false' : 'true');
             if (shouldShowInfoAction) {

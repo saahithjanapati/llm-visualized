@@ -52,7 +52,7 @@ function normalizeRoutePathname(pathname = '') {
     return trimmed.length ? trimmed : '/';
 }
 
-function isMainEntryRoutePath(pathname = '') {
+export function isMainEntryRoutePath(pathname = '') {
     return MAIN_ENTRY_ROUTE_PATHS.has(normalizeRoutePathname(pathname));
 }
 

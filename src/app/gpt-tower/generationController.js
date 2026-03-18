@@ -18,6 +18,7 @@ import { addEmbeddingAndTokenChips } from './tokenChips.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { resolveLogitTokenSeed } from './logitColor.js';
 import {
+    isMainEntryRoutePath,
     resolveGenerationRoute,
     syncGenerationRoute
 } from './generationRoute.js';
@@ -1086,6 +1087,9 @@ export function initGenerationController({
     };
 
     const handleRoutePopState = () => {
+        if (!isMainEntryRoutePath(window.location?.pathname || '/')) {
+            return;
+        }
         syncFromUrl({ historyMode: 'replace' });
     };
 

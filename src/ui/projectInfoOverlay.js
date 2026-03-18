@@ -1,6 +1,10 @@
 import infoMarkdown from './infoModalContent.md?raw';
 import { appState } from '../state/appState.js';
-import { buildProjectInfoPageUrl } from './projectInfoNavigation.js';
+import {
+    PROJECT_INFO_PAGE_PATH,
+    buildProjectInfoPageUrl,
+    resolveProjectInfoBackHref
+} from './projectInfoNavigation.js';
 import { renderSimpleMarkdown } from './simpleMarkdown.js';
 
 export const PROJECT_INFO_OVERLAY_PAUSE_REASON = 'project-info-overlay';
@@ -12,6 +16,17 @@ function scheduleFocus(target) {
         return;
     }
     setTimeout(() => target.focus(), 0);
+}
+
+function normalizePathname(pathname = '') {
+    const rawPathname = String(pathname || '').trim();
+    if (!rawPathname.length || rawPathname === '/') return '/';
+    return rawPathname.replace(/\/+$/, '') || '/';
+}
+
+function isProjectInfoRoute(locationRef = null) {
+    const candidate = locationRef || (typeof window !== 'undefined' ? window.location : null);
+    return normalizePathname(candidate?.pathname || '/') === normalizePathname(PROJECT_INFO_PAGE_PATH);
 }
 
 export function initProjectInfoOverlay({
@@ -28,10 +43,9 @@ export function initProjectInfoOverlay({
     const overlay = document.getElementById('projectInfoOverlay');
     const modal = overlay?.querySelector('.project-info-modal') || null;
     const closeBtn = document.getElementById('projectInfoClose');
-    const standaloneLink = document.getElementById('projectInfoStandaloneLink');
     const contentEl = document.getElementById('projectInfoOverlayContent');
 
-    if (!overlay || !modal || !closeBtn || !standaloneLink || !contentEl) {
+    if (!overlay || !modal || !closeBtn || !contentEl) {
         return {
             open: () => false,
             close: () => false,
@@ -49,10 +63,8 @@ export function initProjectInfoOverlay({
     let previousBodyOverflow = '';
     let previousCanvasPointerEvents = null;
     let previousControlsState = null;
-
-    const syncStandaloneLinkHref = () => {
-        standaloneLink.setAttribute('href', buildProjectInfoPageUrl(window.location));
-    };
+    let historyCloseRestoreFocus = true;
+    let historyTraversalPending = false;
 
     const lockBackgroundInteraction = () => {
         const engine = pipeline?.engine;
@@ -103,7 +115,7 @@ export function initProjectInfoOverlay({
         engine.resetInteractionState?.();
     };
 
-    const close = ({
+    const closeInternal = ({
         restoreFocus = true
     } = {}) => {
         if (!isOverlayOpen) return false;
@@ -124,10 +136,48 @@ export function initProjectInfoOverlay({
         return true;
     };
 
+    const syncInfoRouteIntoHistory = () => {
+        if (typeof window === 'undefined') return false;
+        if (isProjectInfoRoute(window.location)) return false;
+        if (typeof window.history?.pushState !== 'function') return false;
+        window.history.pushState(window.history.state, '', buildProjectInfoPageUrl(window.location));
+        return true;
+    };
+
+    const restoreVisualizationRouteInPlace = () => {
+        if (typeof window === 'undefined') return false;
+        if (typeof window.history?.replaceState !== 'function') return false;
+        window.history.replaceState(window.history.state, '', resolveProjectInfoBackHref(window.location));
+        return true;
+    };
+
+    const close = ({
+        restoreFocus = true,
+        syncHistory = true
+    } = {}) => {
+        if (!isOverlayOpen) return false;
+        if (syncHistory && isProjectInfoRoute(window.location)) {
+            if (historyTraversalPending) return true;
+            historyCloseRestoreFocus = restoreFocus;
+            if (Number.isFinite(window.history.length) && window.history.length > 1 && typeof window.history.back === 'function') {
+                historyTraversalPending = true;
+                window.history.back();
+                return true;
+            }
+            restoreVisualizationRouteInPlace();
+        }
+        historyTraversalPending = false;
+        historyCloseRestoreFocus = true;
+        return closeInternal({ restoreFocus });
+    };
+
     const open = ({
+        syncHistory = true,
         restoreFocusTarget = null
     } = {}) => {
-        syncStandaloneLinkHref();
+        if (syncHistory) {
+            syncInfoRouteIntoHistory();
+        }
         if (isOverlayOpen) {
             scheduleFocus(closeBtn);
             return true;
@@ -150,6 +200,21 @@ export function initProjectInfoOverlay({
         return true;
     };
 
+    const handlePopState = () => {
+        if (isProjectInfoRoute(window.location)) {
+            if (!isOverlayOpen) {
+                open({ restoreFocusTarget: null, syncHistory: false });
+            }
+            return;
+        }
+        if (isOverlayOpen) {
+            historyTraversalPending = false;
+            const shouldRestoreFocus = historyCloseRestoreFocus;
+            historyCloseRestoreFocus = true;
+            closeInternal({ restoreFocus: shouldRestoreFocus });
+        }
+    };
+
     overlay.addEventListener('click', (event) => {
         if (event.target === overlay) {
             close();
@@ -160,6 +225,15 @@ export function initProjectInfoOverlay({
         event.preventDefault();
         close();
     });
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        const previousPopstateListener = window.__llmVisualizedProjectInfoOverlayPopstateListener;
+        if (typeof previousPopstateListener === 'function') {
+            window.removeEventListener('popstate', previousPopstateListener);
+        }
+        window.__llmVisualizedProjectInfoOverlayPopstateListener = handlePopState;
+        window.addEventListener('popstate', handlePopState);
+    }
 
     document.addEventListener('keydown', (event) => {
         if (!isOverlayOpen) return;

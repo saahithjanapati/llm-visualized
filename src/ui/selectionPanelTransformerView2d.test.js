@@ -352,7 +352,7 @@ describe('createTransformerView2dDetailView', () => {
         expect(onOpenInfo).toHaveBeenCalledTimes(1);
     });
 
-    it('shows the project info action in the outer overview and hides it for focused inner 2D views', () => {
+    it('shows the project info action for desktop 2D views and hides it only on small screens', () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
 
@@ -368,7 +368,8 @@ describe('createTransformerView2dDetailView', () => {
             tokenIndices: [0, 1, 2],
             tokenLabels: ['A', 'B', 'C'],
             semanticTarget: null,
-            focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_LABEL
+            focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_LABEL,
+            isSmallScreen: false
         });
 
         expect(infoBtn?.hidden).toBe(false);
@@ -383,7 +384,24 @@ describe('createTransformerView2dDetailView', () => {
                 stage: 'embedding.token',
                 role: 'module'
             },
-            focusLabel: 'Token Embedding'
+            focusLabel: 'Token Embedding',
+            isSmallScreen: false
+        });
+
+        expect(infoBtn?.hidden).toBe(false);
+        expect(infoBtn?.getAttribute('aria-hidden')).toBe('false');
+
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'module'
+            },
+            focusLabel: 'Token Embedding',
+            isSmallScreen: true
         });
 
         expect(infoBtn?.hidden).toBe(true);
