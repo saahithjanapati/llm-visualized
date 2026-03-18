@@ -335,6 +335,23 @@ describe('createTransformerView2dDetailView', () => {
         expect(closeSelectionBtn).toBeTruthy();
     });
 
+    it('places the project info action at the far right of the 2D toolbar and routes it through the info callback', () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenInfo = vi.fn();
+        createTransformerView2dDetailView(panelEl, { onOpenInfo });
+
+        const toolbarActions = panelEl.querySelector('.detail-transformer-view2d-toolbar-actions');
+        const infoBtn = panelEl.querySelector('[data-transformer-view2d-action="open-info"]');
+
+        expect(infoBtn).toBeTruthy();
+        expect(toolbarActions?.lastElementChild).toBe(infoBtn);
+        expect(infoBtn?.getAttribute('aria-label')).toBe('Open project info page');
+
+        infoBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+        expect(onOpenInfo).toHaveBeenCalledTimes(1);
+    });
+
     it('stages MHSA entries from the tower overview into the head-detail scene', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);

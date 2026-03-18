@@ -105,6 +105,7 @@ import {
     getDescriptionPlainText,
     setDescriptionContent
 } from './selectionPanelCopyUtils.js';
+import { openProjectInfoPage } from './projectInfoNavigation.js';
 import { createSelectionPanelHistoryNavigation } from './selectionPanelHistoryNavigationUtils.js';
 import {
     formatAttentionSubtitleTokenPart,
@@ -9189,6 +9190,9 @@ export class SelectionPanel {
                 const detailView = createTransformerView2dDetailView(this.panel, {
                     onExitTo3d: () => {
                         this.close({ clearHistory: false });
+                    },
+                    onOpenInfo: () => {
+                        openProjectInfoPage();
                     },
                     onOpenSelection: (selection) => {
                         return this._openTransformerView2dCanvasSelection(selection);

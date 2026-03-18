@@ -36,7 +36,9 @@ const NEXT_TOKEN_MOBILE_MEDIA_QUERY = '(max-aspect-ratio: 1/1), (max-width: 880p
 const NEXT_TOKEN_PANEL_GAP_PX = 18;
 const NEXT_TOKEN_VIEWPORT_GUTTER_PX = 12;
 const PASS_INTRO_ENGINE_PAUSE_REASON = 'generation-pass-intro';
-const NEXT_TOKEN_BTN_LABEL = 'Next Token';
+const NEXT_TOKEN_BTN_LABEL = 'Next pass';
+const NEXT_TOKEN_BTN_TITLE = 'Advance to next forward pass';
+const NEXT_PASS_OVERLAY_TITLE_PREFIX = 'Going to next forward pass in';
 const RESTART_GENERATION_BTN_LABEL = 'Restart generation';
 
 export function buildPassState({
@@ -193,7 +195,7 @@ function createAdvanceOverlay() {
         root.innerHTML = `
             <div class="generation-header">
                 <div class="generation-title">
-                    <span data-role="title-prefix">Going to next token in</span>
+                    <span data-role="title-prefix">Going to next forward pass in</span>
                     <span data-role="countdown-wrap"><span data-role="countdown">10</span>s</span>
                 </div>
                 <div class="generation-meta" data-role="token"></div>
@@ -233,9 +235,9 @@ function createNextTokenButton() {
     const btn = document.createElement('button');
     btn.id = 'nextTokenBtn';
     btn.type = 'button';
-    btn.textContent = 'Next Token';
-    btn.title = 'Advance to next token';
-    btn.setAttribute('aria-label', 'Advance to next token');
+    btn.textContent = NEXT_TOKEN_BTN_LABEL;
+    btn.title = NEXT_TOKEN_BTN_TITLE;
+    btn.setAttribute('aria-label', NEXT_TOKEN_BTN_TITLE);
     btn.dataset.visible = 'false';
     btn.style.display = 'none';
     document.body.appendChild(btn);
@@ -749,7 +751,7 @@ export function initGenerationController({
         const shouldShow = passComplete && autoAdvancePaused;
         const isRestartAction = passComplete && autoAdvancePaused && atEnd;
         const buttonLabel = isRestartAction ? RESTART_GENERATION_BTN_LABEL : NEXT_TOKEN_BTN_LABEL;
-        const buttonTitle = isRestartAction ? RESTART_GENERATION_BTN_LABEL : 'Advance to next token';
+        const buttonTitle = isRestartAction ? RESTART_GENERATION_BTN_LABEL : NEXT_TOKEN_BTN_TITLE;
         const next = shouldShow ? 'true' : 'false';
         if (nextTokenBtn.dataset.visible !== next) {
             nextTokenBtn.dataset.visible = next;
@@ -797,7 +799,7 @@ export function initGenerationController({
 
         if (overlay.countdownEl) overlay.countdownEl.textContent = String(remainingSeconds);
 
-        if (overlay.titlePrefix) overlay.titlePrefix.textContent = 'Going to next token in';
+        if (overlay.titlePrefix) overlay.titlePrefix.textContent = NEXT_PASS_OVERLAY_TITLE_PREFIX;
         if (overlay.countdownWrap) overlay.countdownWrap.style.display = '';
 
         const nextTokenLabel = (activationSource && typeof activationSource.getTokenString === 'function')

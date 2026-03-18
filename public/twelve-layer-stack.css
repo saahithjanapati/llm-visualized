@@ -172,10 +172,21 @@ body.touch-ui * {
     outline-offset: 2px;
 }
 
+#pauseBtn,
+#skipMenuToggle {
+    width: 44px;
+    min-width: 44px;
+    height: 38px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
 #pauseBtn {
     font-size: 14px;
     letter-spacing: 0.2px;
-    min-width: 80px;
 }
 
 #pauseBtn[data-state="paused"] {
@@ -192,13 +203,6 @@ body.touch-ui * {
     display: none;
 }
 #skipMenuToggle {
-    width: 42px;
-    min-width: 42px;
-    height: 38px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
     touch-action: manipulation;
 }
 #skipMenuToggle .skip-toggle-icon {

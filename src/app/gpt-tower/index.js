@@ -51,6 +51,7 @@ import { initGoogleAnalyticsPageTracking } from './googleAnalytics.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { initPassIntroOverlay } from './passIntroOverlay.js';
 import { createLazySelectionPanel } from './lazySelectionPanel.js';
+import { openProjectInfoPage } from '../../ui/projectInfoNavigation.js';
 import {
     NUM_LAYERS,
     PROMPT_TOKENS,
@@ -315,7 +316,7 @@ transformerView2dBtn?.addEventListener('click', (event) => {
 
 infoBtn?.addEventListener('click', (event) => {
     event.preventDefault();
-    window.location.assign('/info/');
+    openProjectInfoPage();
 });
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {

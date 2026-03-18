@@ -2701,6 +2701,31 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .detail-transformer-view2d-action--exit {
     min-width: 96px;
 }
+.detail-transformer-view2d-action--icon {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 0;
+}
+.detail-transformer-view2d-action--icon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.detail-transformer-view2d-action--info {
+    background: rgba(94, 154, 255, 0.12);
+    border-color: rgba(148, 193, 255, 0.34);
+    color: #e2f2ff;
+}
+.detail-transformer-view2d-action--info:hover {
+    background: rgba(94, 154, 255, 0.2);
+    border-color: rgba(173, 210, 255, 0.52);
+}
 .detail-transformer-view2d-canvas {
     width: 100%;
     height: 420px;
@@ -2947,6 +2972,14 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     background: rgba(0, 0, 0, 0.56);
     border-color: rgba(255, 255, 255, 0.16);
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info {
+    background: rgba(56, 132, 255, 0.18);
+    border-color: rgba(148, 193, 255, 0.34);
+}
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info:hover {
+    background: rgba(56, 132, 255, 0.26);
+    border-color: rgba(173, 210, 255, 0.52);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card {
     position: absolute;

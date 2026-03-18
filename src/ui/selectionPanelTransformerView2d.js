@@ -51,6 +51,7 @@ import { createTransformerView2dResidualCaptionOverlay } from './transformerView
 import { formatTokenLabelForPreview } from './selectionPanelFormatUtils.js';
 import { ATTENTION_VALUE_PLACEHOLDER } from './selectionPanelConstants.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
+import { openProjectInfoPage } from './projectInfoNavigation.js';
 import {
     buildTransformerView2dOverviewState,
     TRANSFORMER_VIEW2D_OVERVIEW_FOCUS_LABEL
@@ -101,6 +102,7 @@ export {
 const VIEW2D_DETAIL_ACTION_FIT = 'fit-scene';
 const VIEW2D_DETAIL_ACTION_EXIT_DEEP = 'exit-deep-detail';
 const VIEW2D_DETAIL_ACTION_EXIT_TO_3D = 'exit-to-3d';
+const VIEW2D_DETAIL_ACTION_OPEN_INFO = 'open-info';
 const VIEW2D_DETAIL_ACTION_CLOSE_SELECTION = 'close-selection';
 const VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS = 220;
 const VIEW2D_SELECTION_SIDEBAR_VIEWPORT_TRANSITION_MS = 240;
@@ -350,6 +352,7 @@ export function setDescriptionTransformerView2dAction(descriptionEl, {
 
 export function createTransformerView2dDetailView(panelEl, {
     onExitTo3d = null,
+    onOpenInfo = null,
     onOpenSelection = null,
     onCloseSelection = null
 } = {}) {
@@ -399,6 +402,19 @@ export function createTransformerView2dDetailView(panelEl, {
                             aria-label="Exit the 2D canvas and return to the 3D view"
                         >
                             Go to 3D
+                        </button>
+                        <button
+                            type="button"
+                            class="detail-transformer-view2d-action detail-transformer-view2d-action--icon detail-transformer-view2d-action--info"
+                            data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_OPEN_INFO}"
+                            aria-label="Open project info page"
+                            title="Open project info page"
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <circle cx="12" cy="12" r="9"></circle>
+                                <path d="M12 10.2V16"></path>
+                                <circle cx="12" cy="7.35" r="0.85" fill="currentColor" stroke="none"></circle>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -510,6 +526,7 @@ export function createTransformerView2dDetailView(panelEl, {
     const fitBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_FIT}"]`);
     const backToGraphBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_DEEP}"]`);
     const exitTo3dBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_EXIT_TO_3D}"]`);
+    const openInfoBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_OPEN_INFO}"]`);
     const closeSelectionBtn = root.querySelector(`[data-transformer-view2d-action="${VIEW2D_DETAIL_ACTION_CLOSE_SELECTION}"]`);
     const stageLayerReadout = root.querySelector('[data-transformer-view2d-readout="layer"]');
     const stageTitleReadout = root.querySelector('[data-transformer-view2d-readout="stage"]');
@@ -3844,6 +3861,13 @@ export function createTransformerView2dDetailView(panelEl, {
         if (typeof onExitTo3d === 'function') {
             onExitTo3d();
         }
+    });
+    openInfoBtn?.addEventListener('click', () => {
+        if (typeof onOpenInfo === 'function') {
+            onOpenInfo();
+            return;
+        }
+        openProjectInfoPage();
     });
     closeSelectionBtn?.addEventListener('click', () => {
         const didClearSelectionLock = clearPinnedSceneSelectionLocks({ scheduleRender: false });
