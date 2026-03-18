@@ -106,6 +106,7 @@ import {
     setDescriptionContent
 } from './selectionPanelCopyUtils.js';
 import {
+    getProjectInfoActiveVisualizationMode,
     openProjectInfoPage,
     PROJECT_INFO_ACTIVE_VISUALIZATION_MODES,
     setProjectInfoActiveVisualizationMode
@@ -455,6 +456,11 @@ function formatNumber(value) {
     return Math.round(value).toLocaleString('en-US');
 }
 
+function formatUngroupedNumber(value) {
+    if (!Number.isFinite(value)) return 'TBD';
+    return Math.round(value).toLocaleString('en-US', { useGrouping: false });
+}
+
 const DEFAULT_METADATA_DIMENSION_LABELS = Object.freeze({
     input: 'Input dimension',
     output: 'Output dimension',
@@ -521,7 +527,7 @@ function buildMetadata(
         outputDim: hasDims ? formatNumber(outputDim) : 'TBD',
         inputDimLabel: dimensionLabels.input,
         outputDimLabel: dimensionLabels.output,
-        length: hasLength ? formatNumber(length) : 'TBD',
+        length: hasLength ? formatUngroupedNumber(length) : 'TBD',
         hasLength,
         biasDim: hasBiasDim ? formatNumber(biasDim) : '',
         hasBiasDim,
@@ -1050,21 +1056,21 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
     const tokenIndices = Array.isArray(context?.tokenIndices) ? context.tokenIndices : [];
     const tokenLabels = Array.isArray(context?.tokenLabels) ? context.tokenLabels : [];
 
-    const sourceTokenIndex = Number.isFinite(activation.tokenIndex) ? activation.tokenIndex : null;
-    const targetTokenIndex = Number.isFinite(activation.keyTokenIndex) ? activation.keyTokenIndex : null;
-    const row = Number.isFinite(sourceTokenIndex) ? tokenIndices.indexOf(sourceTokenIndex) : -1;
-    const col = Number.isFinite(targetTokenIndex) ? tokenIndices.indexOf(targetTokenIndex) : -1;
+    const queryTokenIndex = Number.isFinite(activation.tokenIndex) ? activation.tokenIndex : null;
+    const sourceTokenIndex = Number.isFinite(activation.keyTokenIndex) ? activation.keyTokenIndex : null;
+    const row = Number.isFinite(queryTokenIndex) ? tokenIndices.indexOf(queryTokenIndex) : -1;
+    const col = Number.isFinite(sourceTokenIndex) ? tokenIndices.indexOf(sourceTokenIndex) : -1;
 
-    const sourceLabel = formatTokenLabelForPreview(
+    const queryLabel = formatTokenLabelForPreview(
         activation.tokenLabel || (row >= 0 ? tokenLabels[row] : null)
     );
-    const targetLabel = formatTokenLabelForPreview(
+    const sourceLabel = formatTokenLabelForPreview(
         activation.keyTokenLabel || (col >= 0 ? tokenLabels[col] : null)
     );
+    const queryTokenText = normalizeAttentionValuePart(queryLabel);
     const sourceTokenText = normalizeAttentionValuePart(sourceLabel);
-    const targetTokenText = normalizeAttentionValuePart(targetLabel);
+    const queryText = queryTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Query' : queryTokenText;
     const sourceText = sourceTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Source' : sourceTokenText;
-    const targetText = targetTokenText === ATTENTION_VALUE_PLACEHOLDER ? 'Target' : targetTokenText;
     const scoreText = formatAttentionDisplayScore({
         mode,
         value: score,
@@ -1074,11 +1080,19 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
         keyTokenIndex: activation.keyTokenIndex,
         fallback: 'n/a'
     });
+    const hasQueryContext = Number.isFinite(queryTokenIndex) || queryLabel.length > 0;
     const hasSourceContext = Number.isFinite(sourceTokenIndex) || sourceLabel.length > 0;
-    const hasTargetContext = Number.isFinite(targetTokenIndex) || targetLabel.length > 0;
-    const tokenContext = (hasSourceContext || hasTargetContext)
+    const tokenContext = (hasQueryContext || hasSourceContext)
         ? {
             source: {
+                role: 'Query',
+                tokenText: queryTokenText,
+                tokenIndex: queryTokenIndex,
+                positionText: Number.isFinite(queryTokenIndex)
+                    ? `Position ${Math.floor(queryTokenIndex) + 1}`
+                    : 'Position n/a'
+            },
+            target: {
                 role: 'Source',
                 tokenText: sourceTokenText,
                 tokenIndex: sourceTokenIndex,
@@ -1086,21 +1100,13 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
                     ? `Position ${Math.floor(sourceTokenIndex) + 1}`
                     : 'Position n/a'
             },
-            target: {
-                role: 'Target',
-                tokenText: targetTokenText,
-                tokenIndex: targetTokenIndex,
-                positionText: Number.isFinite(targetTokenIndex)
-                    ? `Position ${Math.floor(targetTokenIndex) + 1}`
-                    : 'Position n/a'
-            },
             score: {
                 value: scoreText
             }
         }
         : null;
-    const tokenContextLine = (hasSourceContext || hasTargetContext)
-        ? `${formatAttentionSubtitleTokenPart(sourceLabel, sourceTokenIndex, 'Source')} • ${formatAttentionSubtitleTokenPart(targetLabel, targetTokenIndex, 'Target')}`
+    const tokenContextLine = (hasQueryContext || hasSourceContext)
+        ? `${formatAttentionSubtitleTokenPart(queryLabel, queryTokenIndex, 'Query')} • ${formatAttentionSubtitleTokenPart(sourceLabel, sourceTokenIndex, 'Source')}`
         : '';
 
     return {
@@ -1110,11 +1116,11 @@ function resolveAttentionScoreSelectionSummary(selectionInfo, context = null) {
         tokenContextLine,
         tokenContext,
         defaultValue: {
-            source: sourceText,
-            target: targetText,
+            source: queryText,
+            target: sourceText,
             score: scoreText,
-            sourceTokenIndex: Number.isFinite(sourceTokenIndex) ? Math.floor(sourceTokenIndex) : null,
-            targetTokenIndex: Number.isFinite(targetTokenIndex) ? Math.floor(targetTokenIndex) : null,
+            sourceTokenIndex: Number.isFinite(queryTokenIndex) ? Math.floor(queryTokenIndex) : null,
+            targetTokenIndex: Number.isFinite(sourceTokenIndex) ? Math.floor(sourceTokenIndex) : null,
             empty: false
         }
     };
@@ -3914,6 +3920,11 @@ export class SelectionPanel {
         this._onOpenInfo = typeof options.onOpenInfo === 'function'
             ? options.onOpenInfo
             : openProjectInfoPage;
+        this._onOpenSettings = typeof options.onOpenSettings === 'function'
+            ? options.onOpenSettings
+            : (() => {
+                document.getElementById('settingsBtn')?.click();
+            });
         this._pendingResizeRaf = null;
         this._previewRafId = null;
         this._previewPausedForPanelResize = false;
@@ -4864,6 +4875,34 @@ export class SelectionPanel {
         };
     }
 
+    _resolveCopyContextSurfaceState() {
+        const activeMode = getProjectInfoActiveVisualizationMode()
+            || (
+                this._transformerView2dDetailOpen
+                    ? PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.TRANSFORMER_VIEW2D
+                    : PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D
+            );
+        const activeView2dContext = this._transformerView2dDetailOpen
+            ? (this._currentTransformerView2dContext || null)
+            : null;
+        const availableView2dContext = this._currentTransformerView2dContext || null;
+        const current2dSelectionSidebarVisible = this._transformerView2dDetailOpen
+            && this._transformerView2dDetailView?.isSelectionSidebarVisible?.() === true;
+
+        return {
+            activeMode,
+            supports3d: true,
+            supports2d: true,
+            current2dFocusLabel: String(activeView2dContext?.focusLabel || '').trim(),
+            current2dDetailFocusLabel: String(activeView2dContext?.detailFocusLabel || '').trim(),
+            current2dSemanticTarget: activeView2dContext?.semanticTarget || null,
+            current2dTransitionMode: String(activeView2dContext?.transitionMode || '').trim(),
+            current2dSelectionSidebarVisible,
+            available2dFocusLabel: String(availableView2dContext?.focusLabel || '').trim(),
+            available2dDetailFocusLabel: String(availableView2dContext?.detailFocusLabel || '').trim()
+        };
+    }
+
     _buildSelectionContextPayload() {
         const selection = this._lastSelection;
         const normalizedLabel = this._lastSelectionLabel
@@ -4899,7 +4938,8 @@ export class SelectionPanel {
                 attentionScoreSummary,
                 vectorTokenMetadata,
                 activationSource: this.activationSource,
-                kvState: this._resolveCopyContextKvState(selection)
+                kvState: this._resolveCopyContextKvState(selection),
+                surfaceState: this._resolveCopyContextSurfaceState()
             });
         }
 
@@ -4948,7 +4988,8 @@ export class SelectionPanel {
             attentionScoreSummary,
             vectorTokenMetadata,
             activationSource: this.activationSource,
-            kvState: this._resolveCopyContextKvState(selection)
+            kvState: this._resolveCopyContextKvState(selection),
+            surfaceState: this._resolveCopyContextSurfaceState()
         });
     }
 
@@ -9279,6 +9320,9 @@ export class SelectionPanel {
                     onOpenInfo: () => {
                         this._onOpenInfo?.();
                     },
+                    onOpenSettings: () => {
+                        this._onOpenSettings?.();
+                    },
                     onOpenSelection: (selection) => {
                         return this._openTransformerView2dCanvasSelection(selection);
                     },
@@ -9329,8 +9373,8 @@ export class SelectionPanel {
             this.previewMetaSection,
             this.description,
             this.metaSection,
-            this.dataSection,
             this.attentionRoot,
+            this.dataSection,
             this.copyContextRow
         ].filter(Boolean);
     }
@@ -9936,14 +9980,14 @@ export class SelectionPanel {
         }
 
         const modeText = nextLink.mode === 'post' ? 'post-softmax' : 'pre-softmax';
-        const safeSourceText = normalizeAttentionValuePart(sourceText, 'source token');
-        const safeTargetText = normalizeAttentionValuePart(targetText, 'target token');
+        const safeQueryText = normalizeAttentionValuePart(sourceText, 'query token');
+        const safeSourceText = normalizeAttentionValuePart(targetText, 'source token');
         this.attentionValueScore.dataset.attentionScoreMode = nextLink.mode;
         this.attentionValueScore.tabIndex = 0;
         this.attentionValueScore.setAttribute('role', 'button');
         this.attentionValueScore.setAttribute(
             'aria-label',
-            `Open ${modeText} attention score for ${safeSourceText} to ${safeTargetText}`
+            `Open ${modeText} attention score for query token ${safeQueryText} reading from source token ${safeSourceText}`
         );
     }
 
@@ -11149,30 +11193,30 @@ export class SelectionPanel {
         const colLabel = cell.dataset.colLabel || '';
         const rawRowTokenIndex = Number(cell.dataset.rowTokenIndex);
         const rawColTokenIndex = Number(cell.dataset.colTokenIndex);
-        const sourceTokenIndex = Number.isFinite(rawRowTokenIndex) ? Math.floor(rawRowTokenIndex) : null;
-        const targetTokenIndex = Number.isFinite(rawColTokenIndex) ? Math.floor(rawColTokenIndex) : null;
-        const sourceText = normalizeAttentionValuePart(rowLabel, 'Source');
-        const targetText = normalizeAttentionValuePart(colLabel, 'Target');
+        const queryTokenIndex = Number.isFinite(rawRowTokenIndex) ? Math.floor(rawRowTokenIndex) : null;
+        const sourceTokenIndex = Number.isFinite(rawColTokenIndex) ? Math.floor(rawColTokenIndex) : null;
+        const queryText = normalizeAttentionValuePart(rowLabel, 'Query');
+        const sourceText = normalizeAttentionValuePart(colLabel, 'Source');
         const scoreText = formatAttentionDisplayScore({
             mode: displayMode,
             value: valueNum,
-            queryTokenIndex: sourceTokenIndex,
-            keyTokenIndex: targetTokenIndex
+            queryTokenIndex,
+            keyTokenIndex: sourceTokenIndex
         });
         this._setAttentionValue({
-            source: sourceText,
-            target: targetText,
+            source: queryText,
+            target: sourceText,
             score: scoreText,
-            sourceTokenIndex,
-            targetTokenIndex,
+            sourceTokenIndex: queryTokenIndex,
+            targetTokenIndex: sourceTokenIndex,
             attentionScoreLink: displayMode === 'mask'
                 ? null
                 : this._buildAttentionScoreValueLink({
                     mode: displayMode,
                     row,
                     col,
-                    sourceTokenIndex,
-                    targetTokenIndex
+                    sourceTokenIndex: queryTokenIndex,
+                    targetTokenIndex: sourceTokenIndex
                 }),
             empty: false
         });
@@ -15380,6 +15424,40 @@ export class SelectionPanel {
         };
         this._setAttentionValue(this._attentionValueDefault);
         this._applyAttentionDecodeStyling();
+        this._refreshTransformerView2dDetailViewAfterDataUpdate();
+    }
+
+    _refreshTransformerView2dDetailViewAfterDataUpdate() {
+        if (!this._transformerView2dDetailOpen || !this._transformerView2dDetailView) return;
+        const view2dContext = this._currentTransformerView2dContext;
+        if (!view2dContext) return;
+
+        const keepSelectionSidebarVisible = this._transformerView2dDetailView?.isSelectionSidebarVisible?.() === true;
+
+        this._transformerView2dDetailView.open({
+            activationSource: this.activationSource,
+            tokenIndices: Array.isArray(this.attentionTokenIndices) ? this.attentionTokenIndices : this.laneTokenIndices,
+            tokenLabels: Array.isArray(this.attentionTokenLabels) ? this.attentionTokenLabels : this.tokenLabels,
+            semanticTarget: view2dContext.semanticTarget,
+            focusLabel: view2dContext.focusLabel,
+            initialOverviewSelectionLockTarget: view2dContext.initialOverviewSelectionLockTarget,
+            detailSemanticTargets: view2dContext.detailSemanticTargets,
+            detailFocusLabel: view2dContext.detailFocusLabel,
+            detailInteractionTargets: view2dContext.detailInteractionTargets,
+            transitionMode: view2dContext.transitionMode,
+            initialSelectionSidebarVisible: keepSelectionSidebarVisible,
+            isSmallScreen: this._isSmallScreen && this._isSmallScreen()
+        });
+
+        if (keepSelectionSidebarVisible) {
+            this._showTransformerView2dSelectionSidebar({ scrollToTop: false });
+        } else {
+            this._scheduleResize();
+        }
+    }
+
+    isTransformerView2dOpen() {
+        return this._transformerView2dDetailOpen === true;
     }
 
     _resolveVectorTokenPosition(selection, label) {
@@ -16348,6 +16426,7 @@ export function initSelectionPanel(options = {}) {
         handleSelection: (selection) => panel.showSelection(selection),
         close: () => panel.close(),
         updateData: (data) => panel.updateData(data),
-        openTransformerView2d: (config) => panel.openTransformerView2d(config)
+        openTransformerView2d: (config) => panel.openTransformerView2d(config),
+        isTransformerView2dOpen: () => panel.isTransformerView2dOpen()
     };
 }

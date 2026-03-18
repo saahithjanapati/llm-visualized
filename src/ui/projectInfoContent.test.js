@@ -3,11 +3,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     enhanceProjectInfoContent,
+    PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS,
     PROJECT_INFO_FEEDBACK_TARGET_ID
 } from './projectInfoContent.js';
 
 describe('projectInfoContent', () => {
-    it('assigns the feedback anchor and smooth-scrolls to it for internal links', () => {
+    it('assigns the feedback anchor, smooth-scrolls to it, and briefly spotlights it for internal links', () => {
+        vi.useFakeTimers();
         document.body.innerHTML = `
             <div id="content">
                 <blockquote><p>Feedback lives here.</p></blockquote>
@@ -30,5 +32,11 @@ describe('projectInfoContent', () => {
         expect(feedbackTarget?.classList.contains('project-info-scroll-target')).toBe(true);
         expect(feedbackTarget.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
         expect(feedbackTarget.focus).toHaveBeenCalled();
+        expect(feedbackTarget?.classList.contains(PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS)).toBe(true);
+
+        vi.advanceTimersByTime(1800);
+
+        expect(feedbackTarget?.classList.contains(PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS)).toBe(false);
+        vi.useRealTimers();
     });
 });

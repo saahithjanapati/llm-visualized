@@ -679,10 +679,11 @@ body.touch-ui * {
 
 @media (max-width: 600px) {
     #topControls {
-        gap: 3px;
+        gap: 6px;
         left: max(8px, env(safe-area-inset-left));
         right: max(8px, env(safe-area-inset-right));
         max-width: none;
+        justify-content: stretch;
         pointer-events: none;
     }
     #topControls > * {
@@ -691,16 +692,26 @@ body.touch-ui * {
     #topControls[data-auto-hidden="true"] > * {
         pointer-events: none;
     }
+    #topControls button {
+        min-height: 40px;
+        border-radius: 10px;
+    }
+    #pauseBtn,
+    #skipMenuToggle,
+    #settingsBtn,
+    #infoBtn {
+        width: 40px;
+        min-width: 40px;
+        height: 40px;
+    }
     #followModeBtn,
     #transformerView2dBtn {
-        padding-inline: clamp(6px, 2vw, 9px);
-        font-size: 11px;
-    }
-    #followModeBtn {
-        min-width: clamp(66px, 19vw, 78px);
-    }
-    #transformerView2dBtn {
-        min-width: clamp(42px, 12vw, 52px);
+        min-width: 0;
+        min-height: 40px;
+        flex: 1 1 0;
+        justify-content: center;
+        padding-inline: clamp(10px, 3vw, 14px);
+        font-size: 12px;
     }
 }
 
@@ -2143,6 +2154,72 @@ body.detail-panel-resizing * {
 .project-info-modal-content .project-info-scroll-target {
     scroll-margin-top: 14px;
     outline: none;
+    transition:
+        transform 260ms cubic-bezier(0.2, 0.9, 0.2, 1),
+        border-color 220ms ease,
+        box-shadow 220ms ease,
+        background 220ms ease;
+}
+
+.project-info-modal-content .project-info-scroll-target.is-feedback-spotlighted {
+    border-color: rgba(155, 194, 255, 0.98);
+    background: linear-gradient(180deg, rgba(110, 168, 255, 0.22), rgba(110, 168, 255, 0.08));
+    box-shadow:
+        0 0 0 1px rgba(155, 194, 255, 0.44),
+        0 0 0 10px rgba(110, 168, 255, 0.08),
+        0 18px 54px rgba(7, 17, 34, 0.42);
+    animation: project-info-feedback-spotlight 1.4s ease-out;
+}
+
+@keyframes project-info-feedback-spotlight {
+    0% {
+        transform: translate3d(0, 4px, 0) scale(0.972) rotate(0deg);
+        border-color: rgba(110, 168, 255, 0.52);
+        box-shadow:
+            0 0 0 1px rgba(110, 168, 255, 0.2),
+            0 0 0 0 rgba(110, 168, 255, 0),
+            0 14px 42px rgba(0, 0, 0, 0.24);
+    }
+    18% {
+        transform: translate3d(-3px, -7px, 0) scale(1.038) rotate(-0.45deg);
+        border-color: rgba(203, 226, 255, 1);
+        box-shadow:
+            0 0 0 1px rgba(203, 226, 255, 0.74),
+            0 0 0 18px rgba(110, 168, 255, 0.16),
+            0 28px 72px rgba(7, 17, 34, 0.52);
+    }
+    30% {
+        transform: translate3d(3px, -4px, 0) scale(1.028) rotate(0.38deg);
+        border-color: rgba(197, 222, 255, 1);
+        box-shadow:
+            0 0 0 1px rgba(197, 222, 255, 0.68),
+            0 0 0 16px rgba(110, 168, 255, 0.14),
+            0 25px 66px rgba(7, 17, 34, 0.5);
+    }
+    42% {
+        transform: translate3d(-2px, -2px, 0) scale(1.014) rotate(-0.22deg);
+        border-color: rgba(194, 220, 255, 1);
+        box-shadow:
+            0 0 0 1px rgba(194, 220, 255, 0.64),
+            0 0 0 14px rgba(110, 168, 255, 0.12),
+            0 22px 60px rgba(7, 17, 34, 0.48);
+    }
+    56% {
+        transform: translate3d(1px, 1px, 0) scale(0.998) rotate(0.08deg);
+        border-color: rgba(191, 219, 255, 1);
+        box-shadow:
+            0 0 0 1px rgba(191, 219, 255, 0.62),
+            0 0 0 14px rgba(110, 168, 255, 0.12),
+            0 20px 58px rgba(7, 17, 34, 0.46);
+    }
+    100% {
+        transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+        border-color: rgba(155, 194, 255, 0.98);
+        box-shadow:
+            0 0 0 1px rgba(155, 194, 255, 0.44),
+            0 0 0 10px rgba(110, 168, 255, 0.08),
+            0 18px 54px rgba(7, 17, 34, 0.42);
+    }
 }
 
 /* Modal panel */

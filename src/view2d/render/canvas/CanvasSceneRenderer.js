@@ -3685,6 +3685,7 @@ export class CanvasSceneRenderer {
                 && !interactionState?.hoveredRow
                 && !interactionState?.previousHoveredRow
                 && !(Number(interactionState?.hoverDimStrength) > 0.001)
+                && interactionState?.interactionKind !== 'zoom'
                 && !overviewCurrentFocusState
                 && !overviewPreviousFocusState
                 && !sceneFocusState

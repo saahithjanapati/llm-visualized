@@ -1,4 +1,8 @@
 export const PROJECT_INFO_FEEDBACK_TARGET_ID = 'project-info-feedback';
+export const PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS = 'is-feedback-spotlighted';
+
+const FEEDBACK_SPOTLIGHT_DURATION_MS = 1800;
+const feedbackSpotlightTimeouts = new WeakMap();
 
 function focusScrollTarget(target) {
     if (!target || typeof target.focus !== 'function') return;
@@ -7,6 +11,26 @@ function focusScrollTarget(target) {
     } catch {
         target.focus();
     }
+}
+
+function spotlightScrollTarget(target) {
+    if (!target?.classList) return;
+
+    const previousTimeout = feedbackSpotlightTimeouts.get(target);
+    if (previousTimeout) {
+        clearTimeout(previousTimeout);
+    }
+
+    target.classList.remove(PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS);
+    void target.offsetWidth;
+    target.classList.add(PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS);
+
+    const timeoutId = setTimeout(() => {
+        target.classList.remove(PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS);
+        feedbackSpotlightTimeouts.delete(target);
+    }, FEEDBACK_SPOTLIGHT_DURATION_MS);
+
+    feedbackSpotlightTimeouts.set(target, timeoutId);
 }
 
 export function enhanceProjectInfoContent(contentEl) {
@@ -46,5 +70,6 @@ export function enhanceProjectInfoContent(contentEl) {
             target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
         focusScrollTarget(target);
+        spotlightScrollTarget(target);
     });
 }

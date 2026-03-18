@@ -70,12 +70,6 @@
         >
             2D View
         </button>
-        <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2a1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.1a1 1 0 0 0-.6-.9a1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1a1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.1a1 1 0 0 0 .9-.6a1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.1a1 1 0 0 0 .6.9a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.1a1 1 0 0 0-.9.6z"></path>
-                <circle cx="12" cy="12" r="3.5"></circle>
-            </svg>
-        </button>
         <button
             id="infoBtn"
             type="button"
@@ -88,6 +82,12 @@
                 <circle cx="12" cy="12" r="9"></circle>
                 <path d="M12 10.2V16"></path>
                 <circle cx="12" cy="7.35" r="0.85" fill="currentColor" stroke="none"></circle>
+            </svg>
+        </button>
+        <button id="settingsBtn" type="button" aria-haspopup="dialog" aria-controls="settingsOverlay" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2a1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.1a1 1 0 0 0-.6-.9a1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1a1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.1a1 1 0 0 0 .9-.6a1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.1a1 1 0 0 0 .6.9a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.1a1 1 0 0 0-.9.6z"></path>
+                <circle cx="12" cy="12" r="3.5"></circle>
             </svg>
         </button>
     </div>
@@ -252,14 +252,6 @@
                     <span id="detailTokenEncodingValue" class="detail-value">—</span>
                 </div>
             </div>
-            <div id="detailDataSection" class="detail-data" style="display:none;">
-                <div class="detail-data-header">
-                    <span id="detailDataEyebrow" class="detail-data-eyebrow">DEV MODE</span>
-                    <div id="detailDataTitle" class="detail-data-title">Vector sampling</div>
-                </div>
-                <div id="detailDataBlurb" class="detail-data-blurb" hidden></div>
-                <div id="detailData" class="detail-data-values"></div>
-            </div>
             <div id="detailAttention" class="detail-attention" aria-hidden="true">
                 <div class="detail-attention-header">
                     <div class="detail-attention-header-top">
@@ -291,10 +283,10 @@
                     <div class="detail-attention-grid">
                         <div class="attention-corner"></div>
                         <div class="attention-axis-label attention-axis-label--top">
-                            <span class="attention-axis-label-text">Target Token</span>
+                            <span class="attention-axis-label-text">Source Token</span>
                         </div>
                         <div class="attention-axis-label attention-axis-label--left">
-                            <span class="attention-axis-label-text">Source Token</span>
+                            <span class="attention-axis-label-text">Query Token</span>
                         </div>
                         <div id="detailAttentionTokensTop" class="attention-tokens attention-tokens-top"></div>
                         <div id="detailAttentionTokensLeft" class="attention-tokens attention-tokens-left"></div>
@@ -317,8 +309,8 @@
                     <div id="detailAttentionNote" class="attention-note"></div>
                     <div id="detailAttentionValue" class="attention-value" data-empty="true">
                         <div class="attention-value-head" aria-hidden="true">
+                            <span>Query token</span>
                             <span>Source token</span>
-                            <span>Target token</span>
                             <span>Score</span>
                         </div>
                         <div class="attention-value-bar">
@@ -330,6 +322,14 @@
                         </div>
                     </div>
                 </div>
+            </div>
+            <div id="detailDataSection" class="detail-data" style="display:none;">
+                <div class="detail-data-header">
+                    <span id="detailDataEyebrow" class="detail-data-eyebrow">DEV MODE</span>
+                    <div id="detailDataTitle" class="detail-data-title">Vector sampling</div>
+                </div>
+                <div id="detailDataBlurb" class="detail-data-blurb" hidden></div>
+                <div id="detailData" class="detail-data-values"></div>
             </div>
             <div class="detail-copy-context">
                 <button id="detailCopyContextBtn" class="detail-copy-context-btn" type="button">

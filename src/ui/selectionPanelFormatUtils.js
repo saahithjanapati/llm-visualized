@@ -49,10 +49,10 @@ export function formatActivationData(data) {
     if (Number.isFinite(data.layerIndex)) lines.push(`Layer: ${data.layerIndex + 1}`);
     if (isAttentionScore) {
         if (Number.isFinite(data.tokenIndex) || data.tokenLabel) {
-            lines.push(`Source token: ${formatTokenWithIndex(data.tokenIndex, data.tokenLabel, 'Source')}`);
+            lines.push(`Query token: ${formatTokenWithIndex(data.tokenIndex, data.tokenLabel, 'Query')}`);
         }
         if (Number.isFinite(data.keyTokenIndex) || data.keyTokenLabel) {
-            lines.push(`Target token: ${formatTokenWithIndex(data.keyTokenIndex, data.keyTokenLabel, 'Target')}`);
+            lines.push(`Source token: ${formatTokenWithIndex(data.keyTokenIndex, data.keyTokenLabel, 'Source')}`);
         }
     } else {
         if (Number.isFinite(data.tokenIndex)) {

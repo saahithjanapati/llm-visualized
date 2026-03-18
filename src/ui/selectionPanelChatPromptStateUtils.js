@@ -33,11 +33,13 @@ function isLayerNormOutputVectorStage(stageLower = '', kind = '') {
 
 export function buildChatPromptInstructionText() {
     return [
-        'You are helping a user understand an interactive GPT-2 visualization.',
-        'Answer as if you are watching the same animation alongside the user. Prefer wording like "here we are seeing" or "in this view" instead of describing the animation as belonging to the user or to you.',
-        'Use the reference markdown below as the broad description of the full scene, then use the live selection and visualization-state context afterward as the most specific description of what is currently on screen.',
-        'If the user\'s next question is about self-attention, it may be useful to refer to query, key, and value vectors by the visualization colors listed below.',
-        'Answer the user\'s next question about the model or the visualization using both sources.'
+        'I am about to ask a question about this GPT-2 visualization.',
+        'Below I am pasting background context about the full visualization, plus details about what I am currently looking at right now.',
+        'My question might be about the whole visualization, the 3D scene, the 2D semantic canvas, or the current live selection, so do not assume I am only asking about the selected object.',
+        'Use the reference markdown as the broad description of the visualization and its geometry, flow, and views. Use the current surface, current selection, and current visualization-state sections as the live description of what I am seeing right now.',
+        'If my question is about the current live view, prioritize the live sections. If my question is broader, use the reference markdown and then pull in the live sections when they help.',
+        'Please answer as if you are looking at the same visualization alongside me, and prefer simple, concrete explanations that refer to visible geometry, layout, color, motion, matrices, vectors, and flow between components.',
+        'If my question is about self-attention, it may help to refer to query, key, and value vectors by the visualization colors listed below.'
     ].join('\n');
 }
 
@@ -146,73 +148,73 @@ export function buildVisualizationStateLines({
     const stage = typeof activation?.stage === 'string' ? activation.stage : '';
     const stageLower = stage.toLowerCase();
 
-    if (stage) lines.push(`Active stage key: ${stage}`);
+    if (stage) lines.push(`The active stage key right now is: ${stage}`);
 
     const stageSummary = describeSceneStage(stage, labelText);
-    if (stageSummary) lines.push(`Current stage summary: ${stageSummary}`);
+    if (stageSummary) lines.push(`Right now I am seeing this stage: ${stageSummary}`);
 
     if (stageLower === 'embedding.token') {
-        lines.push('We are at the very start of the token path, before position information has been added into the residual stream.');
+        lines.push('I am at the very start of the token path, before position information has been added into the residual stream.');
     } else if (stageLower === 'embedding.position') {
-        lines.push('We are looking at positional information before it is added to the token embedding.');
+        lines.push('I am looking at positional information before it is added to the token embedding.');
     } else if (stageLower === 'embedding.sum') {
-        lines.push('We are looking at the token state after token and position embeddings have been combined, but before the first block processes it.');
+        lines.push('I am looking at the token state after token and position embeddings have been combined, but before the first block processes it.');
     } else if (stageLower === 'layer.incoming') {
-        lines.push('We are at the entrance to a transformer block, right before the attention sublayer begins.');
+        lines.push('I am at the entrance to a transformer block, right before the attention sublayer begins.');
     } else if (stageLower === 'ln1.norm') {
-        lines.push(`We are between the incoming residual stream and the learned affine output of ${formatLayerNormLabel('ln1')}.`);
+        lines.push(`I am between the incoming residual stream and the learned affine output of ${formatLayerNormLabel('ln1')}.`);
     } else if (isLayerNormScaleStage(stageLower, 'ln1')) {
-        lines.push(`We are in the middle of ${formatLayerNormLabel('ln1')}, after normalization and during the learned scaling step.`);
+        lines.push(`I am in the middle of ${formatLayerNormLabel('ln1')}, after normalization and during the learned scaling step.`);
     } else if (isLayerNormOutputVectorStage(stageLower, 'ln1')) {
-        lines.push('We are at the handoff from LayerNorm 1 into self-attention, right before Q/K/V projections are read from this token state.');
+        lines.push('I am at the handoff from LayerNorm 1 into self-attention, right before Q/K/V projections are read from this token state.');
     } else if (stageLower === 'qkv.q') {
-        lines.push('We are in the query-projection view for one attention head, where this token prepares the vector that will look outward across the context.');
+        lines.push('I am in the query-projection view for one attention head, where this token prepares the vector that will look outward across the context.');
     } else if (stageLower === 'qkv.k') {
-        lines.push('We are in the key-projection view for one attention head, where this token prepares the vector that other queries will compare against.');
+        lines.push('I am in the key-projection view for one attention head, where this token prepares the vector that other queries will compare against.');
     } else if (stageLower === 'qkv.v') {
-        lines.push('We are in the value-projection view for one attention head, where this token prepares the content that can be routed forward by attention weights.');
+        lines.push('I am in the value-projection view for one attention head, where this token prepares the content that can be routed forward by attention weights.');
     } else if (stageLower === 'attention.pre') {
-        lines.push('We are in the raw score step of attention, before softmax converts compatibility scores into normalized weights.');
+        lines.push('I am in the raw score step of attention, before softmax converts compatibility scores into normalized weights.');
     } else if (stageLower === 'attention.post') {
-        lines.push('We are in the normalized attention step, after softmax has distributed the query token\'s focus across the visible context.');
+        lines.push('I am in the normalized attention step, after softmax has distributed the query token\'s focus across the visible context.');
     } else if (stageLower === 'attention.weighted_value') {
-        lines.push('We are after attention weighting has started, while value-vector contributions are being scaled and accumulated for the head output.');
+        lines.push('I am after attention weighting has started, while value-vector contributions are being scaled and accumulated for the head output.');
     } else if (stageLower === 'attention.output_projection') {
-        lines.push('We are after per-head mixing, while the concatenated attention result is being projected back into residual width.');
+        lines.push('I am after per-head mixing, while the concatenated attention result is being projected back into residual width.');
     } else if (stageLower === 'residual.post_attention') {
-        lines.push('We are between the attention sublayer and the MLP: the attention update has already been written back into the residual stream.');
+        lines.push('I am between the attention sublayer and the MLP: the attention update has already been written back into the residual stream.');
     } else if (stageLower === 'ln2.norm') {
-        lines.push(`We are between the post-attention residual stream and the learned affine output of ${formatLayerNormLabel('ln2')}.`);
+        lines.push(`I am between the post-attention residual stream and the learned affine output of ${formatLayerNormLabel('ln2')}.`);
     } else if (isLayerNormScaleStage(stageLower, 'ln2')) {
-        lines.push(`We are in the middle of ${formatLayerNormLabel('ln2')}, after normalization and during the learned scaling step.`);
+        lines.push(`I am in the middle of ${formatLayerNormLabel('ln2')}, after normalization and during the learned scaling step.`);
     } else if (isLayerNormOutputVectorStage(stageLower, 'ln2')) {
-        lines.push('We are at the handoff from LayerNorm 2 into the MLP, right before the feed-forward sublayer reads this token state.');
+        lines.push('I am at the handoff from LayerNorm 2 into the MLP, right before the feed-forward sublayer reads this token state.');
     } else if (stageLower === 'mlp.up') {
-        lines.push('We are in the MLP expansion step, where residual-width features fan out into a wider hidden representation.');
+        lines.push('I am in the MLP expansion step, where residual-width features fan out into a wider hidden representation.');
     } else if (stageLower === 'mlp.activation') {
-        lines.push('We are in the nonlinear part of the MLP, after the up-projection and before the hidden state is compressed back down.');
+        lines.push('I am in the nonlinear part of the MLP, after the up-projection and before the hidden state is compressed back down.');
     } else if (stageLower === 'mlp.down') {
-        lines.push('We are in the MLP down-projection step, where the widened hidden representation is being mapped back to residual width.');
+        lines.push('I am in the MLP down-projection step, where the widened hidden representation is being mapped back to residual width.');
     } else if (stageLower === 'residual.post_mlp') {
-        lines.push('We are at the end of the block, after both attention and the MLP have updated the residual stream.');
+        lines.push('I am at the end of the block, after both attention and the MLP have updated the residual stream.');
     } else if (stageLower === 'final_ln.norm') {
-        lines.push('We are in the final normalization path, just before the last token state is sent into the vocabulary projection.');
+        lines.push('I am in the final normalization path, just before the last token state is sent into the vocabulary projection.');
     } else if (isLayerNormScaleStage(stageLower, 'final_ln')) {
-        lines.push(`We are in the middle of ${formatLayerNormLabel('final')}, after normalization and during the learned scaling step before logits are computed.`);
+        lines.push(`I am in the middle of ${formatLayerNormLabel('final')}, after normalization and during the learned scaling step before logits are computed.`);
     } else if (isLayerNormOutputVectorStage(stageLower, 'final_ln')) {
-        lines.push('We are at the output of the final normalization path, immediately before the unembedding produces vocabulary logits.');
+        lines.push('I am at the output of the final normalization path, immediately before the unembedding produces vocabulary logits.');
     }
 
     if (isAttentionScoreSelection(labelText, selection)) {
         const mode = resolveAttentionModeFromSelection(selection)
             || (stageLower === 'attention.post' ? 'post' : 'pre');
         lines.push(mode === 'post'
-            ? 'The selected attention cell is currently being interpreted as a post-softmax weight.'
-            : 'The selected attention cell is currently being interpreted as a pre-softmax score.');
+            ? 'I am currently interpreting the selected attention cell as a post-softmax weight.'
+            : 'I am currently interpreting the selected attention cell as a pre-softmax score.');
     } else if (isWeightedSumSelection(labelText, selection)) {
         lines.push('This view is after attention weights have been applied to value vectors, but before the final output projection writes the result back into the residual stream.');
     } else if (isResidualVectorSelection(labelText, selection) && stageLower === 'residual.post_attention') {
-        lines.push('In other words, we are looking at the token state after context from other positions has already been mixed in.');
+        lines.push('In other words, I am looking at the token state after context from other positions has already been mixed in.');
     }
 
     if (kvState?.kvCacheModeEnabled) {

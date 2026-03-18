@@ -2717,7 +2717,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     stroke-linecap: round;
     stroke-linejoin: round;
 }
-.detail-transformer-view2d-action--info {
+.detail-transformer-view2d-action--info,
+.detail-transformer-view2d-action--settings {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -2730,15 +2731,32 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
     transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
 }
+.detail-transformer-view2d-action--settings {
+    background: rgba(230, 237, 247, 0.08);
+    border-color: rgba(230, 237, 247, 0.22);
+    color: #e6edf7;
+}
 .detail-transformer-view2d-action--info:hover {
     background: rgba(14, 18, 24, 0.96);
     border-color: rgba(255,255,255,0.28);
     color: #fff;
 }
+.detail-transformer-view2d-action--settings:hover {
+    background: rgba(230, 237, 247, 0.14);
+    border-color: rgba(230, 237, 247, 0.34);
+    color: #fff;
+}
 .detail-transformer-view2d-action--info:active {
     transform: none;
 }
+.detail-transformer-view2d-action--settings:active {
+    transform: none;
+}
 .detail-transformer-view2d-action--info:focus-visible {
+    outline: 2px solid rgba(236, 243, 252, 0.78);
+    outline-offset: 2px;
+}
+.detail-transformer-view2d-action--settings:focus-visible {
     outline: 2px solid rgba(236, 243, 252, 0.78);
     outline-offset: 2px;
 }
@@ -2989,14 +3007,16 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     border-color: rgba(255, 255, 255, 0.16);
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
-#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info {
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--settings {
     background: rgba(0, 0, 0, 0.56);
     border-color: rgba(255, 255, 255, 0.16);
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
 }
-#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info:hover {
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info:hover,
+#detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--settings:hover {
     background: rgba(10, 10, 12, 0.72);
     border-color: rgba(255, 255, 255, 0.26);
 }
@@ -3215,6 +3235,9 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         background: rgba(10, 10, 12, 0.94);
         box-shadow: 0 16px 36px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.04);
         transform: none;
+    }
+    #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-header {
+        padding-top: 14px;
     }
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar-body > .detail-preview {
         width: calc(100% - 12px);

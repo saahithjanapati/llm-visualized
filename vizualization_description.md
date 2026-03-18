@@ -302,6 +302,102 @@ The visualization also includes supporting UI elements outside the main 3D scene
 
 ---
 
+## 2D semantic canvas
+
+In addition to the main 3D scene, the app also includes a **2D semantic canvas**. This is not a separate model or a separate explanation. It is a parallel view of the **same GPT-2 runtime state** shown in the 3D scene, but presented as a scalable semantic diagram / matrix-style canvas rather than as moving 3D geometry.
+
+The 2D view is designed for panning, zooming, and semantic focus. Instead of reading motion in depth, the viewer reads module layout, matrix placement, connector flow, and local detail views.
+
+### 1. 2D overview / outer view
+
+The outer 2D view presents the model as a large semantic map of the transformer:
+
+* **Embedding modules** for token embeddings, position embeddings, and their sum
+* **Residual-stream regions** for incoming, post-attention, and post-MLP residual states
+* **Per-layer transformer modules** for LayerNorm 1, self-attention, output projection, LayerNorm 2, and the MLP
+* **Final output modules** for final layer norm, unembedding / logits, and chosen-token output
+
+The overview is meant to show where each major computation lives in the stack and how information flows from one module to the next.
+
+### 2. 2D detail views
+
+From the overview, the app can focus into more detailed 2D views for specific components.
+
+**Attention head detail**
+
+For a selected attention head, the 2D canvas can focus into a head-specific detail view. This view can show:
+
+* **Query, key, and value projection areas**
+* **Query / key / value weight matrices and bias vectors**
+* **Projected query, key, and value vectors**
+* **Pre-softmax scores, post-softmax attention weights, the attention mask, and softmax-related elements**
+* **Weighted-value products and the head's final weighted-sum / head-output region**
+
+This is the 2D counterpart of the 3D QKV and attention-routing sequence.
+
+**Output projection detail**
+
+For the post-attention recombination stage, the 2D canvas can focus into an **output projection** detail view.
+
+This detail view follows the full recombination path for one layer:
+
+* the twelve per-head outputs **H_1, H_2, ..., H_12**
+* the explicit **concatenation** step that forms **H_concat**
+* a copied / forwarded version of the concatenated output as it enters the projection stage
+* the learned **output projection weight matrix** **W_O**
+* the learned **output projection bias vector** **b_O**
+* the final projected attention output **O**
+
+So this view is not just a single matrix card. It shows the flow from separate head outputs, through concatenation, into the learned projection that maps the concatenated attention result back to model width.
+
+**MLP detail**
+
+For the feed-forward block, the 2D canvas can focus into an **MLP** detail view.
+
+This detail view lays out the MLP pipeline explicitly:
+
+* the incoming post-LayerNorm vector **x_ln**
+* the learned **up-projection weight matrix** **W_up**
+* the learned **up-projection bias vector** **b_up**
+* the up-projection output **a**
+* the **GELU** activation step
+* the post-GELU activation **z**
+* the learned **down-projection weight matrix** **W_down**
+* the learned **down-projection bias vector** **b_down**
+* the final MLP output **MLP(x_ln)**
+
+In practice the layout also includes copied intermediate vectors where helpful, so the viewer can follow the path from the up projection into GELU and then into the down projection without losing the relationship between stages.
+
+**LayerNorm detail**
+
+For layer norms, the 2D canvas can focus into a **LayerNorm** detail view for LN1, LN2, or the final layer norm.
+
+This detail view breaks LayerNorm into its visible pipeline stages:
+
+* the incoming vector **x**
+* the explicit normalization equation that produces the normalized vector **x_hat**
+* a copied normalized vector used to feed the next step
+* the learned **scale** parameter vector **gamma**
+* the scaled result **gamma ⊙ x_hat**
+* a copied scaled vector used to feed the final additive step
+* the learned **shift** parameter vector **beta**
+* the final LayerNorm output, such as **x_ln** or the final-layer output vector
+
+So the LayerNorm detail view is a full normalize -> scale -> shift pipeline rather than a single abstract module card.
+
+### 3. 2D interaction model
+
+The 2D canvas is intended to support semantic navigation:
+
+* the user can **pan and zoom**
+* the view can **animate / fly** from the overview into a specific target region
+* the selection can lock onto a semantic target such as a layer, head, matrix, residual region, or output component
+* the same underlying selection / token context can be described either from the 3D scene or from the 2D canvas
+
+So if a question mentions the 2D view, it may be asking about the overview, a zoomed-in detail panel, the current semantic focus target, or how a component in 3D maps into the 2D canvas.
+
+---
+
 ## Short version of the scene logic
 
 The scene starts with token IDs and position indices, maps them through learned embeddings, adds them into the residual stream, then repeatedly visualizes each GPT-2 Small transformer block as:

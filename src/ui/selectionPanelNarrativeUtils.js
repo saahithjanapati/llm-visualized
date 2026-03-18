@@ -46,6 +46,7 @@ const LAYERNORM_DETAIL_ACTION = 'open-layernorm';
 const LAYERNORM_PARAM_DETAIL_ACTION = 'open-layernorm-param';
 const QKV_SOURCE_VECTOR_DETAIL_ACTION = 'open-qkv-source-vector';
 const QKV_WEIGHT_MATRIX_DETAIL_ACTION = 'open-qkv-weight-matrix';
+const SOFTMAX_DETAIL_ACTION = 'open-softmax-preview';
 function joinParagraphs(...parts) {
     return parts
         .filter((part) => typeof part === 'string' && part.trim().length > 0)
@@ -65,7 +66,7 @@ function buildLinearMapDimensionSentence({
     inputName = 'input vector',
     outputName = 'output vector'
 } = {}) {
-    return `In the notation used in this visualization, its shape is ${matrixShapeText}: it takes a ${inputDimText}-dimensional ${inputName} and produces a ${outputDimText}-dimensional ${outputName}. That means the matrix reads ${inputDimText} input features together and recombines them into ${outputDimText} output features.`;
+    return `Its shape is ${matrixShapeText}: it takes a ${inputDimText}-dimensional ${inputName} and produces a ${outputDimText}-dimensional ${outputName}. That means the matrix reads ${inputDimText} input features together and recombines them into ${outputDimText} output features.`;
 }
 
 function buildLookupTableDimensionSentence({
@@ -108,6 +109,10 @@ function buildInlineDetailActionMarkup(linkText, action, payload = null) {
     if (!safeText || !safeAction) return safeText;
     const encodedPayload = encodeURIComponent(JSON.stringify(payload && typeof payload === 'object' ? payload : {}));
     return `[[detail-action|${encodeURIComponent(safeText)}|${safeAction}|${encodedPayload}]]`;
+}
+
+function buildSoftmaxDetailActionMarkup(linkText = 'Explain softmax') {
+    return buildInlineDetailActionMarkup(linkText, SOFTMAX_DETAIL_ACTION);
 }
 
 function normalizeQkvKind(kind = 'Q') {
@@ -264,12 +269,32 @@ function resolveTopKShortlistText(selectionInfo = null) {
     return `the top ${Math.floor(barCount).toLocaleString('en-US')} candidates`;
 }
 
+function resolveTopKShortlistCount(selectionInfo = null) {
+    const barCount = findUserDataNumber(selectionInfo, 'barCount');
+    if (!Number.isFinite(barCount) || barCount <= 0) return null;
+    return Math.floor(barCount);
+}
+
+function buildTopKSamplingExplanation(selectionInfo = null, {
+    fullDistribution = false
+} = {}) {
+    const shortlistCount = resolveTopKShortlistCount(selectionInfo);
+    if (!Number.isFinite(shortlistCount)) {
+        return fullDistribution
+            ? 'The scores still come from a full-vocabulary softmax, even if decoding later keeps only a smaller shortlist.'
+            : 'If decoding uses top-k sampling, the model keeps only a shortlist of the best-scoring tokens, renormalizes inside that shortlist, and samples from it.';
+    }
+    return fullDistribution
+        ? `In this visualization, the shortlist shown here is top-k with ${inlineMath(`k = ${shortlistCount}`)}. The probabilities still come from the full-vocabulary softmax, but decoding keeps only these ${shortlistCount.toLocaleString('en-US')} candidates, renormalizes inside that subset, and samples from it.`
+        : `In this visualization, decoding uses top-k sampling with ${inlineMath(`k = ${shortlistCount}`)}: it keeps these ${shortlistCount.toLocaleString('en-US')} candidates, renormalizes inside that shortlist, and then samples one token.`;
+}
+
 function buildTopLogitBarsDescription(selectionInfo = null) {
     const shortlistText = resolveTopKShortlistText(selectionInfo);
     return joinParagraphs(
-        `These bars are ${shortlistText} for the next token after the final hidden state has been projected through the unembedding matrix into vocabulary logits and then normalized with softmax.`,
-        `Each visible bar shows one token's softmax probability, ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. The denominator sums over the entire vocabulary, not just the bars shown here, so the visible shortlist usually adds up to less than 100%.`,
-        `If you explain decoding with top-k sampling, this is the shortlist that step operates on: keep only these highest-scoring candidates, renormalize within that reduced set, and sample from it.`
+        `These bars show ${shortlistText} for the next token. GPT-2 gets them by taking the final token state, scoring every vocabulary item with the unembedding matrix, and then applying softmax over the whole vocabulary.`,
+        `Each bar is one token's probability, ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. The denominator includes the whole vocabulary, not just the bars shown here, so the visible bars usually add up to less than 100%.`,
+        buildTopKSamplingExplanation(selectionInfo, { fullDistribution: true })
     );
 }
 
@@ -277,16 +302,15 @@ function buildChosenTokenDescription(selectionInfo = null) {
     const tokenDescriptor = resolveOutputTokenDescriptor(selectionInfo, 'the token selected for this decoding step');
     const probability = resolveOutputTokenProbability(selectionInfo);
     const probabilityText = formatProbabilityPercentage(probability);
-    const shortlistText = resolveTopKShortlistText(selectionInfo);
     const tokenIndex = findUserDataNumber(selectionInfo, 'tokenIndex');
     const appendSentence = Number.isFinite(tokenIndex)
         ? `Once chosen, it is appended at position ${Math.floor(tokenIndex) + 1} in the running sequence. On the next forward pass, the model looks up that token's embedding, adds the position embedding for the new slot, and uses the extended context to predict the token after it.`
         : 'Once chosen, it is appended to the right end of the running sequence. On the next forward pass, the model looks up that token\'s embedding, adds the next position embedding, and uses the extended context to predict the token after it.';
     return joinParagraphs(
-        `This marks ${tokenDescriptor}, the token that the decoding step actually selected from the output distribution.`,
+        `This marks ${tokenDescriptor}, the token GPT-2 actually selected for this decoding step.`,
         probabilityText
-            ? `The displayed probability here is ${probabilityText}, which is the token's full-distribution softmax probability before any truncation. If you describe decoding with top-k sampling, the sampler first keeps ${shortlistText}, renormalizes inside that subset, and then draws one token; this label shows the winner of that selection step.`
-            : `This token is chosen from the softmax distribution over vocabulary logits. If you describe decoding with top-k sampling, the sampler first keeps ${shortlistText}, renormalizes inside that subset, and then draws one token; this label shows the winner of that selection step.`,
+            ? `Its displayed probability is ${probabilityText}, which is the full-vocabulary softmax probability before the shortlist is applied. ${buildTopKSamplingExplanation(selectionInfo)}`
+            : `This token is chosen from the softmax distribution over vocabulary logits. ${buildTopKSamplingExplanation(selectionInfo)}`,
         appendSentence
     );
 }
@@ -305,10 +329,10 @@ function buildKvCacheInfoDescription(selectionInfo = null) {
         : 'Once pre-fill finishes, later decode passes do not rebuild those prompt keys and values. They only add one new cache row per generated token and attend against the stored history.';
 
     return joinParagraphs(
-        'KV cache stores each token\'s attention keys and values after they are computed, so later autoregressive steps can reuse them instead of rebuilding the whole attention history from scratch.',
+        'KV cache stores each token\'s attention keys and values after they are computed, so later autoregressive steps can reuse them instead of rebuilding the whole history from scratch.',
         currentPhaseParagraph,
         companionPhaseParagraph,
-        'That reuse is why inference gets faster. Without a KV cache, every generated token would recompute keys and values for the entire prefix again. With the cache, the model mostly does fresh work only for the newest token, which reduces repeated computation and helps long prompts or long generations run much faster.'
+        'That reuse is why generation gets faster. Without a KV cache, every new token would recompute keys and values for the whole prefix. With the cache, most of the fresh work is only for the newest token.'
     );
 }
 
@@ -317,11 +341,11 @@ function buildLogitDescription(selectionInfo = null) {
     const probability = resolveOutputTokenProbability(selectionInfo);
     const probabilityText = formatProbabilityPercentage(probability);
     return joinParagraphs(
-        `This is the vocabulary score for ${tokenDescriptor}. The raw logit ${inlineMath('\\ell_i')} is an unnormalized compatibility score between the final hidden state and that vocabulary item, so the number itself is not yet a probability.`,
+        `This is the vocabulary score for ${tokenDescriptor}. The raw logit ${inlineMath('\\ell_i')} says how compatible the final hidden state is with that token, but by itself it is not yet a probability.`,
         probabilityText
-            ? `Its displayed probability is ${probabilityText}, computed by softmax over all logits in the vocabulary: ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. What matters is how this score compares with every other token, not the absolute logit on its own.`
-            : `Its probability is computed by softmax over all logits in the vocabulary: ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. What matters is how this score compares with every other token, not the absolute logit on its own.`,
-        'If you later apply top-k sampling, this candidate remains eligible only if it survives into the highest-scoring shortlist, after which the sampler renormalizes over the surviving tokens before drawing the next token.'
+            ? `Its displayed probability is ${probabilityText}, computed by softmax over all logits: ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. What matters most is how this score compares with every other candidate token.`
+            : `Its probability is computed by softmax over all logits: ${inlineMath('p_i = \\frac{e^{\\ell_i}}{\\sum_j e^{\\ell_j}}')}. What matters most is how this score compares with every other candidate token.`,
+        buildTopKSamplingExplanation(selectionInfo, { fullDistribution: true })
     );
 }
 
@@ -440,7 +464,6 @@ function buildAttentionScoreLinkedVectorReferences(selectionInfo = null) {
     const queryTokenMeta = resolveSelectionTokenRef(selectionInfo);
     const keyTokenMeta = resolveSelectionKeyTokenRef(selectionInfo);
     const queryTokenRef = buildTokenReference(queryTokenMeta, 'the query token');
-    const targetTokenRef = buildTokenReference(queryTokenMeta, 'the target token');
     const sourceTokenRef = buildTokenReference(keyTokenMeta, 'the source token');
     const queryVectorLink = buildAttentionVectorActionMarkup(selectionInfo, {
         vectorKind: 'Q',
@@ -459,7 +482,6 @@ function buildAttentionScoreLinkedVectorReferences(selectionInfo = null) {
     });
     return {
         queryTokenRef,
-        targetTokenRef,
         sourceTokenRef,
         queryVectorLink,
         keyVectorLink,
@@ -470,12 +492,11 @@ function buildAttentionScoreLinkedVectorReferences(selectionInfo = null) {
 function buildResidualStreamDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     const layerRef = buildSelectionLayerReference(selectionInfo);
+    const layerNormRef = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln1', linked: true });
     return joinParagraphs(
-        `This is the residual-stream vector representation for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''}. The full residual stream is the collection of one such vector per token position, all evolving through the model together.`,
-        'At this point in the network, this vector is the token\'s running state: each sublayer reads from it, computes an update, and adds that update back instead of replacing it.',
-        'As this vector moves upward through the transformer, it keeps accumulating information from the earlier context. Each attention sublayer can pull in relevant information from other token positions, and each MLP can rewrite that information into more useful local features.',
-        'Those refinements build on one another across layers, so the top-layer residual vector at this position is the model\'s final internal summary of what it has inferred here. That final state is what the model turns into logits to predict the next token after this one.',
-        'That design is what lets the model preserve earlier information while still refining it with attention and MLP computations. If you want to know what the model currently knows about a specific token, this vector is usually the best place to look.'
+        `This is the main running state for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''}. In GPT-2, each token position keeps one residual-stream vector, and almost every important computation reads from it and writes an update back into it.`,
+        'Attention uses this state to pull in useful information from earlier tokens. The MLP then rewrites that token-local state into more useful features. Because both updates are added instead of replacing the vector, earlier information can stay available while the model keeps refining it.',
+        `By the top of the stack, this vector is the model's best current summary of what it has inferred at that position. That final version is what GPT-2 converts into logits for the next-token prediction. Inside a block, ${layerNormRef} is the next place where this running state is prepared for attention.`
     );
 }
 
@@ -485,9 +506,9 @@ function buildIncomingResidualDescription(selectionInfo = null) {
     const ln1Ref = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln1', linked: true });
     const layerJobRef = buildSelectionLayerJobReference(selectionInfo);
     return joinParagraphs(
-        `This is the residual-stream vector representation for ${tokenRef} as it enters ${layerRef}, before ${ln1Ref} runs.`,
+        `This is the token state for ${tokenRef} as it enters ${layerRef}, before ${ln1Ref} runs.`,
         buildIncomingResidualSourceSentence(selectionInfo),
-        `This vector already contains everything the model has accumulated so far for this position as it enters ${layerJobRef}, and ${layerJobRef} refines that state further for the eventual prediction of the subsequent token.`
+        `${layerJobRef} will first normalize this state, then use attention and the MLP to refine it further for the eventual next-token prediction.`
     );
 }
 
@@ -497,9 +518,9 @@ function buildPostAttentionResidualDescription(selectionInfo = null) {
     const ln2Ref = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln2', linked: true });
     const layerJobRef = buildSelectionLayerJobReference(selectionInfo);
     return joinParagraphs(
-        `This is the residual-stream vector representation for ${tokenRef} after the attention update from ${layerRef} has been added in.`,
-        `This updated residual is what ${ln2Ref} reads next before the MLP branch in ${layerRef}. The MLP takes this attention-shaped running state, recombines features within this token position, and writes its update back into the residual stream through residual addition.`,
-        `This vector already contains everything the model has accumulated so far for this position in ${layerJobRef}, including the attention update from earlier tokens, and the MLP in ${layerJobRef} refines those features before the state moves on toward the next-token prediction.`
+        `This is the token state for ${tokenRef} after the attention update from ${layerRef} has been added back into the residual stream.`,
+        `At this point the vector already includes information gathered from earlier tokens. ${ln2Ref} reads this updated state next, and the MLP branch in ${layerRef} will turn it into another residual update.`,
+        `So this is the handoff between the two halves of ${layerJobRef}: attention has finished, and the token-local MLP rewrite is about to begin.`
     );
 }
 
@@ -507,9 +528,9 @@ function buildPostMlpResidualDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     const layerRef = buildSelectionLayerReference(selectionInfo);
     return joinParagraphs(
-        `This is the residual-stream vector representation for ${tokenRef} after the MLP update from ${layerRef} has been added in.`,
-        `At this point, ${layerRef} is complete for this token. The vector now contains the previous state, the attention update, and the MLP update all combined through residual addition, and this final block output is what gets passed to the next layer.`,
-        'The next layer will keep refining this same running state rather than starting over. By the top of the stack, the accumulated version of this vector is what the model ultimately turns into logits for the next token after this one.'
+        `This is the token state for ${tokenRef} after the MLP update from ${layerRef} has been added back into the residual stream.`,
+        `At this point ${layerRef} is done for this token. The vector now combines the incoming state, the attention update, and the MLP update, and that full result is what gets passed to the next layer.`,
+        'The next layer will keep refining this same running state rather than starting over. By the top of the model, this accumulated state is what GPT-2 turns into logits for the next token.'
     );
 }
 
@@ -517,18 +538,34 @@ function buildLayerNormNormalizedVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     const layerRef = buildSelectionLayerReference(selectionInfo);
     const layerNormRef = buildSelectionLayerNormReference(selectionInfo);
+    const scaleLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'scale',
+        linkText: 'scale parameter'
+    });
+    const shiftLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'shift',
+        linkText: 'shift parameter'
+    });
     return joinParagraphs(
-        `This is the normalized residual-stream vector for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''}. The normalization step in ${layerNormRef} has already completed, so this vector is now the zero-centered, variance-scaled version of that token's state.`,
-        'The learned scale and shift are the next LayerNorm substeps. They will turn this normalized state into the final post-LayerNorm vector that attention or the MLP actually reads.',
-        'Its job is to present the same token state in a numerically steadier form so the next learned operations see a more stable input.'
+        `This is the token state for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''} right after the normalization step in ${layerNormRef}. The mean has been removed and the features have been rescaled, but the learned ${scaleLink} and ${shiftLink} have not been applied yet.`,
+        'Its purpose is not to add new information. Instead, it puts the same token state onto a steadier numerical scale so the next learned computation behaves more predictably.',
+        'Next, the learned scale and shift turn this into the post-LayerNorm vector that attention or the MLP actually reads.'
     );
 }
 
 function buildFinalLayerNormNormalizedVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
+    const scaleLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'scale',
+        linkText: 'scale parameter'
+    });
+    const shiftLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'shift',
+        linkText: 'shift parameter'
+    });
     return joinParagraphs(
-        `This is the normalized residual-stream vector for ${tokenRef} at the top of the model. The final normalization step has already completed, so this vector is the zero-centered, variance-scaled state right before the last learned scale and shift.`,
-        'It is the last normalized version of this token\'s state before the model converts hidden features into vocabulary logits.'
+        `This is the token state for ${tokenRef} right after the final normalization step at the top of the model. It is the zero-centered, variance-scaled version of the state just before the last learned ${scaleLink} and ${shiftLink}.`,
+        'It is the last normalized checkpoint before GPT-2 turns hidden features into vocabulary logits.'
     );
 }
 
@@ -536,17 +573,21 @@ function buildLayerNormScaledVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     const layerRef = buildSelectionLayerReference(selectionInfo);
     const layerNormKind = resolveSelectionLayerNormKind(selectionInfo);
+    const shiftLink = buildLayerNormParamActionMarkup(selectionInfo, {
+        param: 'shift',
+        linkText: 'shift parameter'
+    });
     let nextStageSentence = 'The next step is to add the learned shift so this affine LayerNorm result becomes the final post-LayerNorm vector that the following computation actually reads.';
     if (layerNormKind === 'ln1') {
-        nextStageSentence = `The next step is to add the learned shift ${inlineMath('\\beta')}, producing the post-LayerNorm vector that the self-attention sublayer in ${layerRef} actually reads.`;
+        nextStageSentence = `The next step is to add the learned ${shiftLink}, producing the post-LayerNorm vector that the self-attention sublayer in ${layerRef} actually reads.`;
     } else if (layerNormKind === 'ln2') {
-        nextStageSentence = `The next step is to add the learned shift ${inlineMath('\\beta')}, producing the post-LayerNorm vector that the MLP sublayer in ${layerRef} reads next.`;
+        nextStageSentence = `The next step is to add the learned ${shiftLink}, producing the post-LayerNorm vector that the MLP sublayer in ${layerRef} reads next.`;
     } else if (layerNormKind === 'final') {
-        nextStageSentence = `The next step is to add the learned shift ${inlineMath('\\beta')}, producing the final hidden state that the unembedding matrix uses to score vocabulary logits.`;
+        nextStageSentence = `The next step is to add the learned ${shiftLink}, producing the final hidden state that the unembedding matrix uses to score vocabulary logits.`;
     }
     return joinParagraphs(
-        `This is the LayerNorm token-state vector for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''} after normalization and after elementwise multiplication by the learned scale vector ${inlineMath('\\gamma')}, but before the learned shift ${inlineMath('\\beta')} is added.`,
-        'The scale parameters let the model decide which normalized features should be amplified, damped, or even sign-flipped before the token moves on to the next sublayer.',
+        `This is the token state for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''} after normalization and after multiplication by the learned scale vector ${inlineMath('\\gamma')}, but before the learned shift ${inlineMath('\\beta')} is added.`,
+        'This step lets LayerNorm reweight the normalized features before the next computation sees them. Some features can be amplified, suppressed, or sign-flipped even though no new context has been added here.',
         nextStageSentence
     );
 }
@@ -556,8 +597,8 @@ function buildLn1OutputDescription(selectionInfo = null) {
     const layerRef = buildSelectionLayerReference(selectionInfo);
     const layerNormRef = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln1', linked: true });
     return joinParagraphs(
-        `This is the post-LayerNorm residual vector for ${tokenRef} after ${layerNormRef}. It is the version of that token's state that the self-attention sublayer in ${layerRef} will actually read.`,
-        'From here, the layer sends branched copies of this vector into the query, key, and value projections, so this is the shared attention input for every head in the block.'
+        `This is the post-LayerNorm token state for ${tokenRef} after ${layerNormRef}. It is the exact version of the token that the self-attention sublayer in ${layerRef} will read.`,
+        'From here, the layer sends branched copies of this vector into the query, key, and value projections, so this is the shared starting point for every head in the block.'
     );
 }
 
@@ -566,42 +607,41 @@ function buildLn2OutputDescription(selectionInfo = null) {
     const layerRef = buildSelectionLayerReference(selectionInfo);
     const layerNormRef = buildSelectionLayerNormReference(selectionInfo, { layerNormKind: 'ln2', linked: true });
     return joinParagraphs(
-        `This is the post-LayerNorm residual vector for ${tokenRef} after ${layerNormRef}. It is the version of that token's state that the MLP sublayer in ${layerRef} will read next.`,
-        'From here, the vector goes into the MLP up-projection, GELU, and down-projection, so this normalized residual state is the starting point for the feed-forward update in this layer.'
+        `This is the post-LayerNorm token state for ${tokenRef} after ${layerNormRef}. It is the exact version of the token that the MLP sublayer in ${layerRef} will read next.`,
+        'From here, the vector goes into the MLP up-projection, GELU, and down-projection, so this is the starting point for the feed-forward update in this layer.'
     );
 }
 
 const TOKEN_CHIP_DESCRIPTION = joinParagraphs(
-    'This is one discrete input token ID. The model uses this ID to select the corresponding row from the vocabulary embedding table so the token can enter the network as a learned feature vector.',
-    'That lookup gives the model a dense starting representation for the token, carrying usage patterns and associations learned during training.'
+    'This is one discrete input token ID. GPT-2 uses it as an index into the vocabulary embedding table.',
+    'That lookup turns a symbolic token into a learned vector, which is the form the rest of the model can actually work with.'
 );
 
 const POSITION_CHIP_DESCRIPTION = joinParagraphs(
-    'This is the position index for a token in the sequence. The model uses it to select a learned position vector that tells the network where this token sits in the prompt.',
+    'This is the position index for a token in the sequence. GPT-2 uses it to look up a learned position vector.',
     'Adding that position vector to the token embedding gives the token an order-aware starting state before any attention layers run.'
 );
 
 const TOKEN_EMBEDDING_VECTOR_DESCRIPTION = joinParagraphs(
-    `This is the learned embedding vector for one token: one row selected from a ${GPT2_VOCAB_SIZE_TEXT} x ${GPT2_D_MODEL_TEXT} embedding table. A word or subword token becomes usable to the model only after this lookup converts it into continuous features.`,
-    'At this stage, the vector still has no context about the rest of the sequence. It only reflects what the model has learned about this specific token type in general, because attention has not yet compared it with any other token positions.',
-    'The embedding is learned jointly with the rest of the model to make next-token prediction easier. From a research perspective, embedding spaces often organize tokens by distributional behavior: tokens that appear in similar contexts, play similar syntactic roles, share morphology, or refer to related concepts often end up in nearby or systematically related parts of the space.',
-    'That does not mean each coordinate has a simple human-readable meaning. Instead, this vector gives the later layers a starting bundle of learned features about how this token tends to behave before any context-specific attention or MLP computation refines it.'
+    `This is the learned starting vector for one token type: one row from a ${GPT2_VOCAB_SIZE_TEXT} x ${GPT2_D_MODEL_TEXT} embedding table. GPT-2 gets it by looking up the token ID in that table.`,
+    'At this stage the vector does not yet know anything about the rest of the prompt. It only captures what the model has learned, in general, about how this token tends to behave.',
+    'Once position information is added, this embedding becomes part of the first residual-stream state for the token. From there, attention and the MLP keep refining it using the actual context.'
 );
 
 const POSITION_EMBEDDING_VECTOR_DESCRIPTION = joinParagraphs(
-    'This is the learned position vector for one sequence index. It tells the model where this token sits in the prompt so that order and distance can affect later computations.',
-    `GPT-2 learns a separate vector for each position up to its context window, so the same token can start from a different state when it appears earlier or later. That gives later attention layers a way to factor sequence order into their decisions.`,
-    'Once this position information is added into the token state, it becomes part of the running representation that the transformer keeps refining layer by layer until the final hidden state is used to predict the next token.'
+    'This is the learned position vector for one sequence index. Its job is to tell GPT-2 where a token sits in the prompt so order and distance can matter later.',
+    `GPT-2 learns a separate vector for each position up to its context window, so the same token can start from a different state when it appears earlier or later.`,
+    'After this vector is added to the token embedding, position information becomes part of the running token state that the transformer refines layer by layer.'
 );
 
 const EMBEDDING_SUM_DESCRIPTION = joinParagraphs(
     'This vector is the sum of token meaning and token position. It is the first full model-state vector for this token and the starting point for everything the transformer does afterward.',
-    'From this point on, the model repeatedly rewrites this state through residual updates. Attention adds information gathered from other tokens, and the MLP adds token-local nonlinear feature transformations.'
+    'From here on, GPT-2 keeps updating this same state through the residual stream. Attention pulls in context from other tokens, and the MLP rewrites token-local features.'
 );
 
 const EMBEDDING_CONNECTOR_TRAIL_DESCRIPTION = joinParagraphs(
-    'This connector marks the path from the symbolic inputs into the vector computation. It is not itself a learned parameter or activation; it is a guide showing where token and position information enter the network.',
-    'Its purpose is to make the handoff legible: discrete token IDs and position indices become continuous vectors, and those vectors then become the initial residual stream.'
+    'This connector marks the path from the symbolic inputs into the vector computation. It is not a learned parameter or activation.',
+    'Its purpose is to show the handoff: discrete token IDs and position indices become continuous vectors, and those vectors then become the initial residual stream.'
 );
 
 const VOCAB_EMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
@@ -611,21 +651,21 @@ const VOCAB_EMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
         outputDimText: GPT2_D_MODEL_TEXT,
         indexName: 'token ID'
     }),
-    'When the model receives a token ID, it uses that ID to select the corresponding row from this table. That row becomes the token\'s learned starting representation before position is added, giving the rest of the network a continuous feature vector it can compare, transform, and refine.'
+    'When GPT-2 receives a token ID, it selects the matching row from this table. That row becomes the token\'s learned starting representation before position is added.'
 );
 
 const POSITIONAL_EMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
-    `This is the table of learned position vectors. It has ${GPT2_CONTEXT_LEN_TEXT} rows and ${GPT2_D_MODEL_TEXT} columns, with one learned row for each sequence position in GPT-2\'s context window.`,
+    `This is the table of learned position vectors. It has ${GPT2_CONTEXT_LEN_TEXT} rows and ${GPT2_D_MODEL_TEXT} columns, with one learned row for each sequence position in GPT-2's context window.`,
     buildLookupTableDimensionSentence({
         rowCountText: GPT2_CONTEXT_LEN_TEXT,
         outputDimText: GPT2_D_MODEL_TEXT,
         indexName: 'position index'
     }),
-    'For each token position, the model selects one row from this table and adds it elementwise to the token embedding. That lets later attention layers treat "the same token in a different place" as a meaningfully different starting state.'
+    'For each token position, GPT-2 selects one row from this table and adds it to the token embedding. That lets later layers treat "the same token in a different place" as a meaningfully different starting state.'
 );
 
 const UNEMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
-    'This is the output projection, often called the unembedding matrix. It maps the final model-state vector back into vocabulary space, producing one logit for each token in the vocabulary.',
+    'This is the output projection, often called the unembedding matrix. It turns the final token state back into vocabulary scores, producing one logit for each token in the vocabulary.',
     buildLinearMapDimensionSentence({
         inputDimText: GPT2_D_MODEL_TEXT,
         outputDimText: GPT2_VOCAB_SIZE_TEXT,
@@ -633,7 +673,7 @@ const UNEMBEDDING_MATRIX_DESCRIPTION = joinParagraphs(
         inputName: 'final hidden-state vector',
         outputName: 'logit vector over the vocabulary'
     }),
-    'Those logits say how compatible the current hidden state is with each possible next token. After softmax, they become probabilities that the sampling step can use. In GPT-2, these weights are tied to the input token embeddings.'
+    'Those logits say how compatible the current hidden state is with each possible next token. After softmax, they become probabilities that the decoding step can use. In GPT-2, these weights are tied to the input token embeddings.'
 );
 
 function buildLayerNormDescription(selectionInfo = null) {
@@ -646,9 +686,18 @@ function buildLayerNormDescription(selectionInfo = null) {
         linkText: 'shift parameter'
     });
     const layerNormRef = buildSelectionLayerNormReference(selectionInfo);
+    const layerNormKind = resolveSelectionLayerNormKind(selectionInfo);
+    let branchSentence = 'This block prepares the residual stream right before the next learned branch reads it.';
+    if (layerNormKind === 'ln1') {
+        branchSentence = 'This block prepares the residual stream right before the self-attention branch reads it.';
+    } else if (layerNormKind === 'ln2') {
+        branchSentence = 'This block prepares the residual stream right before the MLP branch reads it.';
+    } else if (layerNormKind === 'final') {
+        branchSentence = 'This block prepares the residual stream right before the output vocabulary projection reads it.';
+    }
     return joinParagraphs(
-        `${layerNormRef.charAt(0).toUpperCase()}${layerNormRef.slice(1)} normalizes one token's feature vector by subtracting its mean and dividing by its standard deviation across features, then applying learned ${scaleLink} and ${shiftLink}. This keeps feature magnitudes under control and gives later computations a more stable input.`,
-        'In GPT-2, LayerNorm runs before attention and before the MLP. That means the model normalizes the residual stream first and then feeds that conditioned state into each sublayer.',
+        `${layerNormRef.charAt(0).toUpperCase()}${layerNormRef.slice(1)} normalizes one token's feature vector, then applies a learned ${scaleLink} and ${shiftLink}. Its job is to make the next computation see a steadier input.`,
+        branchSentence,
         buildLayerNormHadamardFootnote(`the learned ${scaleLink}`)
     );
 }
@@ -663,8 +712,8 @@ function buildTopLayerNormDescription(selectionInfo = null) {
         linkText: 'shift parameter'
     });
     return joinParagraphs(
-        `This is the final LayerNorm at the top of the model. It performs the same normalize-then-affine operation as other LayerNorm blocks, but here the learned ${scaleLink} and ${shiftLink} prepare the representation directly for the output vocabulary projection.`,
-        'By the time the model reaches this point, all 12 transformer layers have already contributed their updates. This LayerNorm is the last conditioning step before logits are computed.',
+        `This is the final LayerNorm at the top of the model. It performs the same normalize-then-affine operation as other LayerNorm blocks, but here the learned ${scaleLink} and ${shiftLink} prepare the state directly for the output vocabulary projection.`,
+        'By the time the model reaches this point, all 12 transformer layers have already contributed their updates. This is the last conditioning step before logits are computed.',
         buildLayerNormHadamardFootnote(`the learned ${scaleLink}`)
     );
 }
@@ -674,32 +723,32 @@ function buildLayerNormHadamardFootnote(scaleRef = inlineMath('\\gamma')) {
 }
 
 const LN_SCALE_PARAMETER_DESCRIPTION = joinParagraphs(
-    `This is a learned LayerNorm scale parameter vector, usually written as ${inlineMath('\\gamma')}. It is not produced by the current prompt; it is a fixed trained parameter shared across all tokens in this layer.`,
-    'After normalization, each feature is multiplied by its corresponding scale value. That gives the model a way to keep some features large, suppress others, and generally choose a useful post-normalization coordinate system.',
+    `This is a learned LayerNorm scale parameter vector, usually written as ${inlineMath('\\gamma')}. It is a trained parameter shared across all tokens in this LayerNorm, not something produced by the current prompt.`,
+    'After normalization, each feature is multiplied by its matching scale value. That lets the model decide which normalized features should stay large, become small, or flip sign before the next sublayer reads them.',
     buildLayerNormHadamardFootnote()
 );
 
 const LN_SHIFT_PARAMETER_DESCRIPTION = joinParagraphs(
     `This is a learned LayerNorm shift parameter vector, usually written as ${inlineMath('\\beta')}. Like ${inlineMath('\\gamma')}, it is a trained parameter shared across tokens rather than a prompt-dependent activation.`,
-    `After the normalized vector is scaled, ${inlineMath('\\beta')} is added featurewise. That lets the model choose a learned baseline or offset for each feature instead of forcing every normalized feature to stay centered at zero.`
+    `After scaling, ${inlineMath('\\beta')} is added feature by feature. That gives LayerNorm a learned baseline instead of forcing every normalized feature to stay centered at zero.`
 );
 
 const FINAL_LN_SCALE_DESCRIPTION = joinParagraphs(
-    'This is the learned scale vector for the final LayerNorm at the top of the model. It plays the same mathematical role as other LayerNorm scale vectors, but here it prepares the representation immediately before logits are computed.',
+    'This is the learned scale vector for the final LayerNorm at the top of the model. It plays the same mathematical role as other LayerNorm scale vectors, but here it prepares the state immediately before logits are computed.',
     'Its job is to make the final hidden state land in a feature space that the unembedding matrix can read effectively.',
     buildLayerNormHadamardFootnote()
 );
 
 const FINAL_LN_SHIFT_DESCRIPTION = joinParagraphs(
     'This is the learned shift vector for the final LayerNorm at the top of the model. It is added after final scaling and before the unembedding step.',
-    'Because the logits are read directly from the post-final-LayerNorm state, this shift influences the final baseline from which vocabulary scores are computed.'
+    'Because logits are read directly from the post-final-LayerNorm state, this shift helps set the final baseline from which vocabulary scores are computed.'
 );
 
 function buildQueryWeightMatrixDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const layerRef = buildSelectionLayerReference(selectionInfo);
     return joinParagraphs(
-        `This is the learned query projection matrix for ${headRef} in ${layerRef}. For each token state entering attention, the model multiplies that token's LayerNorm output by this matrix to compute a ${GPT2_D_HEAD_TEXT}-dimensional query vector.`,
+        `This is the learned query projection matrix for ${headRef} in ${layerRef}. It turns each token's post-LayerNorm state into the ${GPT2_D_HEAD_TEXT}-dimensional query vector that says what this head is looking for.`,
         buildLinearMapDimensionSentence({
             inputDimText: GPT2_D_MODEL_TEXT,
             outputDimText: GPT2_D_HEAD_TEXT,
@@ -707,8 +756,7 @@ function buildQueryWeightMatrixDescription(selectionInfo = null) {
             inputName: 'LayerNorm output vector',
             outputName: 'query vector'
         }),
-        `In symbols, this is the ${inlineMath(ATTENTION_QUERY_PROJECTION_TEX)} step for this attention head. The matrix multiplication recombines the full token state into the query space that determines what this attention head will search for.`,
-        `The same matrix is applied at every token position, so ${headRef} produces one query vector per token. Those query vectors are then dotted with the key vectors from the same attention head to form raw attention scores.`
+        `The same matrix is reused at every token position, so ${headRef} produces one query vector per token. Those query vectors are then compared with the head's key vectors to form raw attention scores.`
     );
 }
 
@@ -716,7 +764,7 @@ function buildKeyWeightMatrixDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const layerRef = buildSelectionLayerReference(selectionInfo);
     return joinParagraphs(
-        `This is the learned key projection matrix for ${headRef} in ${layerRef}. For each token state entering attention, the model multiplies that token's LayerNorm output by this matrix to compute a ${GPT2_D_HEAD_TEXT}-dimensional key vector.`,
+        `This is the learned key projection matrix for ${headRef} in ${layerRef}. It turns each token's post-LayerNorm state into the ${GPT2_D_HEAD_TEXT}-dimensional key vector that other tokens can match against.`,
         buildLinearMapDimensionSentence({
             inputDimText: GPT2_D_MODEL_TEXT,
             outputDimText: GPT2_D_HEAD_TEXT,
@@ -724,8 +772,7 @@ function buildKeyWeightMatrixDescription(selectionInfo = null) {
             inputName: 'LayerNorm output vector',
             outputName: 'key vector'
         }),
-        `In symbols, this is the ${inlineMath(ATTENTION_KEY_PROJECTION_TEX)} step for this attention head. The matrix multiplication places each token into the key space that queries will be compared against.`,
-        `The same matrix is applied independently at every token position, so ${headRef} produces a separate key vector for every token in the sequence. Those key vectors are what the head's queries use in their scaled dot products.`
+        `The same matrix is reused at every token position, so ${headRef} produces one key vector per token. Those keys are what the head's queries use in their scaled dot products.`
     );
 }
 
@@ -733,7 +780,7 @@ function buildValueWeightMatrixDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const layerRef = buildSelectionLayerReference(selectionInfo);
     return joinParagraphs(
-        `This is the learned value projection matrix for ${headRef} in ${layerRef}. For each token state entering attention, the model multiplies that token's LayerNorm output by this matrix to compute a ${GPT2_D_HEAD_TEXT}-dimensional value vector.`,
+        `This is the learned value projection matrix for ${headRef} in ${layerRef}. It turns each token's post-LayerNorm state into the ${GPT2_D_HEAD_TEXT}-dimensional value vector that this head can pass forward.`,
         buildLinearMapDimensionSentence({
             inputDimText: GPT2_D_MODEL_TEXT,
             outputDimText: GPT2_D_HEAD_TEXT,
@@ -741,13 +788,12 @@ function buildValueWeightMatrixDescription(selectionInfo = null) {
             inputName: 'LayerNorm output vector',
             outputName: 'value vector'
         }),
-        `In symbols, this is the ${inlineMath(ATTENTION_VALUE_PROJECTION_TEX)} step for this attention head. The matrix multiplication places each token into the value space that the attention head will actually mix after softmax has chosen the weights.`,
-        `The same matrix is applied independently at every token position, so ${headRef} produces one value vector per token. Later, each of those value vectors is multiplied by a scalar attention weight and added into the head's weighted sum.`
+        `The same matrix is reused at every token position, so ${headRef} produces one value vector per token. Later, softmax weights decide how much of each value vector gets mixed into the head's weighted sum.`
     );
 }
 
 const OUTPUT_PROJECTION_MATRIX_DESCRIPTION = joinParagraphs(
-    'This is the learned output projection for the attention block. After all heads produce their own outputs, those outputs are concatenated and this matrix maps the combined vector back to model width.',
+    'This is the learned output projection for the attention block. After all heads produce their own outputs, GPT-2 places those head outputs side by side and this matrix maps the combined vector back to model width.',
     buildLinearMapDimensionSentence({
         inputDimText: GPT2_D_MODEL_TEXT,
         outputDimText: GPT2_D_MODEL_TEXT,
@@ -755,17 +801,16 @@ const OUTPUT_PROJECTION_MATRIX_DESCRIPTION = joinParagraphs(
         inputName: `concatenated head-output vector (${GPT2_NUM_HEADS_TEXT} heads x ${GPT2_D_HEAD_TEXT} dimensions each)`,
         outputName: 'model-width attention output vector'
     }),
-    'Again, this is applied token by token: each token position has its own concatenated attention-head output, and this same matrix maps each of those concatenated vectors back to residual width.',
-    'Its job is to let the model mix information across heads and express the final attention update in the same coordinate system as the residual stream.'
+    'Its job is to mix information across heads and express the result in the same coordinate system as the residual stream, so the attention branch can write one clean model-width update back into the token state.'
 );
 
 const OUTPUT_PROJECTION_BIAS_DESCRIPTION = joinParagraphs(
     `This is the learned output-projection bias ${inlineMath('b_O')}. It is a ${GPT2_D_MODEL_TEXT}-dimensional parameter vector added after the concatenated head output is multiplied by ${inlineMath('W_O')}.`,
-    `In symbols, the attention block computes ${inlineMath('O_t = H_t W_O + b_O')}. The same bias is shared across every token position, so it shifts the baseline of the attention update before that update is added back into the residual stream.`
+    `The same bias is shared across every token position, so it shifts the baseline of the final attention update before that update is added back into the residual stream.`
 );
 
 const MLP_UP_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
-    'This is the first learned matrix in the feed-forward network. It expands the token state from model width into a larger hidden space so the model has more room to build nonlinear features.',
+    'This is the first learned matrix in the MLP. It expands the token state from model width into a larger hidden space so the model has room to build richer feature detectors.',
     buildLinearMapDimensionSentence({
         inputDimText: GPT2_D_MODEL_TEXT,
         outputDimText: GPT2_MLP_HIDDEN_TEXT,
@@ -773,11 +818,11 @@ const MLP_UP_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
         inputName: 'token-state vector',
         outputName: 'expanded MLP hidden vector'
     }),
-    'This computation is token-local: every token goes through the same MLP weights independently at its own position. That means the layer produces one expanded hidden vector per token position, all using the same learned matrix.'
+    'This computation is token-local: every token goes through the same MLP weights independently at its own position. The next step is GELU, which decides which of those expanded features should stay active.'
 );
 
 const MLP_DOWN_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
-    'This is the second learned matrix in the feed-forward network. It takes the expanded, nonlinearly transformed MLP state and compresses it back down to model width.',
+    'This is the second learned matrix in the MLP. It takes the expanded, nonlinearly transformed hidden state and compresses it back down to model width.',
     buildLinearMapDimensionSentence({
         inputDimText: GPT2_MLP_HIDDEN_TEXT,
         outputDimText: GPT2_D_MODEL_TEXT,
@@ -785,32 +830,31 @@ const MLP_DOWN_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
         inputName: 'expanded MLP hidden vector',
         outputName: 'residual-width MLP output vector'
     }),
-    'This is again applied independently at every token position, so it produces one residual-width MLP output vector per token.',
     'That down-projection turns the MLP\'s private hidden features into a residual-sized update that can be added back into the main stream.'
 );
 
 const MLP_UP_BIAS_DESCRIPTION = joinParagraphs(
-    `This is the learned up-projection bias ${inlineMath('b_{\\text{up}}')}. It is a ${GPT2_MLP_HIDDEN_TEXT}-dimensional parameter vector that is added to ${inlineMath('x_{\\text{ln}} W_{\\text{up}}')} before GELU is applied.`,
+    `This is the learned up-projection bias ${inlineMath('b_{\\text{up}}')}. It is a ${GPT2_MLP_HIDDEN_TEXT}-dimensional parameter vector added before GELU is applied.`,
     'Unlike a token activation, this bias is shared across every token position. Its job is to shift the baseline of each hidden MLP feature so different units become easier or harder to activate.'
 );
 
 const MLP_DOWN_BIAS_DESCRIPTION = joinParagraphs(
-    `This is the learned down-projection bias ${inlineMath('b_{\\text{down}}')}. It is a ${GPT2_D_MODEL_TEXT}-dimensional parameter vector that is added after the expanded MLP state is multiplied by ${inlineMath('W_{\\text{down}}')}.`,
-    'This bias is also shared across all token positions. It lets the MLP set a default residual-width offset before the branch output is added back into the main residual stream.'
+    `This is the learned down-projection bias ${inlineMath('b_{\\text{down}}')}. It is a ${GPT2_D_MODEL_TEXT}-dimensional parameter vector added after the expanded MLP state is multiplied by ${inlineMath('W_{\\text{down}}')}.`,
+    'This bias is shared across all token positions. It helps set the baseline of the MLP branch before that branch writes its update back into the residual stream.'
 );
 
 const MLP_GENERIC_DESCRIPTION = joinParagraphs(
-    'The MLP is the token-wise feed-forward network inside each transformer block. It processes each token independently using the same learned weights at every position.',
-    'Its role is to create nonlinear feature combinations within each token state. The usual pattern is expand, apply GELU, compress, then add the result back into the residual stream.'
+    'The MLP is the token-wise feed-forward network inside each transformer block. Unlike attention, it does not mix information across token positions. It rewrites one token at a time using the same learned weights everywhere in the sequence.',
+    'Its role is to build nonlinear feature combinations inside one token state at a time. The usual pattern is expand, apply GELU, compress, then add the result back into the residual stream.'
 );
 
 const MLP_UP_VECTOR_DESCRIPTION = joinParagraphs(
-    'This is the token state after the MLP up-projection and before the GELU nonlinearity. The model has moved into a larger hidden space where it can build richer intermediate features.',
-    'At this point the representation is still purely linear in the input token state. The nonlinearity that follows is what makes the MLP more expressive than just another matrix multiply.'
+    'This is the token state after the MLP up-projection and before GELU. The model has moved into a larger hidden space where it can build richer intermediate features.',
+    'At this point the transformation is still linear in the input token state. GELU is the next step that makes the MLP more expressive than just another matrix multiply.'
 );
 
 const MLP_ACTIVATION_DESCRIPTION = joinParagraphs(
-    'This is the MLP state after the GELU nonlinearity. GELU selectively bends and gates features instead of passing everything through linearly.',
+    'This is the MLP state after GELU. GELU selectively bends and gates features instead of passing everything through linearly.',
     'That nonlinearity is what makes the MLP expressive. It lets the model create feature detectors and interactions that depend on the current activation values before the state is projected back down.'
 );
 
@@ -820,28 +864,54 @@ const MLP_DOWN_VECTOR_DESCRIPTION = joinParagraphs(
 );
 
 const MLP_EXPANDED_SEGMENTS_DESCRIPTION = joinParagraphs(
-    'This is one expanded MLP activation shown as multiple visible segments. Mathematically it is still one vector; the segmentation is only a display choice to make the 4x larger hidden width easier to see.',
-    'The important model fact is that the MLP temporarily moves into a larger feature space, applies a nonlinearity there, and then compresses back down.'
+    'This is one expanded MLP activation shown as multiple visible segments. Mathematically it is still one vector; the segmentation is only a display choice to make the 4x larger hidden width easier to inspect.',
+    'The model point is that the MLP temporarily moves into a larger feature space, applies a nonlinearity there, and then compresses back down.'
 );
 
 const POST_ATTENTION_OUTPUT_DESCRIPTION = joinParagraphs(
     'This is the attention branch output after head concatenation and the output projection. It is the full attention update that this layer wants to write back into the token\'s residual state.',
-    'It is no longer a per-head object. By this point, all head-specific weighted sums have already been combined into one model-width vector.'
+    'It is no longer a per-head object. By this point, all head-specific weighted sums have already been combined into one model-width vector that is ready for residual addition.'
+);
+
+const CONCATENATED_HEAD_OUTPUT_DESCRIPTION = joinParagraphs(
+    'This is the vector you get after placing all attention-head outputs side by side for one token. At this stage the heads are visible together, but they have not yet been mixed across heads.',
+    'The next step is the output projection matrix, which combines those head-specific outputs and turns them into one model-width attention update for the residual stream.'
+);
+
+const ATTENTION_HEAD_DESCRIPTION = joinParagraphs(
+    'This is one attention head inside the layer. It sees the same post-LayerNorm token states as the other heads, but it has its own query, key, and value weights, so it can learn a different lookup pattern.',
+    'Its job is to decide which source tokens matter for the current token and what information should be read from them. GPT-2 runs many heads in parallel so one token can look for several different relationships at once.',
+    'This head contributes only one slice of the full attention update. GPT-2 later concatenates all head outputs and mixes them with the output projection before adding the result back into the residual stream.'
+);
+
+const QUERY_PATH_DESCRIPTION = joinParagraphs(
+    'This highlight traces the query branch from the shared post-LayerNorm token state into the query projection and then toward the attention-score computation. It is a guide to the flow, not a separate learned tensor.',
+    'Following this path shows how the selected token becomes a query vector that will be compared against key vectors from the same head.'
+);
+
+const KEY_PATH_DESCRIPTION = joinParagraphs(
+    'This highlight traces the key branch from the shared post-LayerNorm token state into the key projection. It is a guide to the flow, not a separate learned tensor.',
+    'Following this path shows how a source token becomes a key vector that other tokens can match against when they build attention scores.'
+);
+
+const WEIGHTED_OUTPUT_PATH_DESCRIPTION = joinParagraphs(
+    'This highlight traces one source token\'s contribution after its value vector has been scaled by the attention weight. It is a guide to how information moves through the head, not a separate learned object.',
+    'All of these weighted contributions are summed to form the head output, and that head output later joins the other heads in the concatenated vector.'
 );
 
 const Q_COPIES_DESCRIPTION = joinParagraphs(
-    'These are branched copies of the LayerNorm output that are about to be turned into query vectors. Each attention head gets its own learned projection, so the model duplicates the token state before sending it through head-specific Q matrices.',
-    'The important idea is that all heads start from the same token state but then ask different questions about the context.'
+    'These are branched copies of the LayerNorm output that are about to be turned into query vectors. Each attention head gets its own learned query projection, so the model duplicates the token state before sending it into head-specific Q matrices.',
+    'All heads start from the same token state, but after that they can ask different questions about the context.'
 );
 
 const K_COPIES_DESCRIPTION = joinParagraphs(
-    'These are branched copies of the LayerNorm output that are about to be turned into key vectors. Each attention head uses its own key projection so that different attention heads can organize context in different ways.',
-    'The keys derived from these copies are what queries will compare against to decide how much each source token matters.'
+    'These are branched copies of the LayerNorm output that are about to be turned into key vectors. Each attention head uses its own key projection, so different heads can organize the context in different ways.',
+    'The resulting keys are what queries compare against to decide how much each source token matters.'
 );
 
 const V_COPIES_DESCRIPTION = joinParagraphs(
-    'These are branched copies of the LayerNorm output that are about to be turned into value vectors. Each attention head learns its own value space because different attention heads may want to pass different kinds of information forward.',
-    'Once attention weights are computed, those weights are applied to the resulting value vectors and summed into the attention-head output.'
+    'These are branched copies of the LayerNorm output that are about to be turned into value vectors. Each attention head learns its own value space because different heads may want to pass different kinds of information forward.',
+    'Once attention weights are computed, those weights are applied to the resulting value vectors and summed into the head output.'
 );
 
 function buildQueryVectorDescription(selectionInfo = null) {
@@ -857,9 +927,9 @@ function buildQueryVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_Q')
     });
     return joinParagraphs(
-        `This is the ${GPT2_D_HEAD_TEXT}-dimensional query vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific query matrix ${weightMatrixLink}, which is the ${inlineMath(ATTENTION_QUERY_PROJECTION_TEX)} computation for this attention head.`,
-        `The model takes dot products between this query vector and every key vector in ${headRef}, producing one raw attention score per source token before scaling by ${inlineMath('\\frac{1}{\\sqrt{d_h}}')}, causal masking, and softmax.`,
-        `Those scores determine how strongly ${tokenRef} will read from each source token when ${headRef} forms its weighted sum of value vectors.`
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional query vector for ${tokenRef} in ${headRef}. It is produced by applying the head-specific query matrix ${weightMatrixLink} to this token's post-LayerNorm state ${sourceVectorLink}.`,
+        `Its job is to encode what ${tokenRef} is looking for right now in this head. The model compares this vector with every key vector in ${headRef} to form raw attention scores.`,
+        `After scaling, masking, and softmax, those scores decide how strongly ${tokenRef} will read from each source token when ${headRef} forms its weighted sum of value vectors.`
     );
 }
 
@@ -876,9 +946,9 @@ function buildKeyVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_K')
     });
     return joinParagraphs(
-        `This is the ${GPT2_D_HEAD_TEXT}-dimensional key vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific key matrix ${weightMatrixLink}, which is the ${inlineMath(ATTENTION_KEY_VECTOR_TEX)} computation for this attention head.`,
-        `When a query token computes ${inlineMath(ATTENTION_QK_DOT_PRODUCT_TEX)} in ${headRef}, this vector supplies the ${inlineMath('k_{j,i}')} term for ${tokenRef}. After scaling by ${inlineMath('\\frac{1}{\\sqrt{d_h}}')}, and after masking removes disallowed future positions, that interaction contributes one raw attention score in the query token's row.`,
-        `Its job is to determine how strongly other tokens can attend to ${tokenRef} in ${headRef}.`
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional key vector for ${tokenRef} in ${headRef}. It is produced by applying the head-specific key matrix ${weightMatrixLink} to this token's post-LayerNorm state ${sourceVectorLink}.`,
+        `Its job is to advertise what this token offers to other tokens in ${headRef}. When another token's query is compared against this key, that comparison contributes one raw attention score.`,
+        `So this vector helps decide how easy it is for other tokens to attend to ${tokenRef} in this head.`
     );
 }
 
@@ -895,9 +965,9 @@ function buildValueVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_V')
     });
     return joinParagraphs(
-        `This is the ${GPT2_D_HEAD_TEXT}-dimensional value vector for ${tokenRef} in ${headRef}. It is produced by multiplying the post-LayerNorm residual vector ${sourceVectorLink} for this token by the head-specific value matrix ${weightMatrixLink}, which is the ${inlineMath(ATTENTION_VALUE_VECTOR_TEX)} computation for this attention head.`,
-        `Once a query token's raw scores have been turned into weights ${inlineMath('\\alpha_{t,j}')} by softmax, this vector is multiplied by its scalar weight and added into the weighted sum.`,
-        `That is how information from ${tokenRef} can flow into other tokens through ${headRef}.`
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional value vector for ${tokenRef} in ${headRef}. It is produced by applying the head-specific value matrix ${weightMatrixLink} to this token's post-LayerNorm state ${sourceVectorLink}.`,
+        `This vector is the payload that can actually be passed forward. Once attention weights ${inlineMath('\\alpha_{t,j}')} have been computed, this value vector is scaled by its weight and added into the weighted sum.`,
+        `That is how information from ${tokenRef} flows into other tokens through ${headRef}.`
     );
 }
 
@@ -909,8 +979,8 @@ function buildQueryBiasVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_Q')
     });
     return joinParagraphs(
-        `This is the learned query bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the head-specific query matrix ${weightMatrixLink}.`,
-        `In symbols, the head computes ${inlineMath('q_{t,i} = x_t W_Q + b_Q')}. The same bias is reused at every token position in this head, so it acts as a learned offset in query space before any query-key comparisons happen.`,
+        `This is the learned query bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the query matrix ${weightMatrixLink}.`,
+        `The same bias is reused at every token position in this head, so it acts as a learned offset in query space before any query-key comparisons happen.`,
         'Its job is to shift the baseline of the head\'s query features, making some query directions easier or harder to activate.'
     );
 }
@@ -923,8 +993,8 @@ function buildKeyBiasVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_K')
     });
     return joinParagraphs(
-        `This is the learned key bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the head-specific key matrix ${weightMatrixLink}.`,
-        `In symbols, the head computes ${inlineMath('k_{j,i} = x_j W_K + b_K')}. The same bias is shared across all token positions in this head, so it sets a default offset in key space for every token.`,
+        `This is the learned key bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the key matrix ${weightMatrixLink}.`,
+        `The same bias is shared across all token positions in this head, so it sets a default offset in key space for every token.`,
         'That offset changes how easily other tokens\' queries can match against these keys when raw attention scores are formed.'
     );
 }
@@ -937,8 +1007,8 @@ function buildValueBiasVectorDescription(selectionInfo = null) {
         linkText: inlineMath('W_V')
     });
     return joinParagraphs(
-        `This is the learned value bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the head-specific value matrix ${weightMatrixLink}.`,
-        `In symbols, the head computes ${inlineMath('v_{j,i} = x_j W_V + b_V')}. The same bias is shared across tokens, so every value vector in this head starts from the same learned baseline offset.`,
+        `This is the learned value bias vector for ${headRef} in ${layerRef}. It is a fixed ${GPT2_D_HEAD_TEXT}-dimensional parameter added after the token state is multiplied by the value matrix ${weightMatrixLink}.`,
+        `The same bias is shared across tokens, so every value vector in this head starts from the same learned baseline offset.`,
         'Its role is to shift the default contents of the value space that this attention head writes into its weighted sum.'
     );
 }
@@ -947,8 +1017,8 @@ function buildCachedKeyVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this cached token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     return joinParagraphs(
-        `This is the cached key vector for ${tokenRef} in ${headRef}. It was computed on an earlier decoding step and stored so later queries can still take dot products against it.`,
-        'Reusing cached keys is what makes autoregressive decoding efficient: when a new token arrives, the model computes the new query and compares it against the stored past keys instead of rebuilding those old keys every time.'
+        `This is the cached key vector for ${tokenRef} in ${headRef}. It was computed on an earlier decoding step and stored so later queries can still compare against it.`,
+        'Reusing cached keys is what makes autoregressive decoding efficient: when a new token arrives, GPT-2 computes the new query and compares it against stored past keys instead of rebuilding those old keys every time.'
     );
 }
 
@@ -956,19 +1026,19 @@ function buildCachedValueVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this cached token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     return joinParagraphs(
-        `This is the cached value vector for ${tokenRef} in ${headRef}. It stores the value content from an earlier decoding step so future queries can still read from that token.`,
-        `After the new token's attention row is computed in ${headRef}, the model multiplies the relevant post-softmax weights by these cached values and adds them into the weighted sum, without recomputing old value vectors from scratch.`
+        `This is the cached value vector for ${tokenRef} in ${headRef}. It stores the payload from an earlier decoding step so future queries can still read from that token.`,
+        `After the new token's attention row is computed in ${headRef}, GPT-2 multiplies the relevant post-softmax weights by these cached values and adds them into the weighted sum without recomputing old value vectors from scratch.`
     );
 }
 
 const MERGED_KEY_VECTORS_DESCRIPTION = joinParagraphs(
-    'These are the key vectors from multiple attention heads shown together in one combined view. Mathematically they still belong to separate attention heads; they are only grouped here so you can inspect more of the attention state at once.',
-    'Each attention head builds its own attention matrix from its own queries and keys, so these vectors can be viewed as parallel key sets rather than one shared pool.'
+    'These are key vectors from multiple attention heads shown together in one combined view. Mathematically they still belong to separate heads; they are only grouped here so you can inspect more of the attention state at once.',
+    'Each head builds its own attention matrix from its own queries and keys, so this is best read as several parallel key sets rather than one shared pool.'
 );
 
 const MERGED_VALUE_VECTORS_DESCRIPTION = joinParagraphs(
-    'These are the value vectors from multiple attention heads shown together in one combined view. Each attention head still uses only its own values when forming its weighted sum.',
-    'Seeing them together is useful because it makes the multi-head structure visible: different attention heads can carry different kinds of payload even for the same token position.'
+    'These are value vectors from multiple attention heads shown together in one combined view. Each head still uses only its own values when forming its weighted sum.',
+    'Seeing them together makes the multi-head structure easier to read: different heads can carry different kinds of payload even for the same token position.'
 );
 
 function buildWeightedValueVectorDescription(selectionInfo = null) {
@@ -976,9 +1046,9 @@ function buildWeightedValueVectorDescription(selectionInfo = null) {
     const queryTokenRef = buildSelectionQueryTokenReference(selectionInfo, 'the query token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     return joinParagraphs(
-        `This is the weighted value contribution from ${sourceTokenRef} to ${queryTokenRef} in ${headRef}. In equations, this contribution can be written as ${inlineMath('\\tilde{V}_{t,j} = \\alpha_{t,j} V_j')}.`,
-        `The scalar ${inlineMath('\\alpha_{t,j}')} comes from the scaled dot product between the query for ${queryTokenRef} and the key for ${sourceTokenRef}, after masking and softmax. Multiplying that scalar by the value vector from ${sourceTokenRef} produces one contribution to the attention-head output.`,
-        `The full output of ${headRef} for ${queryTokenRef} is the sum of these weighted contributions over all source tokens, ${inlineMath('H_t = \\sum_j \\tilde{V}_{t,j}')}.`
+        `This is the weighted value contribution from ${sourceTokenRef} to ${queryTokenRef} in ${headRef}. It is what you get when one attention weight is applied to one value vector.`,
+        `The scalar ${inlineMath('\\alpha_{t,j}')} comes from the scaled dot product between the query for ${queryTokenRef} and the key for ${sourceTokenRef}, after masking and softmax. Multiplying that scalar by the value vector from ${sourceTokenRef} produces one piece of the head output.`,
+        `The full output of ${headRef} for ${queryTokenRef} is the sum of these weighted contributions over all source tokens.`
     );
 }
 
@@ -986,30 +1056,30 @@ function buildAttentionWeightedSumDescription(selectionInfo = null) {
     const queryTokenRef = buildSelectionTokenReference(selectionInfo, 'the query token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     return joinParagraphs(
-        `This is the ${GPT2_D_HEAD_TEXT}-dimensional head output ${inlineMath('H_i')} for ${queryTokenRef} in ${headRef}. It is formed by mixing that head's value vectors with the post-softmax attention weights from ${queryTokenRef}'s attention row.`,
-        `In symbols, ${headRef} computes ${inlineMath('H_{t,i} = \\sum_j \\alpha_{t,j}^{(i)} V_j^{(i)}')}. Each source token contributes its value vector, scaled by how much attention ${queryTokenRef} assigns to that token in this head after softmax and masking.`,
-        `This is the final vector that ${headRef} contributes for that token before the model concatenates all ${GPT2_NUM_HEADS_TEXT} head outputs and applies the output projection ${inlineMath('W_O')}.`
+        `This is the ${GPT2_D_HEAD_TEXT}-dimensional head output ${inlineMath('H_i')} for ${queryTokenRef} in ${headRef}. It is formed by mixing this head's value vectors with the post-softmax attention weights from ${queryTokenRef}'s attention row.`,
+        `Each source token contributes its value vector, scaled by how much attention ${queryTokenRef} assigns to that token in this head after softmax and masking.`,
+        `This is the final vector that ${headRef} contributes before the model concatenates all ${GPT2_NUM_HEADS_TEXT} head outputs and applies the output projection ${inlineMath('W_O')}.`
     );
 }
 
 const ATTENTION_GENERIC_DESCRIPTION = joinParagraphs(
-    'Self-attention is the mechanism that lets each token build a query vector, take dot products with key vectors in each attention head, scale and mask those scores, apply softmax across each row, and then use the resulting weights to form weighted sums of value vectors.',
-    'The Q, K, and V matrix multiplications determine what each attention head measures and what content it can pass forward, so different attention heads can learn different lookup patterns and different kinds of token-to-token interactions.'
+    'Self-attention is the mechanism that lets each token decide which earlier tokens matter for it right now. It does that by building queries, comparing them with keys, turning those scores into weights with softmax, and then mixing value vectors with those weights.',
+    'The Q, K, and V projections determine what each head looks for and what content it can pass forward, so different heads can learn different token-to-token interaction patterns.'
 );
 
 const MHSA_INFO_DESCRIPTION = joinParagraphs(
-    `Multi-head self-attention lets each token project its current state into queries, keys, and values, compare ${inlineMath('QK^\\top')} inside each head, and turn those scores into read weights with ${inlineMath('\\mathrm{softmax}(\\cdot)')}.`,
+    `Multi-head self-attention lets each token turn its current state into queries, keys, and values, compare those queries and keys inside each head, and turn the results into read weights with ${inlineMath('\\mathrm{softmax}(\\cdot)')}.`,
     `Those weights decide how much of every source token's value vector should be mixed into the output for the current token. GPT-2 runs ${GPT2_NUM_HEADS_TEXT} heads in parallel, so the same token can look for different patterns and relationships at once.`,
-    `After that, the head outputs are concatenated and projected back to model width. In short: queries decide what to look for, keys decide where it matches, and values carry the content that gets passed forward.`
+    'A simple way to read the roles is: queries ask what to look for, keys say where it matches, and values carry the content that gets passed forward. After that, the head outputs are concatenated and projected back to model width.'
 );
 
 function buildAttentionScoreGenericDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is one entry in the attention matrix from source token ${linkedVectors.sourceTokenRef} to target token ${linkedVectors.targetTokenRef} in ${headRef}.`,
-        `Depending on the stage, it is either the raw scaled dot-product score between the target token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, or the post-softmax weight derived from that score.`,
-        `That weight determines how much of the source token's ${linkedVectors.valueVectorLink} is mixed into the output of ${headRef}.`
+        `This is one entry in the attention matrix for query token ${linkedVectors.queryTokenRef} reading from source token ${linkedVectors.sourceTokenRef} in ${headRef}.`,
+        `Depending on the stage, it is either the raw query-key score or the post-softmax weight derived from that score.`,
+        `In the end, this cell decides how much of the source token's ${linkedVectors.valueVectorLink} is mixed into the output of ${headRef}.`
     );
 }
 
@@ -1017,51 +1087,60 @@ function buildAttentionPreScoreDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
     return joinParagraphs(
-        `This is the pre-softmax attention score from source token ${linkedVectors.sourceTokenRef} to target token ${linkedVectors.targetTokenRef} in ${headRef}.`,
-        `It is the scaled dot product ${inlineMath(ATTENTION_PRE_SCORE_TEX)} between the target token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, with causal masking applied before the row is normalized.`,
-        `At this stage the number is still a raw score. Softmax will turn the full row into normalized attention weights, and this entry will then scale the source token's ${linkedVectors.valueVectorLink}.`
+        `This is the pre-softmax attention score for query token ${linkedVectors.queryTokenRef} reading from source token ${linkedVectors.sourceTokenRef} in ${headRef}.`,
+        `It is the scaled dot product ${inlineMath(ATTENTION_PRE_SCORE_TEX)} between the query token's ${linkedVectors.queryVectorLink} and the source token's ${linkedVectors.keyVectorLink}, before the row has been normalized.`,
+        `At this stage the number is still just a raw score. Softmax will turn the full row into attention weights, and this entry will then scale the source token's ${linkedVectors.valueVectorLink}.`
     );
 }
 
 function buildAttentionPostScoreDescription(selectionInfo = null) {
     const headRef = buildSelectionHeadReference(selectionInfo);
     const linkedVectors = buildAttentionScoreLinkedVectorReferences(selectionInfo);
+    const softmaxLink = buildSoftmaxDetailActionMarkup();
     return joinParagraphs(
-        `This is the post-softmax attention weight from source token ${linkedVectors.sourceTokenRef} to target token ${linkedVectors.targetTokenRef} in ${headRef}.`,
-        `It comes from applying softmax to the row of scaled dot products built from the target token's ${linkedVectors.queryVectorLink} against the head's key vectors, including the source token's ${linkedVectors.keyVectorLink}. For one entry in that row, softmax is ${inlineMath(ATTENTION_POST_WEIGHT_TEX)}.`,
-        `This scalar is then multiplied into the source token's ${linkedVectors.valueVectorLink}, so it directly sets how much information from that token enters the output of ${headRef}.`
+        `This is the post-softmax attention weight for query token ${linkedVectors.queryTokenRef} reading from source token ${linkedVectors.sourceTokenRef} in ${headRef}.`,
+        `It comes from applying softmax to the row of scaled dot products built from the query token's ${linkedVectors.queryVectorLink} against the head's key vectors, including the source token's ${linkedVectors.keyVectorLink}.`,
+        `This scalar is then multiplied into the source token's ${linkedVectors.valueVectorLink}, so it directly sets how much information from that token enters the output of ${headRef}. If you want a quick refresher on that row normalization step, ${softmaxLink}.`
     );
 }
 
 function buildCausalMaskDescription(selectionInfo = null) {
     const activation = getActivationDataFromSelection(selectionInfo);
     const sourceTokenRef = buildSelectionKeyTokenReference(selectionInfo, 'the source token');
-    const targetTokenRef = buildSelectionQueryTokenReference(selectionInfo, 'the target token');
+    const queryTokenRef = buildSelectionQueryTokenReference(selectionInfo, 'the query token');
     const headRef = buildSelectionHeadReference(selectionInfo);
     const maskValue = activation?.maskValue;
     const isBlocked = activation?.isMasked === true || maskValue === Number.NEGATIVE_INFINITY;
     const valueText = isBlocked ? inlineMath('-\\infty') : inlineMath('0');
 
     return joinParagraphs(
-        `This is one entry of the causal mask ${inlineMath('M_{\\mathrm{causal}}')} from source token ${sourceTokenRef} to target token ${targetTokenRef} in ${headRef}. This mask entry is added to the raw query-key score before softmax so the head knows which source positions the target token is allowed to read from.`,
+        `This is one entry of the causal mask ${inlineMath('M_{\\mathrm{causal}}')} for query token ${queryTokenRef} reading from source token ${sourceTokenRef} in ${headRef}. This mask entry is added to the raw query-key score before softmax so the head knows which source positions the query token is allowed to read from.`,
         isBlocked
-            ? `Here the mask value is ${valueText}. That means ${sourceTokenRef} is a future position relative to ${targetTokenRef}, so GPT-style autoregressive self-attention must block this connection. Adding ${inlineMath('-\\infty')} before softmax forces this cell's probability to zero, so the target token cannot attend to information that comes later in the sequence.`
-            : `Here the mask value is ${valueText}. That means ${sourceTokenRef} is at or before ${targetTokenRef}, so this connection is allowed. Adding ${inlineMath('0')} leaves the raw query-key score unchanged and lets this source token compete normally inside the softmax row.`,
-        `Causal masking is what keeps self-attention compatible with next-token prediction: when the model is generating token ${targetTokenRef}, it may use the current and earlier tokens, but it must not peek at future tokens that have not been generated yet.`
+            ? `Here the mask value is ${valueText}. That means ${sourceTokenRef} is a future position relative to ${queryTokenRef}, so GPT-style autoregressive self-attention must block this connection. Adding ${inlineMath('-\\infty')} before softmax forces this cell's probability to zero.`
+            : `Here the mask value is ${valueText}. That means ${sourceTokenRef} is at or before ${queryTokenRef}, so this connection is allowed. Adding ${inlineMath('0')} leaves the raw query-key score unchanged and lets this source token compete normally inside the softmax row.`,
+        `Causal masking is what keeps self-attention compatible with next-token prediction: when the model is generating token ${queryTokenRef}, it may use the current and earlier tokens, but it must not peek at future tokens that have not been generated yet.`
     );
 }
 
 const GENERIC_VECTOR_DESCRIPTION = joinParagraphs(
-    'This vector is a learned feature representation used somewhere along the model\'s forward pass. A vector in a transformer should be thought of as a bundle of coordinates that the network has learned to make useful.',
-    'Different parts of the model reinterpret and recombine these coordinates for different purposes: residual state, queries, keys, values, MLP activations, and logits all come from vectors passed through different learned transformations.'
+    'This vector is a learned feature representation used somewhere along GPT-2\'s forward pass. In practice, vectors in this visualization usually mean a token state, an attention Q/K/V vector, an MLP activation, or an output score vector.',
+    'A useful way to read it is: what produced this vector, what does it influence next, and is it specific to one token or shared across tokens? The stage label, equation panel, and nearby components usually answer those three questions.'
 );
 
 const GENERIC_WEIGHT_MATRIX_DESCRIPTION = joinParagraphs(
-    'This is a learned linear transformation matrix. From first principles, multiplying a vector by a matrix means recombining its coordinates into a new set of coordinates.',
-    'In the notation used in this visualization, a matrix with shape input_dim x output_dim takes an input vector of length input_dim and produces an output vector of length output_dim. So the input dimension tells you how many features the matrix reads, and the output dimension tells you how many new features it writes.',
-    'Different matrices in the model learn different jobs: some build queries, keys, and values; some mix attention-head outputs; some expand or compress MLP features.',
-    'In a transformer, the important pattern is usually that the same learned matrix is reused across token positions. So these objects typically produce a separate output vector for each token position in the sequence.'
+    'This is a learned linear transformation matrix. In GPT-2, a matrix usually takes one kind of vector and turns it into another kind of vector with a new job.',
+    'A matrix with shape input_dim x output_dim reads an input vector of length input_dim and writes an output vector of length output_dim. Most transformer matrices are reused across token positions, so the same learned transform is applied independently to many tokens.'
 );
+
+function isFlowGuideSelection(label = '', stage = '') {
+    const lower = String(label || '').toLowerCase();
+    const stageLower = String(stage || '').toLowerCase();
+    return lower.includes('path')
+        || lower.includes('connector')
+        || lower.includes('trail')
+        || lower.includes('halo')
+        || stageLower.startsWith('connector-');
+}
 
 function normalizeSelectionKind(kind) {
     const raw = String(kind || '').trim().toLowerCase();
@@ -1079,18 +1158,24 @@ function buildContextualFallbackDescription(label, kind, stage = '') {
     const cleanStage = String(stage || '').trim();
     const kindLabel = normalizeSelectionKind(kind);
 
-        if (cleanStage) {
-            if (cleanLabel && kindLabel) {
-                return joinParagraphs(
-                    `"${cleanLabel}" is an interactive ${kindLabel} mapped to activation stage "${cleanStage}". That stage tells you where this object sits in the forward-pass pipeline.`,
-                    'The important question is still the same: what role does this component play in updating the token state, and what other components read from it next?',
-                    'Use the stage name, the equation panel, and the surrounding scene context together to place it within the residual, attention, or MLP flow.'
-                );
-            }
+    if (isFlowGuideSelection(cleanLabel, cleanStage)) {
+        return joinParagraphs(
+            'This selection is a guide to the current flow rather than a separate learned parameter or activation.',
+            'Use it to follow which nearby vector or matrix is producing information here, and which component reads that information next.'
+        );
+    }
+
+    if (cleanStage) {
+        if (cleanLabel && kindLabel) {
+            return joinParagraphs(
+                `"${cleanLabel}" is an interactive ${kindLabel} mapped to activation stage "${cleanStage}". That stage tells you where it sits in GPT-2's forward pass.`,
+                'The most useful way to read it is to ask what state or parameter it represents, what job it serves in this step, and what component reads it next.'
+            );
+        }
         if (cleanLabel) {
             return joinParagraphs(
                 `"${cleanLabel}" is mapped to activation stage "${cleanStage}". That stage tells you where this object participates in the current forward-pass pipeline.`,
-                'The best way to interpret it is to ask what vector or parameter it represents and which later operation consumes it.'
+                'Read it by asking what information is being carried here and which later operation consumes it.'
             );
         }
         if (kindLabel) {
@@ -1101,15 +1186,14 @@ function buildContextualFallbackDescription(label, kind, stage = '') {
         }
         return joinParagraphs(
             `This selection is mapped to activation stage "${cleanStage}". That stage marks where it participates in the current forward-pass pipeline.`,
-            'It should be interpreted through the same first-principles question: what information is it carrying or what transformation is it applying at this moment?'
+            'Use that stage to ask what information it is carrying or what transformation it is applying at this moment.'
         );
     }
 
     if (cleanLabel && kindLabel) {
         return joinParagraphs(
             `"${cleanLabel}" is an interactive ${kindLabel} in the scene.`,
-            'It contributes somewhere in the residual, attention, MLP, or output flow, and its surrounding stage tells you which part of the transformer is using it.',
-            'The surrounding stage, equation, and neighboring components tell you whether it is acting as a token state, a learned parameter, or a transformation.'
+            'It contributes somewhere in the residual, attention, MLP, or output flow. Use the surrounding stage, equation, and nearby components to decide whether it is acting as a token state, a learned parameter, or a transformation.'
         );
     }
     if (cleanLabel) {
@@ -1435,6 +1519,13 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
             : buildEquationEntries([kvWriteEq, kvAppendEq, kvReuseEq], [0, 1]);
     }
 
+    if (lower.includes('concatenated head output') || lower.includes('concatenate heads')) {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [0]);
+    }
+    if (lower.includes('attention output vector')) {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
+    }
+
     if (shouldSuppressResidualVectorEquations(lower, stageLower)) {
         return [];
     }
@@ -1597,6 +1688,12 @@ function buildSelectionEquationEntries(label, selectionInfo = null) {
     if (lower.includes('output projection matrix')) {
         return buildEquationEntries([concatEq, outputProjectionWeightMatrixEq, postAttentionResidualEq], [1]);
     }
+    if (lower.includes('concatenated head output') || lower.includes('concatenate heads')) {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [0]);
+    }
+    if (lower.includes('attention output vector')) {
+        return buildEquationEntries([concatEq, outputProjectionEq, postAttentionResidualEq], [1]);
+    }
     if (lower.includes('post-attention residual')) {
         return buildEquationEntries([outputProjectionEq, postAttentionResidualEq], [1]);
     }
@@ -1676,6 +1773,13 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         return buildKvCacheInfoDescription(selectionInfo);
     }
 
+    if (lower.includes('concatenated head output') || lower.includes('concatenate heads')) {
+        return CONCATENATED_HEAD_OUTPUT_DESCRIPTION;
+    }
+    if (lower.includes('attention output vector')) {
+        return POST_ATTENTION_OUTPUT_DESCRIPTION;
+    }
+
     if (stageLower) {
         if (stageLower.startsWith('embedding.token')) {
             return TOKEN_EMBEDDING_VECTOR_DESCRIPTION;
@@ -1730,6 +1834,15 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
         }
         if (stageLower === 'attention.output_projection') {
             return POST_ATTENTION_OUTPUT_DESCRIPTION;
+        }
+        if (stageLower === 'attention.concatenate' || stageLower === 'concatenate') {
+            return CONCATENATED_HEAD_OUTPUT_DESCRIPTION;
+        }
+        if (stageLower === 'attn-out') {
+            return POST_ATTENTION_OUTPUT_DESCRIPTION;
+        }
+        if (stageLower === 'head-output') {
+            return buildAttentionWeightedSumDescription(selectionInfo);
         }
         if (stageLower === 'residual.post_attention') {
             return buildPostAttentionResidualDescription(selectionInfo);
@@ -1857,6 +1970,9 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('mlp down projection')) {
         return MLP_DOWN_VECTOR_DESCRIPTION;
     }
+    if (lower.includes('multilayer perceptron')) {
+        return MLP_GENERIC_DESCRIPTION;
+    }
     if (lower.includes('mlp expanded segments')) {
         return MLP_EXPANDED_SEGMENTS_DESCRIPTION;
     }
@@ -1913,8 +2029,14 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('query vector')) {
         return buildQueryVectorDescription(selectionInfo);
     }
+    if (lower.includes('query path')) {
+        return QUERY_PATH_DESCRIPTION;
+    }
     if (lower.includes('cached key vector')) {
         return buildCachedKeyVectorDescription(selectionInfo);
+    }
+    if (lower.includes('key path')) {
+        return KEY_PATH_DESCRIPTION;
     }
     if (lower.includes('key vector')) {
         return buildKeyVectorDescription(selectionInfo);
@@ -1925,14 +2047,29 @@ export function resolveDescription(label, kind = null, selectionInfo = null) {
     if (lower.includes('weighted value vector')) {
         return buildWeightedValueVectorDescription(selectionInfo);
     }
+    if (lower.includes('weighted output')) {
+        return WEIGHTED_OUTPUT_PATH_DESCRIPTION;
+    }
     if (lower.includes('value vector')) {
         return buildValueVectorDescription(selectionInfo);
+    }
+    if (lower.includes('head output row')) {
+        return buildAttentionWeightedSumDescription(selectionInfo);
     }
     if (lower.includes('attention weighted sum') || stageLower === 'attention.weighted_sum') {
         return buildAttentionWeightedSumDescription(selectionInfo);
     }
+    if (lower.includes('concatenated head output') || lower.includes('concatenate heads')) {
+        return CONCATENATED_HEAD_OUTPUT_DESCRIPTION;
+    }
+    if (lower.includes('attention output vector')) {
+        return POST_ATTENTION_OUTPUT_DESCRIPTION;
+    }
     if (lower.includes('causal mask') || lower.includes('attention mask')) {
         return buildCausalMaskDescription(selectionInfo);
+    }
+    if (lower.includes('attention head')) {
+        return ATTENTION_HEAD_DESCRIPTION;
     }
     if (lower.includes('attention score') || stageLower.startsWith('attention.')) {
         if (stageLower === 'attention.pre') {

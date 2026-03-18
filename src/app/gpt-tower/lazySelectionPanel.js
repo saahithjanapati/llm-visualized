@@ -144,6 +144,7 @@ export function createLazySelectionPanel(options = {}) {
         updateData: (data) => {
             updateLoadedPanelData(data);
         },
-        openTransformerView2d: (config) => withPanel('view2d', (resolvedPanel) => resolvedPanel.openTransformerView2d(config))
+        openTransformerView2d: (config) => withPanel('view2d', (resolvedPanel) => resolvedPanel.openTransformerView2d(config)),
+        isTransformerView2dOpen: () => panel?.isTransformerView2dOpen?.() === true
     };
 }

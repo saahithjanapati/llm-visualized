@@ -58,9 +58,10 @@ describe('selectionPanelNarrativeUtils bias narratives', () => {
         };
 
         const description = resolveDescription('Normalized Residual Stream Vector', 'vector', selection);
-        expect(description).toContain('normalization step');
-        expect(description).toContain('already completed');
-        expect(description).toContain('scale and shift');
+        expect(description).toContain('right after the normalization step');
+        expect(description).toContain('open-layernorm-param');
+        expect(description).toContain('learned scale and shift');
+        expect(description).toContain('steadier numerical scale');
     });
 
     it('describes LayerNorm product-vector stages as intermediate affine states', () => {
@@ -255,6 +256,117 @@ describe('selectionPanelNarrativeUtils bias narratives', () => {
         expect(description).toContain('H_i');
         expect(description).toContain('post-softmax attention weights');
         expect(description).toContain('output projection');
+    });
+
+    it('returns specific copy for concatenated head outputs instead of generic attention text', () => {
+        const selection = {
+            label: 'Concatenated Head Output',
+            info: {
+                activationData: {
+                    stage: 'attention.output_projection',
+                    layerIndex: 2
+                }
+            }
+        };
+
+        const description = resolveDescription('Concatenated Head Output', 'vector', selection);
+        expect(description).toContain('placing all attention-head outputs side by side');
+        expect(description).toContain('output projection matrix');
+
+        const entries = resolveSelectionPreviewEquations('Concatenated Head Output', selection);
+        expect(entries).toHaveLength(3);
+        expect(entries[0]?.active).toBe(true);
+    });
+
+    it('returns specific copy for full MLP module selections', () => {
+        const selection = {
+            label: 'Multilayer Perceptron',
+            info: {
+                activationData: {
+                    stage: 'mlp'
+                }
+            }
+        };
+
+        const description = resolveDescription('Multilayer Perceptron', 'label', selection);
+        expect(description).toContain('does not mix information across token positions');
+        expect(description).toContain('expand, apply GELU, compress');
+    });
+
+    it('explains top-k = 40 behavior for top logit bars', () => {
+        const selection = {
+            label: 'Top Logit Bars',
+            info: {
+                activationData: {
+                    stage: 'output',
+                    barCount: 40
+                }
+            }
+        };
+
+        const description = resolveDescription('Top Logit Bars', 'vector', selection);
+        expect(description).toContain('top-k');
+        expect(description).toContain('k = 40');
+        expect(description).toContain('full-vocabulary softmax');
+    });
+
+    it('explains shortlist renormalization for chosen tokens when top-k is active', () => {
+        const selection = {
+            label: 'Chosen Token: cat',
+            info: {
+                activationData: {
+                    stage: 'generation.chosen',
+                    tokenIndex: 5,
+                    barCount: 40,
+                    logitEntry: {
+                        token: 'cat',
+                        token_id: 3797,
+                        probability: 0.12
+                    }
+                }
+            }
+        };
+
+        const description = resolveDescription('Chosen Token: cat', 'label', selection);
+        expect(description).toContain('top-k');
+        expect(description).toContain('k = 40');
+        expect(description).toContain('renormalizes');
+    });
+
+    it('returns head-specific copy for attention-head focus labels', () => {
+        const selection = {
+            label: 'Attention Head 3',
+            info: {
+                activationData: {
+                    stage: 'attention.head',
+                    layerIndex: 1,
+                    headIndex: 2
+                }
+            }
+        };
+
+        const description = resolveDescription('Attention Head 3', 'label', selection);
+        expect(description).toContain('one attention head');
+        expect(description).toContain('query, key, and value weights');
+        expect(description).toContain('concatenates all head outputs');
+    });
+
+    it('returns flow-guide copy for query-path highlights', () => {
+        const selection = {
+            label: 'Query path',
+            info: {
+                activationData: {
+                    stage: 'connector-q',
+                    layerIndex: 1,
+                    headIndex: 2
+                }
+            }
+        };
+
+        const description = resolveDescription('Query path', 'label', selection);
+        expect(description).toContain('guide to the flow');
+        expect(description).toContain('query branch');
+        expect(description).toContain('query vector');
     });
 
     it('returns blocked causal-mask-specific copy and highlights the attention equation', () => {

@@ -1,18 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS,
     TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS,
     TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS,
     shouldKeepTransformerView2dHeadDetailFitView
 } from './selectionPanelTransformerView2dTransitionUtils.js';
 
 describe('selectionPanelTransformerView2dTransitionUtils', () => {
-    it('slows the staged MHSA overview-to-head entry motion slightly', () => {
-        expect(TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS).toBe(1520);
+    it('keeps the staged MHSA overview-to-head entry motion brisk', () => {
+        expect(TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS).toBe(1320);
+    });
+
+    it('uses a shared overview focus duration for direct in-canvas detail entry', () => {
+        expect(TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS).toBe(920);
     });
 
     it('holds briefly on the focused overview component before entering deep detail', () => {
-        expect(TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS).toBe(200);
+        expect(TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS).toBe(160);
     });
 
     it('allows component focus when a specific MHSA component is targeted', () => {

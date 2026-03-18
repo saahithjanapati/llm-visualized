@@ -829,6 +829,7 @@ export function initGenerationController({
 
     const syncSelectionPanel = (passState, attentionState = null) => {
         if (!selectionPanel) return;
+        const keepTransformerView2dOpen = selectionPanel.isTransformerView2dOpen?.() === true;
         selectionPanel.updateData?.({
             activationSource,
             laneTokenIndices: passState.laneTokenIndices,
@@ -836,7 +837,9 @@ export function initGenerationController({
             attentionTokenIndices: attentionState?.laneTokenIndices || passState.laneTokenIndices,
             attentionTokenLabels: attentionState?.tokenLabels || passState.tokenLabels
         });
-        selectionPanel.close?.();
+        if (!keepTransformerView2dOpen) {
+            selectionPanel.close?.();
+        }
     };
 
     const syncPromptTokenStrip = (

@@ -49,21 +49,6 @@ export function setDescriptionSoftmaxAction(descriptionEl, enabled = false) {
             }
             node.remove()
         })
-
-    if (!enabled) return
-
-    const actionRow = document.createElement('div')
-    actionRow.className = 'detail-description-action-row'
-
-    const actionBtn = document.createElement('button')
-    actionBtn.type = 'button'
-    actionBtn.className = 'detail-description-action-link'
-    actionBtn.dataset.detailAction = SOFTMAX_PANEL_ACTION_OPEN
-    actionBtn.textContent = 'Explain softmax'
-    actionBtn.setAttribute('aria-label', 'Open the softmax explainer')
-
-    actionRow.appendChild(actionBtn)
-    descriptionEl.appendChild(actionRow)
 }
 
 export function resolveSoftmaxPreviewContext(selectionInfo = null) {

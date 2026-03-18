@@ -9,9 +9,57 @@
   ],
   "headers": [
     {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
       "source": "/capture(.*).json",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/info",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/info/",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/info/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/full",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/full/",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
       ]
     }
   ],

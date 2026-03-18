@@ -5,11 +5,19 @@ import { fileURLToPath } from 'node:url';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
-const UNUSED_PUBLIC_ASSETS = [
+const UNUSED_PUBLIC_OUTPUT_PATHS = [
+  '.DS_Store',
+  'AGENT.md',
+  'assets/.DS_Store',
+  'assets/AGENT.md',
+  'assets/geometries',
+  'flops_per_step.csv',
+  'flops_per_step.svg',
   'position_embeddings_grid.png',
   'position_embeddings_grid_1024x768.png',
   'position_embeddings_grid_1024x768_clamped_-0.5_0.5.png',
-  'position_embeddings_grid_1024x768_clamped_-1_1.png'
+  'position_embeddings_grid_1024x768_clamped_-1_1.png',
+  'twelve-layer-stack.css'
 ];
 const constantsPath = resolve(projectRoot, 'src/utils/constants.js');
 
@@ -32,10 +40,10 @@ function stripUnusedBuildAssets() {
       outDir = resolve(config.root, config.build.outDir);
     },
     closeBundle() {
-      for (const assetPath of UNUSED_PUBLIC_ASSETS) {
+      for (const assetPath of UNUSED_PUBLIC_OUTPUT_PATHS) {
         const absolutePath = resolve(outDir, assetPath);
         if (existsSync(absolutePath)) {
-          rmSync(absolutePath, { force: true });
+          rmSync(absolutePath, { force: true, recursive: true });
         }
       }
       if (!stripQkvAsset) return;

@@ -85,14 +85,21 @@ function createPanelContext() {
     panel._stopLoop = vi.fn();
     panel._setAttentionVisibility = vi.fn();
     panel._setPanelTokenHoverEntry = vi.fn();
+    panel._setAttentionValue = vi.fn();
+    panel._applyAttentionDecodeStyling = vi.fn();
     panel._applyCopyContextButtonLayout = vi.fn();
     panel._buildHistoryEntry = vi.fn(() => ({ key: 'history-entry' }));
     panel._pushHistoryEntry = vi.fn();
     panel._updateHistoryNavigationControls = vi.fn();
+    panel._resetHistoryNavigation = vi.fn();
     panel._canToggleMhsaFullscreen = vi.fn(() => false);
     panel._setMhsaFullscreen = vi.fn();
     panel._isSmallScreen = vi.fn(() => false);
     panel.open = vi.fn();
+    panel._attentionPostAnimQueue = { clear: vi.fn() };
+    panel._attentionPostAnimatedRows = { clear: vi.fn() };
+    panel._currentTransformerView2dContext = null;
+    panel._transformerView2dDetailOpen = false;
     panel.engine = {
         pause: vi.fn()
     };
@@ -106,6 +113,25 @@ function createPanelContext() {
 }
 
 describe('SelectionPanel transformer-view2d sidebar handoff', () => {
+    it('keeps the dev-mode data section directly above the copy-context row in the docked sidebar order', () => {
+        const panel = createPanelContext();
+        panel.previewRoot = { id: 'previewRoot' };
+        panel.vectorLegend = { id: 'vectorLegend' };
+        panel.equationsSection = { id: 'equationsSection' };
+        panel.promptContextRow = { id: 'promptContextRow' };
+        panel.previewMetaSection = { id: 'previewMetaSection' };
+        panel.description = { id: 'description' };
+        panel.metaSection = { id: 'metaSection' };
+        panel.attentionRoot = { id: 'attentionRoot' };
+        panel.dataSection = { id: 'dataSection' };
+        panel.copyContextRow = { id: 'copyContextRow' };
+
+        const sections = panel._getTransformerView2dSelectionSidebarSections();
+
+        expect(sections.at(-2)).toBe(panel.dataSection);
+        expect(sections.at(-1)).toBe(panel.copyContextRow);
+    });
+
     it('schedules hidden 2D view prewarm when the action button becomes available', () => {
         const panel = createPanelContext();
         panel._scheduleTransformerView2dDetailViewPrewarm = vi.fn();
@@ -322,6 +348,47 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         );
         expect(panel._transformerView2dDetailView.setSelectionSidebarHeaderContent).not.toHaveBeenCalled();
         expect(panel._stopLoop).toHaveBeenCalled();
+    });
+
+    it('refreshes the open 2D canvas in place when panel data changes', () => {
+        const panel = createPanelContext();
+        panel._transformerView2dDetailOpen = true;
+        panel._currentTransformerView2dContext = {
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 3,
+                stage: 'attention',
+                role: 'module'
+            },
+            focusLabel: 'Layer 4 attention',
+            detailSemanticTargets: [],
+            detailFocusLabel: '',
+            detailInteractionTargets: [],
+            transitionMode: 'staged-focus'
+        };
+
+        panel.updateData({
+            activationSource: { id: 'next-activation-source' },
+            laneTokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            attentionTokenIndices: [0, 1, 2],
+            attentionTokenLabels: ['A', 'B', 'C']
+        });
+
+        expect(panel._resetHistoryNavigation).toHaveBeenCalled();
+        expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
+            expect.objectContaining({
+                activationSource: { id: 'next-activation-source' },
+                tokenIndices: [0, 1, 2],
+                tokenLabels: ['A', 'B', 'C'],
+                semanticTarget: panel._currentTransformerView2dContext.semanticTarget,
+                focusLabel: 'Layer 4 attention',
+                initialSelectionSidebarVisible: true
+            })
+        );
+        expect(panel._showTransformerView2dSelectionSidebar).toHaveBeenCalledWith({
+            scrollToTop: false
+        });
     });
 
     it('uses the header close action to dismiss the 2D selection sidebar before closing the panel', () => {

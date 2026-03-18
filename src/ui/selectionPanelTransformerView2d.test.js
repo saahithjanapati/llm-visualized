@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { D_HEAD, D_MODEL } from './selectionPanelConstants.js';
 import {
-    TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS,
+    TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS,
     TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
 } from './selectionPanelTransformerView2dTransitionUtils.js';
 import { TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT } from './selectionPanelTransformerView2dViewportUtils.js';
@@ -258,6 +258,17 @@ function createActivationSource() {
     };
 }
 
+function setViewportSize(width = 1024, height = 768) {
+    Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: width
+    });
+    Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: height
+    });
+}
+
 function getStageReadouts(panelEl) {
     return {
         layer: panelEl.querySelector('[data-transformer-view2d-readout="layer"]'),
@@ -370,33 +381,42 @@ describe('createTransformerView2dDetailView', () => {
         expect(closeSelectionBtn).toBeTruthy();
     });
 
-    it('places the project info action at the far right of the 2D toolbar and routes it through the info callback', () => {
+    it('places the settings action at the far right of the 2D toolbar and routes the icon actions through their callbacks', () => {
         const panelEl = document.getElementById('detailPanel');
         const onOpenInfo = vi.fn();
-        createTransformerView2dDetailView(panelEl, { onOpenInfo });
+        const onOpenSettings = vi.fn();
+        createTransformerView2dDetailView(panelEl, { onOpenInfo, onOpenSettings });
 
         const toolbarActions = panelEl.querySelector('.detail-transformer-view2d-toolbar-actions');
         const infoBtn = panelEl.querySelector('[data-transformer-view2d-action="open-info"]');
+        const settingsBtn = panelEl.querySelector('[data-transformer-view2d-action="open-settings"]');
 
         expect(infoBtn).toBeTruthy();
-        expect(toolbarActions?.lastElementChild).toBe(infoBtn);
+        expect(settingsBtn).toBeTruthy();
+        expect(toolbarActions?.lastElementChild).toBe(settingsBtn);
+        expect(settingsBtn?.previousElementSibling).toBe(infoBtn);
         expect(infoBtn?.getAttribute('aria-label')).toBe('Open project info page');
+        expect(settingsBtn?.getAttribute('aria-label')).toBe('Open settings');
 
         infoBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        settingsBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
         expect(onOpenInfo).toHaveBeenCalledTimes(1);
+        expect(onOpenSettings).toHaveBeenCalledTimes(1);
     });
 
-    it('shows the project info action for desktop 2D views and hides it only on small screens', () => {
+    it('shows the 2D toolbar info/settings actions on desktop and landscape-small screens, but hides them on portrait-small screens', () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
 
         const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
         const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
         const infoBtn = panelEl.querySelector('[data-transformer-view2d-action="open-info"]');
+        const settingsBtn = panelEl.querySelector('[data-transformer-view2d-action="open-settings"]');
         setElementRect(canvas, 960, 600);
         setElementRect(canvasCard, 960, 600);
 
+        setViewportSize(1280, 800);
         view.setVisible(true);
         view.open({
             activationSource: createActivationSource(),
@@ -409,6 +429,8 @@ describe('createTransformerView2dDetailView', () => {
 
         expect(infoBtn?.hidden).toBe(false);
         expect(infoBtn?.getAttribute('aria-hidden')).toBe('false');
+        expect(settingsBtn?.hidden).toBe(false);
+        expect(settingsBtn?.getAttribute('aria-hidden')).toBe('false');
 
         view.open({
             activationSource: createActivationSource(),
@@ -425,7 +447,29 @@ describe('createTransformerView2dDetailView', () => {
 
         expect(infoBtn?.hidden).toBe(false);
         expect(infoBtn?.getAttribute('aria-hidden')).toBe('false');
+        expect(settingsBtn?.hidden).toBe(false);
+        expect(settingsBtn?.getAttribute('aria-hidden')).toBe('false');
 
+        setViewportSize(844, 390);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'module'
+            },
+            focusLabel: 'Token Embedding',
+            isSmallScreen: true
+        });
+
+        expect(infoBtn?.hidden).toBe(false);
+        expect(infoBtn?.getAttribute('aria-hidden')).toBe('false');
+        expect(settingsBtn?.hidden).toBe(false);
+        expect(settingsBtn?.getAttribute('aria-hidden')).toBe('false');
+
+        setViewportSize(390, 844);
         view.open({
             activationSource: createActivationSource(),
             tokenIndices: [0, 1, 2],
@@ -441,6 +485,8 @@ describe('createTransformerView2dDetailView', () => {
 
         expect(infoBtn?.hidden).toBe(true);
         expect(infoBtn?.getAttribute('aria-hidden')).toBe('true');
+        expect(settingsBtn?.hidden).toBe(true);
+        expect(settingsBtn?.getAttribute('aria-hidden')).toBe('true');
     });
 
     it('stages MHSA entries from the tower overview into the head-detail scene', async () => {
@@ -901,7 +947,7 @@ describe('createTransformerView2dDetailView', () => {
         expect(overlay?.style.display).toBe('block');
     });
 
-    it('stages canvas attention-head clicks through an overview zoom before entering the head-detail scene', async () => {
+    it('opens canvas attention-head clicks right after the overview focus zoom settles', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
         const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
@@ -935,19 +981,23 @@ describe('createTransformerView2dDetailView', () => {
 
         canvas.dispatchEvent(createPointerEvent('pointerdown'));
         canvas.dispatchEvent(createPointerEvent('pointerup'));
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(200);
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
 
         await vi.advanceTimersByTimeAsync(
-            TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
-            + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+            TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS - 200 + 32
         );
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+        const openedScale = view.getViewportState().scale;
+
+        await vi.advanceTimersByTimeAsync(240);
+
+        expect(view.getViewportState().scale).toBeCloseTo(openedScale, 6);
     });
 
-    it('stages canvas MLP clicks through an overview zoom before entering the deep detail scene', async () => {
+    it('opens canvas MLP clicks right after the overview focus zoom settles', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
         const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
@@ -980,15 +1030,20 @@ describe('createTransformerView2dDetailView', () => {
 
         canvas.dispatchEvent(createPointerEvent('pointerdown'));
         canvas.dispatchEvent(createPointerEvent('pointerup'));
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(200);
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
 
         await vi.advanceTimersByTimeAsync(
-            1120 + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+            TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS - 200 + 32
         );
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+        const openedScale = view.getViewportState().scale;
+
+        await vi.advanceTimersByTimeAsync(240);
+
+        expect(view.getViewportState().scale).toBeCloseTo(openedScale, 6);
     });
 
     it('opens canvas vocabulary-embedding clicks as sidebar selections', async () => {
@@ -1249,13 +1304,12 @@ describe('createTransformerView2dDetailView', () => {
 
         canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
         canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(200);
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
 
         await vi.advanceTimersByTimeAsync(
-            TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
-            + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+            TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS - 200 + 32
         );
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
@@ -1296,13 +1350,12 @@ describe('createTransformerView2dDetailView', () => {
 
         canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
         canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(200);
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
 
         await vi.advanceTimersByTimeAsync(
-            TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
-            + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+            TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS - 200 + 32
         );
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);

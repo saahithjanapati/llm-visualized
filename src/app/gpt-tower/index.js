@@ -327,6 +327,7 @@ const followModeControls = initFollowModeControls({
 const transformerView2dBtn = document.getElementById('transformerView2dBtn');
 initTransformerView2dButtonLabel(transformerView2dBtn);
 const infoBtn = document.getElementById('infoBtn');
+const settingsBtn = document.getElementById('settingsBtn');
 
 const topControls = document.getElementById('topControls');
 const settingsOverlay = document.getElementById('settingsOverlay');
@@ -342,6 +343,10 @@ const selectionPanel = createLazySelectionPanel({
     pauseMainFlowOnMobileFocus: true,
     onOpenInfo: () => {
         projectInfoOverlay.open();
+    },
+    onOpenSettings: () => {
+        showTopControls();
+        settingsBtn?.click();
     }
 });
 
