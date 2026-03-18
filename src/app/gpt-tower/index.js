@@ -57,6 +57,10 @@ import { initPassIntroOverlay } from './passIntroOverlay.js';
 import { createLazySelectionPanel } from './lazySelectionPanel.js';
 import { initProjectInfoOverlay } from '../../ui/projectInfoOverlay.js';
 import {
+    PROJECT_INFO_ACTIVE_VISUALIZATION_MODES,
+    setProjectInfoActiveVisualizationMode
+} from '../../ui/projectInfoNavigation.js';
+import {
     NUM_LAYERS,
     PROMPT_TOKENS,
     POSITION_TOKENS,
@@ -110,6 +114,11 @@ function shouldSkipInitialPassIntro() {
 }
 
 const initialAppView = resolveInitialAppView();
+setProjectInfoActiveVisualizationMode(
+    initialAppView?.kind === 'transformer-view2d'
+        ? PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.TRANSFORMER_VIEW2D
+        : PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D
+);
 const googleAnalyticsPageTracker = initGoogleAnalyticsPageTracking({
     trackInitialPage: false
 });
@@ -519,6 +528,7 @@ Promise.resolve().then(async () => {
             });
         } catch (err) {
             console.error('Direct 2D startup failed:', err);
+            setProjectInfoActiveVisualizationMode(PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D);
             hideLoadingOverlay();
             pipeline?.engine?.resume?.('initial-pass-intro');
         }

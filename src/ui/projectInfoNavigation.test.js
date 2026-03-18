@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
     bindProjectInfoBackLink,
     buildProjectInfoPageUrl,
     openProjectInfoPage,
+    PROJECT_INFO_ACTIVE_VISUALIZATION_MODES,
     resolveProjectInfoBackHref,
+    resolveProjectInfoNavigationReturnHref,
+    setProjectInfoActiveVisualizationMode,
     shouldUseProjectInfoHistoryBack,
     syncProjectInfoBackLink
 } from './projectInfoNavigation.js';
@@ -26,6 +29,10 @@ function createLocationRef({
 }
 
 describe('projectInfoNavigation', () => {
+    afterEach(() => {
+        setProjectInfoActiveVisualizationMode('');
+    });
+
     it('preserves the active 2D route when building the info page URL', () => {
         const infoHref = buildProjectInfoPageUrl(createLocationRef({
             href: 'https://llm-visualized.local/?view=2d&component=mhsa&layer=3',
@@ -34,6 +41,24 @@ describe('projectInfoNavigation', () => {
         }));
 
         expect(infoHref).toBe('/info/?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa%26layer%3D3');
+    });
+
+    it('drops stale 2D route params when the active visualization is 3D', () => {
+        setProjectInfoActiveVisualizationMode(PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D);
+
+        const returnHref = resolveProjectInfoNavigationReturnHref(createLocationRef({
+            href: 'https://llm-visualized.local/?token=8&generation=4&view=2d&component=mhsa&layer=3',
+            pathname: '/',
+            search: '?token=8&generation=4&view=2d&component=mhsa&layer=3'
+        }));
+        const infoHref = buildProjectInfoPageUrl(createLocationRef({
+            href: 'https://llm-visualized.local/?token=8&generation=4&view=2d&component=mhsa&layer=3',
+            pathname: '/',
+            search: '?token=8&generation=4&view=2d&component=mhsa&layer=3'
+        }));
+
+        expect(returnHref).toBe('/?token=8&generation=4');
+        expect(infoHref).toBe('/info/?returnTo=%2F%3Ftoken%3D8%26generation%3D4');
     });
 
     it('routes back to the encoded visualization URL from the info page', () => {
@@ -86,6 +111,23 @@ describe('projectInfoNavigation', () => {
 
         expect(opened).toBe(true);
         expect(assign).toHaveBeenCalledWith('/info/?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa');
+    });
+
+    it('uses the active 3D state when opening the info page from a stale 2D URL', () => {
+        setProjectInfoActiveVisualizationMode(PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D);
+        const assign = vi.fn();
+        const locationRef = {
+            assign,
+            href: 'https://llm-visualized.local/?token=8&generation=4&view=2d&component=mhsa',
+            pathname: '/',
+            search: '?token=8&generation=4&view=2d&component=mhsa',
+            hash: ''
+        };
+
+        const opened = openProjectInfoPage(locationRef);
+
+        expect(opened).toBe(true);
+        expect(assign).toHaveBeenCalledWith('/info/?returnTo=%2F%3Ftoken%3D8%26generation%3D4');
     });
 
     it('prefers history back when the referrer matches the encoded visualization route', () => {

@@ -105,7 +105,11 @@ import {
     getDescriptionPlainText,
     setDescriptionContent
 } from './selectionPanelCopyUtils.js';
-import { openProjectInfoPage } from './projectInfoNavigation.js';
+import {
+    openProjectInfoPage,
+    PROJECT_INFO_ACTIVE_VISUALIZATION_MODES,
+    setProjectInfoActiveVisualizationMode
+} from './projectInfoNavigation.js';
 import { createSelectionPanelHistoryNavigation } from './selectionPanelHistoryNavigationUtils.js';
 import {
     formatAttentionSubtitleTokenPart,
@@ -9506,6 +9510,9 @@ export class SelectionPanel {
             && this.currentPreview
             && this._transformerView2dDetailView?.isSelectionSidebarVisible?.() === true
         );
+        setProjectInfoActiveVisualizationMode(
+            PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.TRANSFORMER_VIEW2D
+        );
         this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
         if (shouldKeepSelectionPreviewLoop) {
             this._startLoop();
@@ -9542,6 +9549,9 @@ export class SelectionPanel {
         this.panel.classList.remove('is-transformer-view2d-open');
         this._transformerView2dDetailView?.setVisible(false);
         syncTransformerView2dRoute({ active: false });
+        setProjectInfoActiveVisualizationMode(
+            PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D
+        );
         this.engine?.resume?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
         this._syncHoverLabelSuppressionFromHoverState();
         if (this._mhsaFullscreenActive) {

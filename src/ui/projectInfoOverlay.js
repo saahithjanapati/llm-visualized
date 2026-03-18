@@ -2,6 +2,7 @@ import infoMarkdown from './infoModalContent.md?raw';
 import {
     PROJECT_INFO_PAGE_PATH,
     buildProjectInfoPageUrl,
+    resolveProjectInfoNavigationReturnHref,
     resolveProjectInfoBackHref
 } from './projectInfoNavigation.js';
 import {
@@ -105,7 +106,15 @@ export function initProjectInfoOverlay({
         if (typeof window === 'undefined') return false;
         if (isProjectInfoRoute(window.location)) return false;
         if (typeof window.history?.pushState !== 'function') return false;
-        window.history.pushState(window.history.state, '', buildProjectInfoPageUrl(window.location));
+        const returnHref = resolveProjectInfoNavigationReturnHref(window.location);
+        const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (
+            returnHref !== currentHref
+            && typeof window.history?.replaceState === 'function'
+        ) {
+            window.history.replaceState(window.history.state, '', returnHref);
+        }
+        window.history.pushState(window.history.state, '', buildProjectInfoPageUrl(window.location, { returnHref }));
         return true;
     };
 

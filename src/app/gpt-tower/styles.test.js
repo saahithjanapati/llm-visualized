@@ -29,3 +29,17 @@ describe('startup hover label styles', () => {
         });
     });
 });
+
+describe('startup mobile chrome styles', () => {
+    it('keeps top-control mobile sizing rules in the eager tower stylesheet', () => {
+        const eagerSelectors = [
+            '#topControls > * {',
+            '#topControls[data-auto-hidden="true"] > * {'
+        ];
+
+        eagerSelectors.forEach((selector) => {
+            expect(eagerTowerCss).toContain(selector);
+            expect(lazySelectionPanelCss).not.toContain(selector);
+        });
+    });
+});

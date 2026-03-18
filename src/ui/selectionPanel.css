@@ -4605,54 +4605,6 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         padding-right: max(16px, env(safe-area-inset-right));
         padding-bottom: max(18px, calc(env(safe-area-inset-bottom) + 8px));
     }
-    #topControls {
-        gap: 4px;
-        max-width: calc(100vw - 8px);
-        flex-wrap: nowrap;
-        justify-content: flex-end;
-        align-items: center;
-    }
-    #skipMenu {
-        margin-inline: 0;
-    }
-    #topControls button {
-        padding: 7px 8px;
-        font-size: 12px;
-        border-radius: 9px;
-    }
-    #pauseBtn,
-    #skipMenuToggle,
-    #settingsBtn,
-    #infoBtn {
-        width: 36px;
-        min-width: 36px;
-        height: 36px;
-        padding: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        flex: 0 0 auto;
-    }
-    #pauseBtn,
-    #followModeBtn,
-    #transformerView2dBtn {
-        min-width: 0;
-    }
-    #pauseBtn {
-        font-size: 13px;
-    }
-    #followModeBtn,
-    #transformerView2dBtn {
-        white-space: nowrap;
-        padding-inline: 8px;
-        font-size: 12px;
-    }
-    #settingsBtn svg,
-    #infoBtn svg,
-    #skipMenuToggle .skip-toggle-icon {
-        width: 16px;
-        height: 16px;
-    }
     body.detail-mobile-focus #topControls {
         opacity: 0;
         pointer-events: none;
@@ -4661,27 +4613,12 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     body.detail-mobile-focus #hudStack {
         top: max(10px, env(safe-area-inset-top));
     }
-    #hudStack {
-        left: 8px;
-        right: 8px;
-        width: auto;
-        max-width: calc(100vw - 16px);
-        --hud-equations-panel-min-height: clamp(74px, 11vh, 90px);
-        --hud-equations-panel-max-height: clamp(104px, 22vh, 156px);
-        gap: 0;
-    }
     #promptTokenStrip {
         border-radius: 0 18px 0 0;
     }
     #promptTokenStrip::before {
         border-radius: 0 22px 0 0;
     }
-    #hudPanel { padding: 6px 8px 3px; gap: 4px 8px; }
-    #statusOverlay { font-size: 12px; line-height: 1.15; padding-top: 2px; }
-    #parameterCounter .param-label { font-size: 10px; }
-    #parameterCounter .param-value { font-size: 15px; }
-    #equationsPanel .eq-title { font-size: 10px; margin-bottom: 2px; }
-    #equationsPanel .eq-body { font-size: 12px; line-height: 1.28; }
     #detailPanel {
         --detail-font-equation: clamp(15.8px, calc(9.6px + 1vw + 0.45dvh), 21px);
         --detail-mobile-preview-safe-bleed: env(safe-area-inset-top);
@@ -4990,32 +4927,6 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     }
     #detailFullscreenToggle {
         display: none !important;
-    }
-}
-
-@media (max-width: 600px) {
-    #topControls {
-        gap: 3px;
-        left: max(8px, env(safe-area-inset-left));
-        right: max(8px, env(safe-area-inset-right));
-        max-width: none;
-        pointer-events: none;
-    }
-    #topControls > * {
-        pointer-events: auto;
-    }
-    #topControls[data-auto-hidden="true"] > * {
-        pointer-events: none;
-    }
-    #followModeBtn,
-    #transformerView2dBtn {
-        flex: 1 1 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 0;
-        padding-inline: clamp(6px, 2vw, 10px);
-        font-size: 11px;
     }
 }
 

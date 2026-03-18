@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let appState;
 let initProjectInfoOverlay;
 let PROJECT_INFO_OVERLAY_PAUSE_REASON;
+let PROJECT_INFO_ACTIVE_VISUALIZATION_MODES;
+let setProjectInfoActiveVisualizationMode;
 
 function renderOverlayDom() {
     document.body.innerHTML = `
@@ -39,6 +41,10 @@ describe('projectInfoOverlay', () => {
             initProjectInfoOverlay,
             PROJECT_INFO_OVERLAY_PAUSE_REASON
         } = await import('./projectInfoOverlay.js'));
+        ({
+            PROJECT_INFO_ACTIVE_VISUALIZATION_MODES,
+            setProjectInfoActiveVisualizationMode
+        } = await import('./projectInfoNavigation.js'));
         renderOverlayDom();
         window.history.replaceState({}, '', '/?view=2d&component=mhsa&layer=3');
         appState.modalPaused = false;
@@ -163,5 +169,38 @@ describe('projectInfoOverlay', () => {
         expect(controller.isOpen()).toBe(true);
         expect(pause).toHaveBeenCalledWith(PROJECT_INFO_OVERLAY_PAUSE_REASON);
         expect(document.getElementById('projectInfoOverlay')?.getAttribute('aria-hidden')).toBe('false');
+    });
+
+    it('canonicalizes a stale 2D URL before opening the overlay from the 3D visualization', () => {
+        setProjectInfoActiveVisualizationMode(PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D);
+        window.history.replaceState({}, '', '/?token=8&generation=4&view=2d&component=mhsa&layer=3');
+        const replaceStateSpy = vi.spyOn(window.history, 'replaceState');
+        const pushStateSpy = vi.spyOn(window.history, 'pushState');
+        const pipeline = {
+            engine: {
+                pause: vi.fn(),
+                resume: vi.fn(),
+                resetInteractionState: vi.fn(),
+                controls: null,
+                renderer: {
+                    domElement: {
+                        style: {}
+                    }
+                }
+            }
+        };
+
+        const controller = initProjectInfoOverlay({ pipeline });
+        const opened = controller.open();
+
+        expect(opened).toBe(true);
+        expect(replaceStateSpy).toHaveBeenCalledWith(window.history.state, '', '/?token=8&generation=4');
+        expect(pushStateSpy).toHaveBeenCalledWith(
+            window.history.state,
+            '',
+            '/info/?returnTo=%2F%3Ftoken%3D8%26generation%3D4'
+        );
+        expect(window.location.pathname).toBe('/info/');
+        expect(window.location.search).toBe('?returnTo=%2F%3Ftoken%3D8%26generation%3D4');
     });
 });
