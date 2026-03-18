@@ -104,7 +104,7 @@ export function resolveAutoCameraViewState({
     const mhsa = layer?.mhsaAnimation;
     const lanes = Array.isArray(layer?.lanes) ? layer.lanes : [];
     const laneCount = lanes.length;
-    const laneIndex = laneCount ? Math.min(laneCount - 1, Math.floor(laneCount / 2)) : -1;
+    const laneIndex = laneCount ? Math.floor((laneCount - 1) / 2) : -1;
     const lane = laneIndex >= 0 ? lanes[laneIndex] : null;
     const resolvedLayerRuntimeIndex = Number.isFinite(layer?.index) ? layer.index : layerIndex;
     const resolvedLayerCount = Math.max(layers.length, resolvedLayerRuntimeIndex + 1);

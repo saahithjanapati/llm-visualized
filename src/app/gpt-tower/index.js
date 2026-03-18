@@ -55,6 +55,7 @@ import { initGoogleAnalyticsPageTracking } from './googleAnalytics.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { initPassIntroOverlay } from './passIntroOverlay.js';
 import { createLazySelectionPanel } from './lazySelectionPanel.js';
+import { initFirstVisitSceneHint } from '../../ui/firstVisitSceneHint.js';
 import { initProjectInfoOverlay } from '../../ui/projectInfoOverlay.js';
 import {
     PROJECT_INFO_ACTIVE_VISUALIZATION_MODES,
@@ -74,8 +75,29 @@ const TRANSFORMER_VIEW2D_OVERVIEW_LABEL = 'GPT-2 (124M)';
 
 function hideLoadingOverlay() {
     const overlay = document.getElementById('loadingOverlay');
+    const status = document.getElementById('loadingOverlayStatus');
     if (!overlay) return;
     overlay.classList.add('is-hidden');
+    overlay.setAttribute('aria-label', 'Loading GPT-2 visualization');
+    if (status) {
+        status.textContent = '';
+        status.hidden = true;
+    }
+}
+
+function showLoadingOverlay({
+    label = 'Loading GPT-2 visualization',
+    status = ''
+} = {}) {
+    const overlay = document.getElementById('loadingOverlay');
+    const statusEl = document.getElementById('loadingOverlayStatus');
+    if (!overlay) return;
+    overlay.classList.remove('is-hidden');
+    overlay.setAttribute('aria-label', String(label || 'Loading GPT-2 visualization'));
+    if (!statusEl) return;
+    const safeStatus = String(status || '').trim();
+    statusEl.textContent = safeStatus;
+    statusEl.hidden = !safeStatus;
 }
 
 function resolveInitialAppView() {
@@ -417,6 +439,7 @@ const promptTokenStrip = initPromptTokenStrip({
         void selectionPanel.handleSelection(selection);
     }
 });
+const firstVisitSceneHint = initFirstVisitSceneHint();
 let hoveredSceneTokenEntries = [];
 const syncSceneHoverTokenEntry = (selection = null) => {
     const nextEntries = selection?.label
@@ -494,6 +517,11 @@ function waitForAnimationFrames(frameCount = 1) {
     });
 }
 
+async function revealFirstVisitSceneHint() {
+    await waitForAnimationFrames(1);
+    firstVisitSceneHint.showIfEligible();
+}
+
 const shouldOpenMhsaDirectly = initialAppView?.kind === 'mhsa';
 const initialTransformerView2dRoute = initialAppView?.kind === 'transformer-view2d'
     ? initialAppView
@@ -506,10 +534,14 @@ Promise.resolve().then(async () => {
     if (shouldOpenMhsaDirectly) {
         try {
             passIntroOverlay?.dispose?.();
-            hideLoadingOverlay();
-            pipeline?.engine?.resume?.('initial-pass-intro');
-            await waitForAnimationFrames(1);
+            showLoadingOverlay({
+                label: 'Loading MHSA detail view',
+                status: 'Preparing the attention detail panel.'
+            });
             await selectionPanel.handleSelection(buildMhsaInfoSelection());
+            pipeline?.engine?.resume?.('initial-pass-intro');
+            await waitForAnimationFrames(2);
+            hideLoadingOverlay();
         } catch (err) {
             console.error('Direct MHSA startup failed:', err);
             hideLoadingOverlay();
@@ -520,12 +552,16 @@ Promise.resolve().then(async () => {
     if (initialTransformerView2dRoute) {
         try {
             passIntroOverlay?.dispose?.();
-            hideLoadingOverlay();
-            pipeline?.engine?.resume?.('initial-pass-intro');
-            await waitForAnimationFrames(1);
+            showLoadingOverlay({
+                label: 'Loading 2D GPT-2 view',
+                status: 'Preparing the 2D matrix canvas.'
+            });
             await selectionPanel.openTransformerView2d({
                 semanticTarget: initialTransformerView2dRoute.semanticTarget
             });
+            pipeline?.engine?.resume?.('initial-pass-intro');
+            await waitForAnimationFrames(2);
+            hideLoadingOverlay();
         } catch (err) {
             console.error('Direct 2D startup failed:', err);
             setProjectInfoActiveVisualizationMode(PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.SCENE_3D);
@@ -539,6 +575,7 @@ Promise.resolve().then(async () => {
             hideLoadingOverlay();
             pipeline?.engine?.resume?.('initial-pass-intro');
             await waitForAnimationFrames(1);
+            await revealFirstVisitSceneHint();
         } catch (err) {
             console.error('Skip-pass-intro startup failed:', err);
             hideLoadingOverlay();
@@ -577,6 +614,7 @@ Promise.resolve().then(async () => {
             resolve();
         });
         pipeline?.engine?.resume?.('initial-pass-intro');
+        await revealFirstVisitSceneHint();
     } catch (err) {
         console.error('Initial prompt intro failed:', err);
         passIntroOverlay?.dispose?.();

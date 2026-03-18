@@ -42,10 +42,10 @@ button { touch-action: manipulation; }
 #loadingOverlay {
     position: fixed;
     inset: 0;
-    z-index: 4;
+    z-index: 12;
     display: grid;
     place-items: center;
-    pointer-events: none;
+    pointer-events: auto;
     opacity: 1;
     visibility: visible;
     transition: opacity 0.35s ease, visibility 0s linear 0.35s;
@@ -55,6 +55,12 @@ button { touch-action: manipulation; }
 #loadingOverlay.is-hidden {
     opacity: 0;
     visibility: hidden;
+}
+
+.loader-stack {
+    display: grid;
+    gap: 12px;
+    justify-items: center;
 }
 
 .loader-text {
@@ -99,6 +105,17 @@ button { touch-action: manipulation; }
 @keyframes loaderDots {
     from { width: 0; }
     to { width: 3ch; }
+}
+
+.loader-status {
+    max-width: min(72vw, 420px);
+    color: rgba(232, 238, 247, 0.82);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: clamp(11px, 1.15vw, 13px);
+    line-height: 1.45;
+    letter-spacing: 0.04em;
+    text-align: center;
+    text-transform: uppercase;
 }
 
 @media (hover: none) and (pointer: coarse) {
@@ -470,7 +487,7 @@ body.touch-ui * {
     -webkit-appearance: none;
     width: 100%;
     text-align: left;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(108, 182, 255, 0.72);
     border-radius: 11px;
     background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
     color: #f1f1f1;
@@ -1155,6 +1172,43 @@ body.touch-ui * {
     pointer-events: none;
     z-index: -1;
 }
+
+#firstVisitSceneHint {
+    position: fixed;
+    left: 50%;
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + var(--prompt-token-strip-height, 0px) + 14px);
+    z-index: 5;
+    max-width: min(320px, calc(100vw - 24px));
+    padding: 10px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(12, 12, 12, 0.72);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: rgba(247, 250, 253, 0.94);
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(-50%, 10px);
+    transition:
+        opacity 220ms ease,
+        transform 220ms ease,
+        visibility 0s linear 220ms;
+}
+
+#firstVisitSceneHint[data-visible="true"] {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+    transition-delay: 0s;
+}
+
 @media (max-aspect-ratio: 1/1), (max-width: 880px) {
     #promptTokenStrip[data-mobile-full-width-wrap="true"] {
         border-radius: 0;
@@ -1163,6 +1217,13 @@ body.touch-ui * {
         border-radius: 0;
         border-right: none;
         box-shadow: 0 -10px 24px rgba(0,0,0,0.24);
+    }
+
+    #firstVisitSceneHint {
+        bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + var(--prompt-token-strip-height, 0px) + 10px);
+        max-width: min(280px, calc(100vw - 20px));
+        padding: 9px 12px;
+        font-size: 12px;
     }
 }
 @media (any-pointer: coarse) {
@@ -2027,6 +2088,29 @@ body.detail-panel-resizing * {
     color: #ffffff;
 }
 
+.project-info-modal-content kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.8em;
+    margin: 0 0.12em;
+    padding: 0.12em 0.48em 0.08em;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom-width: 2px;
+    border-radius: 0.5rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 6px 18px rgba(0, 0, 0, 0.18);
+    color: #f8fbff;
+    font-family: "Space Grotesk", "Rajdhani", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 0.92em;
+    font-weight: 600;
+    line-height: 1.15;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
 .project-info-modal-content a {
     color: var(--project-info-link);
     text-decoration-thickness: 1.5px;
@@ -2054,6 +2138,11 @@ body.detail-panel-resizing * {
 .project-info-modal-content blockquote p {
     color: #dce9ff;
     line-height: 1.65;
+}
+
+.project-info-modal-content .project-info-scroll-target {
+    scroll-margin-top: 14px;
+    outline: none;
 }
 
 /* Modal panel */

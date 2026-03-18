@@ -2,7 +2,7 @@
 
 This site is an interactive 3D and 2D visualization of GPT-2 (124M) performing forward passes.
 
-GPT-2 (124M) is a 12-layer decoder-only Transformer trained to predict the next token on a corpus of internet text.
+[GPT-2](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (124M) is a 12-layer decoder-only [Transformer](https://arxiv.org/abs/1706.03762) trained to predict the next token on a corpus of internet text.
 
 When most people refer to GPT-2, they are usually referring to the 1.5B parameter version rather than the smaller 124M version depicted on this site.
 
@@ -18,18 +18,16 @@ The site was built with Three.js and is currently deployed on Vercel.
 
 ### Global and 3D scene
 
-- **Space** pauses or resumes the animation.
-- **Arrow keys** orbit the 3D camera.
-- **W / A / S / D** pan the 3D camera.
-- **+ / -** zoom the 3D camera.
-- **Page Up / Page Down** also zoom the 3D camera.
-- **Escape** closes the current detail panel or exits focused panel states.
+- Pause or resume: `Space`
+- Orbit camera: `↑` `↓` `←` `→`
+- Pan camera: `W` `A` `S` `D`
+- Zoom camera: `+` `-`
+- Close the active panel or exit a focused state: `Esc`
 
 ### 2D view and MHSA matrix view
 
-- **Arrow keys** or **W / A / S / D** pan the active 2D viewport after you interact with it.
-- **+ / -** zoom the active 2D viewport.
-- The same movement keys are context-sensitive: when a 2D panel owns keyboard focus, they move that panel instead of the main 3D camera.
+- After clicking the viewport, pan with `↑` `↓` `←` `→` or `W` `A` `S` `D`
+- Zoom the active viewport with `+` `-`
 
 ## Some Sources of Inspiration
 
@@ -38,7 +36,7 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - [Andrej Karpathy's minGPT repo](https://github.com/karpathy/minGPT) and the [Zero to Hero series](https://www.youtube.com/playlist?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ)
 - The diagrams in Anthropic's [A Mathematical Framework for Transformer Circuits](https://transformer-circuits.pub/2021/framework/index.html)
 - The diagrams in [Locating and Editing Factual Associations in GPT](https://arxiv.org/pdf/2202.05262)
-- [Distill](https://distill.pub/)
+- [distill.pub](https://distill.pub/)
 - Brendan Bycroft's [3D GPT Visualization](https://bbycroft.net/llm)
 - Polo Club's [Transformer Explainer](https://poloclub.github.io/transformer-explainer/)
 - AlphaXiv's [Illustrated Transformer in 3D](https://x.com/askalphaxiv/status/1983543092079640963?s=20)
@@ -63,7 +61,8 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - Attention is still organized in a somewhat weird way. The z-axis is used for context, the y-axis is used for layer depth, and the x-axis is used for attention heads. That works for now, but I still want to find a better way to use the 3D space to depict the Transformer.
 - I plan to add more prompts and generations once I get a better sense of steady-state traffic. I also plan to release my extraction script so people can visualize forward passes of their own prompts.
 - There are still a lot of small things that do not need to be so laggy, plus interaction bugs that need to be fixed. A lot of the current work is still bug hunting and cleanup.
-- If you run into any problems or have suggestions, please let me know through the form above!
+
+If you run into any problems or have suggestions, please let me know through the [form above](#project-info-feedback)!
 
 ## Acknowledgements
 
@@ -73,6 +72,6 @@ Thank you to the people on the internet who have already been generous with thei
 
 Thank you to my friends and family who gave me a lot of ideas throughout development. This project would not be the same without their feedback.
 
-And thank you for visiting the site! If you have any ideas or feedback to make it better, I'd love to hear from you!
+And thank you for visiting the site! If you have any ideas or feedback to make it better, [I'd love to hear from you](#project-info-feedback)!
 
 I hope you enjoy the site 😊🫡

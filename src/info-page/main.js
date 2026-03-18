@@ -3,6 +3,7 @@ import {
     bindProjectInfoBackLink,
     syncProjectInfoBackLink
 } from '../ui/projectInfoNavigation.js';
+import { enhanceProjectInfoContent } from '../ui/projectInfoContent.js';
 import { renderSimpleMarkdown } from '../ui/simpleMarkdown.js';
 import './page.css';
 
@@ -16,4 +17,5 @@ if (backLinkEl) {
 
 if (contentEl) {
     contentEl.innerHTML = renderSimpleMarkdown(infoMarkdown);
+    enhanceProjectInfoContent(contentEl);
 }

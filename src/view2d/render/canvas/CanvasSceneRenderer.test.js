@@ -45,6 +45,8 @@ function createMockContext() {
         textBaseline: 'alphabetic',
         currentScaleX: 1,
         currentScaleY: 1,
+        currentTranslateX: 0,
+        currentTranslateY: 0,
         save() {
             stateStack.push({
                 globalAlpha: this.globalAlpha,
@@ -59,7 +61,9 @@ function createMockContext() {
                 textBaseline: this.textBaseline,
                 font: this.font,
                 currentScaleX: this.currentScaleX,
-                currentScaleY: this.currentScaleY
+                currentScaleY: this.currentScaleY,
+                currentTranslateX: this.currentTranslateX,
+                currentTranslateY: this.currentTranslateY
             });
         },
         restore() {
@@ -78,10 +82,14 @@ function createMockContext() {
             this.font = state.font;
             this.currentScaleX = state.currentScaleX;
             this.currentScaleY = state.currentScaleY;
+            this.currentTranslateX = state.currentTranslateX;
+            this.currentTranslateY = state.currentTranslateY;
         },
-        setTransform(a = 1, _b = 0, _c = 0, d = 1) {
+        setTransform(a = 1, _b = 0, _c = 0, d = 1, e = 0, f = 0) {
             this.currentScaleX = Number.isFinite(a) ? a : 1;
             this.currentScaleY = Number.isFinite(d) ? d : 1;
+            this.currentTranslateX = Number.isFinite(e) ? e : 0;
+            this.currentTranslateY = Number.isFinite(f) ? f : 0;
         },
         clearRect() {},
         fillRect(x, y, width, height) {
@@ -197,6 +205,18 @@ function createMockContext() {
                     this.stops.push({ offset, color });
                 }
             };
+        },
+        drawImage(source, x = 0, y = 0) {
+            this.operations.push({
+                type: 'drawImage',
+                source,
+                x,
+                y,
+                transformScaleX: this.currentScaleX,
+                transformScaleY: this.currentScaleY,
+                transformTranslateX: this.currentTranslateX,
+                transformTranslateY: this.currentTranslateY
+            });
         }
     };
 }
@@ -2937,5 +2957,95 @@ describe('CanvasSceneRenderer', () => {
                 + (renderer.layout?.registry?.getNodeEntry(headOutputNode?.id || '')?.contentBounds?.width || 0)
                 + 4)
         );
+    });
+
+    it('reuses the cached overview frame while the outer scene is being panned or zoomed', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createMatrixNode({
+                    role: 'overview-card',
+                    semantic: {
+                        componentKind: 'test',
+                        stage: 'overview',
+                        role: 'overview-card'
+                    },
+                    label: {
+                        tex: 'X',
+                        text: 'X'
+                    },
+                    dimensions: {
+                        rows: 4,
+                        cols: 4
+                    },
+                    presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+                    shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+                    visual: {
+                        styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                        disableCardSurfaceEffects: true
+                    },
+                    metadata: {
+                        card: {
+                            width: 180,
+                            height: 120
+                        }
+                    }
+                }),
+                createTextNode({
+                    text: 'Residual stream',
+                    metadata: {
+                        minScreenHeightPx: 0
+                    }
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+        renderer.overviewRenderCache = {
+            ...renderer.overviewRenderCache,
+            surface: renderer.overviewRenderCache.surface || { width: 480, height: 320 },
+            ctx: renderer.overviewRenderCache.ctx || {},
+            scene,
+            dpr: 1,
+            pixelWidth: 480,
+            pixelHeight: 320,
+            worldScale: 1,
+            offsetX: 0,
+            offsetY: 0
+        };
+
+        ctx.operations.length = 0;
+
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                scale: 1.25,
+                offsetX: 12,
+                offsetY: 8
+            }
+        })).toBe(true);
+
+        const drawImageOperation = ctx.operations.find((operation) => operation.type === 'drawImage') || null;
+        expect(drawImageOperation).toBeTruthy();
+        expect(drawImageOperation?.transformScaleX).toBeCloseTo(1.25, 6);
+        expect(drawImageOperation?.transformScaleY).toBeCloseTo(1.25, 6);
+        expect(drawImageOperation?.transformTranslateX).toBeCloseTo(12, 6);
+        expect(drawImageOperation?.transformTranslateY).toBeCloseTo(8, 6);
+        expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(false);
     });
 });

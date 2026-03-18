@@ -9,6 +9,7 @@ import {
     acquireModalUiLock,
     acquireSceneBackgroundInteractionLock
 } from './overlayLockManager.js';
+import { enhanceProjectInfoContent } from './projectInfoContent.js';
 import { renderSimpleMarkdown } from './simpleMarkdown.js';
 
 export const PROJECT_INFO_OVERLAY_PAUSE_REASON = 'project-info-overlay';
@@ -60,6 +61,7 @@ export function initProjectInfoOverlay({
     if (contentEl.childElementCount === 0) {
         contentEl.innerHTML = renderSimpleMarkdown(infoMarkdown);
     }
+    enhanceProjectInfoContent(contentEl);
 
     let isOverlayOpen = false;
     let restoreFocusEl = null;

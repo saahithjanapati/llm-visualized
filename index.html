@@ -26,21 +26,22 @@
 <body>
     <!-- Loading overlay -->
     <div id="loadingOverlay" role="status" aria-live="polite" aria-label="Loading GPT-2 visualization">
-        <div class="loader-text">
-            <span class="loader-word" aria-hidden="true">
-                <span class="loader-letter">L</span>
-                <span class="loader-letter">o</span>
-                <span class="loader-letter">a</span>
-                <span class="loader-letter">d</span>
-                <span class="loader-letter">i</span>
-                <span class="loader-letter">n</span>
-                <span class="loader-letter">g</span>
-            </span>
-            <span class="loader-dots" aria-hidden="true">...</span>
+        <div class="loader-stack">
+            <div class="loader-text">
+                <span class="loader-word" aria-hidden="true">
+                    <span class="loader-letter">L</span>
+                    <span class="loader-letter">o</span>
+                    <span class="loader-letter">a</span>
+                    <span class="loader-letter">d</span>
+                    <span class="loader-letter">i</span>
+                    <span class="loader-letter">n</span>
+                    <span class="loader-letter">g</span>
+                </span>
+                <span class="loader-dots" aria-hidden="true">...</span>
+            </div>
+            <div id="loadingOverlayStatus" class="loader-status" hidden></div>
         </div>
     </div>
-    <!-- Auto-camera debug overlay -->
-    <div id="cameraOffsetOverlay" style="position:fixed;bottom:20px;right:10px;padding:8px 12px;font-family:monospace;font-size:13px;color:#fff;background:rgba(12,12,12,0.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:8px;pointer-events:none;z-index:5;white-space:pre;display:none;">Offset vs Residual Lane 2\nΔx: —\nΔy: —\nΔz: —</div>
     <!-- Top-right controls -->
     <div id="topControls">
         <button id="pauseBtn" type="button" aria-pressed="false" aria-label="Pause animation" title="Pause animation">⏸︎</button>

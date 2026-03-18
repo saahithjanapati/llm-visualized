@@ -168,3 +168,47 @@ describe('AutoCameraController vector center sampling', () => {
         expect(pulsedCenter.z).toBeCloseTo(baseCenter.z, 6)
     })
 })
+
+describe('AutoCameraController lane reference anchoring', () => {
+    it('anchors even lane counts to the midpoint between the two center residual lanes', () => {
+        const controller = Object.create(AutoCameraController.prototype);
+        const lanes = [-30, -10, 10, 30].map((zPos) => {
+            const group = new THREE.Group();
+            group.position.set(0, 100, zPos);
+            group.updateMatrixWorld(true);
+            return {
+                originalVec: { group }
+            };
+        });
+
+        controller._pipeline = {
+            _layers: [{ lanes }],
+            _currentLayerIdx: 0,
+            _kvCacheDecodeActive: false
+        };
+
+        const target = new THREE.Vector3();
+        const info = controller._resolveActiveLanePosition(target);
+
+        expect(info.laneIndex).toBe(1);
+        expect(info.laneLabel).toBe(2.5);
+        expect(target.x).toBeCloseTo(0, 6);
+        expect(target.y).toBeCloseTo(100, 6);
+        expect(target.z).toBeCloseTo(0, 6);
+    });
+
+    it('returns the fractional lane label in the follow inspector reference', () => {
+        const controller = Object.create(AutoCameraController.prototype);
+        controller._autoCameraInspectorRef = new THREE.Vector3();
+        controller._resolveActiveLanePosition = vi.fn((ref) => {
+            ref.set(1, 2, 3);
+            return { laneIndex: 1, laneLabel: 2.5, laneCount: 4 };
+        });
+
+        expect(controller.getReference()).toEqual({
+            laneIndex: 1,
+            laneLabel: 2.5,
+            position: { x: 1, y: 2, z: 3 }
+        });
+    });
+});

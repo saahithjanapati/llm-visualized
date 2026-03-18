@@ -3,19 +3,15 @@ import {
     MHA_FINAL_K_COLOR,
     MHA_FINAL_Q_COLOR,
     MHA_FINAL_V_COLOR,
-    MHA_VALUE_SPECTRUM_COLOR,
-    MHA_VALUE_HUE_SPREAD,
     MHA_VALUE_LIGHTNESS_MIN,
     MHA_VALUE_LIGHTNESS_MAX,
-    MHA_VALUE_RANGE_MIN,
-    MHA_VALUE_RANGE_MAX,
     MHA_VALUE_CLAMP_MAX
 } from '../animations/LayerAnimationConstants.js';
 import {
-    buildHueRangeOptions,
+    buildMonochromeOptions,
     mapAttentionPostScoreToColor,
     mapValueToColor,
-    mapValueToHueRange
+    mapValueToMonochrome
 } from '../utils/colors.js';
 import {
     ATTENTION_PRE_COLOR_CLAMP,
@@ -36,30 +32,24 @@ const DEFAULT_LAYER_INDEX = 5;
 const DEFAULT_HEAD_INDEX = 5;
 const DEFAULT_PROMPT_ROW_COUNT = 5;
 const PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR = 0.98;
-const QUERY_VECTOR_GRADIENT_OPTIONS = buildHueRangeOptions(MHA_FINAL_Q_COLOR, {
-    hueSpread: MHA_VALUE_HUE_SPREAD,
-    minLightness: MHA_VALUE_LIGHTNESS_MIN,
-    maxLightness: MHA_VALUE_LIGHTNESS_MAX,
-    valueMin: MHA_VALUE_RANGE_MIN,
-    valueMax: MHA_VALUE_RANGE_MAX,
-    valueClampMax: MHA_VALUE_CLAMP_MAX
-});
-const KEY_VECTOR_GRADIENT_OPTIONS = buildHueRangeOptions(MHA_FINAL_K_COLOR, {
-    hueSpread: MHA_VALUE_HUE_SPREAD,
-    minLightness: MHA_VALUE_LIGHTNESS_MIN,
-    maxLightness: MHA_VALUE_LIGHTNESS_MAX,
-    valueMin: MHA_VALUE_RANGE_MIN,
-    valueMax: MHA_VALUE_RANGE_MAX,
-    valueClampMax: MHA_VALUE_CLAMP_MAX
-});
-const VALUE_VECTOR_GRADIENT_OPTIONS = buildHueRangeOptions(MHA_VALUE_SPECTRUM_COLOR, {
-    hueSpread: MHA_VALUE_HUE_SPREAD,
-    minLightness: MHA_VALUE_LIGHTNESS_MIN,
-    maxLightness: MHA_VALUE_LIGHTNESS_MAX,
-    valueMin: MHA_VALUE_RANGE_MIN,
-    valueMax: MHA_VALUE_RANGE_MAX,
-    valueClampMax: MHA_VALUE_CLAMP_MAX
-});
+const PREVIEW_VECTOR_CLAMP_RANGE = Number.isFinite(MHA_VALUE_CLAMP_MAX) && MHA_VALUE_CLAMP_MAX > 0
+    ? MHA_VALUE_CLAMP_MAX
+    : 0.5;
+
+function buildFamilyClampedGradientOptions(colorHex) {
+    return Object.freeze({
+        ...buildMonochromeOptions(colorHex, {
+            valueMin: -PREVIEW_VECTOR_CLAMP_RANGE,
+            valueMax: PREVIEW_VECTOR_CLAMP_RANGE
+        }),
+        minLightness: MHA_VALUE_LIGHTNESS_MIN,
+        maxLightness: MHA_VALUE_LIGHTNESS_MAX
+    });
+}
+
+const QUERY_VECTOR_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_Q_COLOR);
+const KEY_VECTOR_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_K_COLOR);
+const VALUE_VECTOR_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_V_COLOR);
 const PROJECTION_CONFIGS = [
     {
         kind: 'q',
@@ -158,12 +148,12 @@ function buildHueGradientCssFromSamples(values, rangeOptions, direction = '90deg
     const safeValues = cleanNumberArray(values);
     if (!safeValues.length) return 'none';
     if (safeValues.length === 1) {
-        return colorToCss(darkenColor(mapValueToHueRange(safeValues[0], rangeOptions), darkenFactor));
+        return colorToCss(darkenColor(mapValueToMonochrome(safeValues[0], rangeOptions), darkenFactor));
     }
     const lastIndex = Math.max(1, safeValues.length - 1);
     const stops = safeValues.map((value, index) => {
         const percent = (index / lastIndex) * 100;
-        return `${colorToCss(darkenColor(mapValueToHueRange(value, rangeOptions), darkenFactor))} ${percent.toFixed(4)}%`;
+        return `${colorToCss(darkenColor(mapValueToMonochrome(value, rangeOptions), darkenFactor))} ${percent.toFixed(4)}%`;
     });
     return `linear-gradient(${direction}, ${stops.join(', ')})`;
 }
@@ -178,7 +168,7 @@ function buildProjectionVectorGradientCss(values, scalarValue, rangeOptions, dir
     }
     return colorToCss(
         darkenColor(
-            mapValueToHueRange(Number.isFinite(scalarValue) ? scalarValue : 0, rangeOptions),
+            mapValueToMonochrome(Number.isFinite(scalarValue) ? scalarValue : 0, rangeOptions),
             darkenFactor
         )
     );
@@ -196,13 +186,12 @@ function buildAccentCss(rgb, value = 0) {
     return `linear-gradient(92deg, ${rgbToCss(highlight, alphaStart)} 0%, ${rgbToCss(core, alphaMid)} 52%, ${rgbToCss(depth, alphaEnd)} 100%)`;
 }
 
-function buildWeightCardCss(rgb) {
-    const base = Array.isArray(rgb) ? rgb : [255, 255, 255];
-    const top = mixRgb(base, [255, 255, 255], 0.28);
-    const upperMid = mixRgb(base, [255, 255, 255], 0.14);
-    const lowerMid = mixRgb(base, [255, 255, 255], 0.04);
-    const bottom = mixRgb(base, [8, 12, 18], 0.18);
-    return `linear-gradient(162deg, ${rgbToCss(top, 0.88)} 0%, ${rgbToCss(upperMid, 0.96)} 34%, ${rgbToCss(lowerMid, 0.98)} 64%, ${rgbToCss(bottom, 0.92)} 100%)`;
+function buildWeightCardCss(rangeOptions) {
+    const stops = [0.32, 0.12, -0.06, -0.22].map((value, index, values) => {
+        const percent = (index / Math.max(1, values.length - 1)) * 100;
+        return `${colorToCss(mapValueToMonochrome(value, rangeOptions))} ${percent.toFixed(4)}%`;
+    });
+    return `linear-gradient(162deg, ${stops.join(', ')})`;
 }
 
 function buildAttentionScoreCellCss(value) {
@@ -593,7 +582,7 @@ export function buildMhsaTokenMatrixPreviewData({
             colorRgb: rgb,
             weightRowCount: D_MODEL,
             weightColumnCount: D_HEAD,
-            weightGradientCss: buildWeightCardCss(rgb),
+            weightGradientCss: buildWeightCardCss(config.gradientOptions),
             biasValue: safeBiasSample,
             biasGradientCss: buildAccentCss(rgb, safeBiasSample),
             biasVectorGradientCss: buildProjectionVectorGradientCss(

@@ -192,7 +192,9 @@ export function initSettingsModal(pipeline, {
         const target = pipeline?.engine?.controls?.target || null;
         const refInfo = pipeline?.getAutoCameraReference?.();
         const ref = refInfo?.position || null;
-        const laneLabel = Number.isFinite(refInfo?.laneIndex) ? refInfo.laneIndex + 1 : '—';
+        const laneLabel = Number.isFinite(refInfo?.laneLabel)
+            ? refInfo.laneLabel
+            : (Number.isFinite(refInfo?.laneIndex) ? refInfo.laneIndex + 1 : '—');
 
         let camOffset = null;
         let targetOffset = null;

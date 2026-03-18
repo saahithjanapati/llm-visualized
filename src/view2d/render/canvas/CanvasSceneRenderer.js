@@ -3036,6 +3036,7 @@ export class CanvasSceneRenderer {
             surface: null,
             ctx: null,
             scene: null,
+            dpr: null,
             pixelWidth: 0,
             pixelHeight: 0,
             worldScale: null,
@@ -3148,10 +3149,25 @@ export class CanvasSceneRenderer {
         cache.ctx.clearRect(0, 0, cache.pixelWidth, cache.pixelHeight);
         cache.ctx.drawImage(this.canvas, 0, 0);
         cache.scene = this.scene;
+        cache.dpr = Number.isFinite(resolution?.dpr) ? Number(Number(resolution.dpr).toFixed(4)) : null;
         cache.worldScale = Number.isFinite(worldScale) ? Number(worldScale.toFixed(6)) : null;
         cache.offsetX = Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null;
         cache.offsetY = Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null;
         return true;
+    }
+
+    hasReusableOverviewRenderCache({
+        resolution = null
+    } = {}) {
+        const cache = this.overviewRenderCache;
+        return !!(
+            cache?.surface
+            && cache?.ctx
+            && cache.scene === this.scene
+            && cache.dpr === (Number.isFinite(resolution?.dpr) ? Number(Number(resolution.dpr).toFixed(4)) : null)
+            && cache.pixelWidth === Math.max(1, Math.floor(Number(resolution?.pixelWidth) || 0))
+            && cache.pixelHeight === Math.max(1, Math.floor(Number(resolution?.pixelHeight) || 0))
+        );
     }
 
     matchesOverviewRenderCache({
@@ -3162,15 +3178,59 @@ export class CanvasSceneRenderer {
     } = {}) {
         const cache = this.overviewRenderCache;
         return !!(
-            cache?.surface
-            && cache?.ctx
-            && cache.scene === this.scene
-            && cache.pixelWidth === Math.max(1, Math.floor(Number(resolution?.pixelWidth) || 0))
-            && cache.pixelHeight === Math.max(1, Math.floor(Number(resolution?.pixelHeight) || 0))
+            this.hasReusableOverviewRenderCache({
+                resolution
+            })
             && cache.worldScale === (Number.isFinite(worldScale) ? Number(worldScale.toFixed(6)) : null)
             && cache.offsetX === (Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null)
             && cache.offsetY === (Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null)
         );
+    }
+
+    drawTransformedOverviewRenderCache({
+        resolution = null,
+        worldScale = 1,
+        offsetX = 0,
+        offsetY = 0,
+        background = null
+    } = {}) {
+        if (
+            !this.hasReusableOverviewRenderCache({
+                resolution
+            })
+            || !this.ctx
+            || typeof this.ctx.drawImage !== 'function'
+        ) {
+            return false;
+        }
+        const cache = this.overviewRenderCache;
+        const cachedWorldScale = Number(cache?.worldScale);
+        const safeWorldScale = Number(worldScale);
+        if (!(cachedWorldScale > 0) || !(safeWorldScale > 0)) {
+            return false;
+        }
+
+        const scaleRatio = safeWorldScale / cachedWorldScale;
+        const safeDpr = Number.isFinite(resolution?.dpr) ? Number(resolution.dpr) : 1;
+        const translateX = (
+            (Number.isFinite(offsetX) ? Number(offsetX) : 0)
+            - ((Number(cache?.offsetX) || 0) * scaleRatio)
+        ) * safeDpr;
+        const translateY = (
+            (Number.isFinite(offsetY) ? Number(offsetY) : 0)
+            - ((Number(cache?.offsetY) || 0) * scaleRatio)
+        ) * safeDpr;
+
+        this.ctx.save();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (typeof background === 'string' && background.length) {
+            this.ctx.fillStyle = background;
+            this.ctx.fillRect(0, 0, cache.pixelWidth, cache.pixelHeight);
+        }
+        this.ctx.setTransform(scaleRatio, 0, 0, scaleRatio, translateX, translateY);
+        this.ctx.drawImage(cache.surface, 0, 0);
+        this.ctx.restore();
+        return true;
     }
 
     resize(options = {}) {
@@ -3619,6 +3679,35 @@ export class CanvasSceneRenderer {
                 })
                 && typeof ctx.drawImage === 'function'
             );
+            const canUseOverviewInteractionCache = !!(
+                interactionFastPath
+                && !headDetailDepthActive
+                && !interactionState?.hoveredRow
+                && !interactionState?.previousHoveredRow
+                && !(Number(interactionState?.hoverDimStrength) > 0.001)
+                && !overviewCurrentFocusState
+                && !overviewPreviousFocusState
+                && !sceneFocusState
+                && this.hasReusableOverviewRenderCache({
+                    resolution
+                })
+                && typeof ctx.drawImage === 'function'
+            );
+            if (canUseOverviewInteractionCache) {
+                const didDrawInteractionCache = this.drawTransformedOverviewRenderCache({
+                    resolution,
+                    worldScale,
+                    offsetX,
+                    offsetY,
+                    background: config.tokens.palette.sceneBackground || 'rgba(0, 0, 0, 0)'
+                });
+                if (didDrawInteractionCache) {
+                    if (debug) {
+                        drawDebugOverlay(ctx, resolution, renderState);
+                    }
+                    return true;
+                }
+            }
             if (canUseOverviewFocusCache) {
                 const baseInactiveOpacity = Number(config?.tokens?.dimming?.inactiveOpacity) || 0.18;
                 const dimStrength = Math.max(
@@ -3725,6 +3814,7 @@ export class CanvasSceneRenderer {
             ctx.restore();
             const shouldRefreshOverviewRenderCache = !!(
                 !headDetailDepthActive
+                && !interactionFastPath
                 && !interactionState?.hoveredRow
                 && !overviewCurrentFocusState
                 && !overviewPreviousFocusState

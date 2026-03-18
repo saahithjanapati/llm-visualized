@@ -12,7 +12,6 @@ import {
 import { resolveZoomOutSupersampleCeiling } from '../utils/renderPixelRatioUtils.js';
 import { perfStats } from '../utils/perfStats.js';
 import { consoleInfo } from '../utils/runtimeConsole.js';
-import { loadStatsConstructor } from '../utils/statsJsLoader.js';
 import { refreshTrailDisplayScales } from '../utils/trailUtils.js';
 import {
     TRAIL_LINE_WIDTH,
@@ -32,6 +31,7 @@ import {
     isSmallScreenViewport,
     resolveCameraMaxDistance
 } from './coreCameraZoomLimitUtils.js';
+import { resolveFrameRateIndependentDamping } from './coreControlsDampingUtils.js';
 import { resolveKeyboardZoomTargetDistance } from './coreKeyboardZoomUtils.js';
 import Gpt2Layer from './layers/Gpt2Layer.js';
 import { resolveRaycastLabel as resolveRaycastLabelFromIntersections } from './coreRaycastResolver.js';
@@ -442,12 +442,14 @@ export class CoreEngine {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
+        this._controlsBaseDampingFactor = this.controls.dampingFactor;
         this.controls.minPolarAngle = 0.2;
         this.controls.maxPolarAngle = Math.PI - 0.2;
         this.camera.up.set(0, 1, 0);
         this._keyState = new Set();
         this._keyboardPanSpeed = 420;
         this._keyboardRotateSpeed = 1.1;
+        this._keyboardVerticalRotateSpeed = 0.82;
         this._keyboardZoomSpeed = KEYBOARD_ZOOM_SPEED;
         this._keyboardZoomMinUnitsPerSecond = (typeof opts.keyboardZoomMinUnitsPerSecond === 'number'
             && Number.isFinite(opts.keyboardZoomMinUnitsPerSecond)
@@ -560,12 +562,6 @@ export class CoreEngine {
             };
         }
 
-        this._stats = null;
-        this._statsLoadPromise = null;
-        if (this._devMode) {
-            void this._ensureStatsOverlay();
-        }
-
         // Kick off RAF loop
         requestAnimationFrame(this._animate);
     }
@@ -609,44 +605,6 @@ export class CoreEngine {
 
     setDevMode(enabled) {
         this._devMode = !!enabled;
-        if (this._devMode) {
-            void this._ensureStatsOverlay();
-        }
-        if (this._stats && this._stats.dom) {
-            this._stats.dom.style.display = this._devMode ? 'block' : 'none';
-        }
-    }
-
-    async _ensureStatsOverlay() {
-        if (this._stats) return this._stats;
-        if (this._statsLoadPromise) return this._statsLoadPromise;
-
-        this._statsLoadPromise = loadStatsConstructor()
-            .then((StatsConstructor) => {
-                if (!this._devMode || this._stats || typeof StatsConstructor !== 'function') {
-                    return this._stats;
-                }
-                const stats = new StatsConstructor();
-                stats.showPanel(0); // 0 = FPS, 1 = ms/frame, 2 = MB
-                stats.dom.style.position = 'fixed';
-                stats.dom.style.left = '0px';
-                stats.dom.style.top = 'auto';
-                stats.dom.style.bottom = '0px';
-                stats.dom.style.pointerEvents = 'none';
-                stats.dom.style.display = this._devMode ? 'block' : 'none';
-                document.body.appendChild(stats.dom);
-                this._stats = stats;
-                return stats;
-            })
-            .catch((error) => {
-                console.warn('Failed to load Stats.js overlay:', error);
-                return null;
-            })
-            .finally(() => {
-                this._statsLoadPromise = null;
-            });
-
-        return this._statsLoadPromise;
     }
 
     setCameraDebugEnabled(enabled) {
@@ -1393,6 +1351,7 @@ export class CoreEngine {
 
         let didMove = false;
         const rotateSpeed = this._keyboardRotateSpeed * deltaSeconds;
+        const verticalRotateSpeed = this._keyboardVerticalRotateSpeed * deltaSeconds;
         const panSpeed = this._keyboardPanSpeed * deltaSeconds;
 
         if (controls.enableRotate) {
@@ -1405,11 +1364,11 @@ export class CoreEngine {
                 didMove = true;
             }
             if (this._keyState.has('ArrowUp')) {
-                controls._rotateUp(rotateSpeed);
+                controls._rotateUp(verticalRotateSpeed);
                 didMove = true;
             }
             if (this._keyState.has('ArrowDown')) {
-                controls._rotateUp(-rotateSpeed);
+                controls._rotateUp(-verticalRotateSpeed);
                 didMove = true;
             }
         }
@@ -2339,7 +2298,6 @@ export class CoreEngine {
             perfStats.beginFrame(now);
         }
 
-        if (this._devMode && this._stats) this._stats.begin();
         const layerErrorLogThrottleMs = 1000;
 
         if (!this._paused) {
@@ -2423,7 +2381,13 @@ export class CoreEngine {
         }
 
         this._applyKeyboardNavigation(frameDelta);
-        this.controls.update();
+        if (this.controls.enableDamping) {
+            this.controls.dampingFactor = resolveFrameRateIndependentDamping(
+                this._controlsBaseDampingFactor,
+                frameDelta
+            );
+        }
+        this.controls.update(frameDelta);
         this._updateCameraDebug();
         const renderStart = perfEnabled ? this._now() : 0;
         if (this._needsFreshFrameAfterResume) {
@@ -2442,7 +2406,6 @@ export class CoreEngine {
             this._noteAdaptiveRenderDprFrame(now, frameIntervalMs);
         }
 
-        if (this._devMode && this._stats) this._stats.end();
         if (perfEnabled) {
             perfStats.endFrame(this._now());
         }

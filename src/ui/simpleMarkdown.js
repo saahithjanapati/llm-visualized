@@ -14,6 +14,11 @@ function renderInlineMarkdown(text = '') {
         /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
         '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
     );
+    html = html.replace(
+        /\[([^\]]+)\]\((#[A-Za-z][A-Za-z0-9_-]*)\)/g,
+        '<a href="$2">$1</a>'
+    );
+    html = html.replace(/`([^`]+)`/g, '<kbd>$1</kbd>');
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 

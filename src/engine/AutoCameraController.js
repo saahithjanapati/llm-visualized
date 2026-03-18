@@ -8,6 +8,8 @@ import {
 
 const TMP_CENTER_A = new THREE.Vector3();
 const TMP_CENTER_B = new THREE.Vector3();
+const TMP_LANE_REF_A = new THREE.Vector3();
+const TMP_LANE_REF_B = new THREE.Vector3();
 const TMP_CENTER_MAT_A = new THREE.Matrix4();
 const TMP_CENTER_MAT_B = new THREE.Matrix4();
 const TMP_GROUP_WORLD_POS = new THREE.Vector3();
@@ -419,6 +421,7 @@ export class AutoCameraController {
         if (!info || info.laneIndex < 0) return null;
         return {
             laneIndex: info.laneIndex,
+            laneLabel: info.laneLabel,
             position: { x: ref.x, y: ref.y, z: ref.z }
         };
     }
@@ -997,32 +1000,74 @@ export class AutoCameraController {
             return { laneIndex: -1, laneCount };
         }
 
-        const laneIndex = Math.min(laneCount - 1, Math.floor(laneCount / 2));
+        const rightLaneIndex = Math.min(laneCount - 1, Math.floor(laneCount / 2));
+        const hasEvenLaneCount = laneCount % 2 === 0;
+        const laneIndex = hasEvenLaneCount
+            ? Math.max(0, rightLaneIndex - 1)
+            : rightLaneIndex;
         const lane = lanes[laneIndex];
-        const vec = lane?.originalVec;
-        const vecGroup = vec?.group;
-        if (!vecGroup || typeof vecGroup.getWorldPosition !== 'function') {
-            return { laneIndex: -1, laneCount };
+        const laneLabel = hasEvenLaneCount
+            ? (((laneIndex + 1) + (rightLaneIndex + 1)) / 2)
+            : (laneIndex + 1);
+        const hasPrimaryLane = !!(lane?.originalVec?.group
+            && typeof lane.originalVec.group.getWorldPosition === 'function');
+        const hasSecondaryLane = hasEvenLaneCount && rightLaneIndex !== laneIndex
+            ? !!(lanes[rightLaneIndex]?.originalVec?.group
+                && typeof lanes[rightLaneIndex].originalVec.group.getWorldPosition === 'function')
+            : false;
+        if (!hasPrimaryLane && !hasSecondaryLane) {
+            return { laneIndex: -1, laneCount, laneLabel: null };
         }
 
         if (targetVec) {
-            if (lane?.stopRise && lane?.stopRiseTarget) {
-                if (!this._resolveStopRiseFollowReference(lane, vec, targetVec)) {
-                    vecGroup.getWorldPosition(targetVec);
+            let resolved = false;
+            if (hasEvenLaneCount && rightLaneIndex !== laneIndex) {
+                const leftResolved = this._resolveLaneReferencePosition(lanes[laneIndex], TMP_LANE_REF_A);
+                const rightResolved = this._resolveLaneReferencePosition(lanes[rightLaneIndex], TMP_LANE_REF_B);
+                if (leftResolved && rightResolved) {
+                    targetVec.copy(TMP_LANE_REF_A).add(TMP_LANE_REF_B).multiplyScalar(0.5);
+                    resolved = true;
+                } else if (leftResolved) {
+                    targetVec.copy(TMP_LANE_REF_A);
+                    resolved = true;
+                } else if (rightResolved) {
+                    targetVec.copy(TMP_LANE_REF_B);
+                    resolved = true;
                 }
-            } else if (this._resolveStopRiseReleaseReference(lane, vec, targetVec)) {
-                // Keep blending to the settled residual vector for a short
-                // release window after stopRise clears to avoid a final jerk.
-            } else if (!this._getVectorWorldCenter(vec, targetVec)) {
-                this._clearStopRiseFollowState(lane);
-                vecGroup.getWorldPosition(targetVec);
             } else {
-                this._clearStopRiseFollowState(lane);
+                resolved = this._resolveLaneReferencePosition(lane, targetVec);
+            }
+            if (!resolved) {
+                return { laneIndex: -1, laneCount, laneLabel: null };
             }
             this._applyKvDecodeVirtualCenterZ(targetVec, lane, layerIndex, laneCount);
         }
 
-        return { laneIndex, laneCount };
+        return { laneIndex, laneCount, laneLabel };
+    }
+
+    _resolveLaneReferencePosition(lane, out) {
+        const vec = lane?.originalVec;
+        const vecGroup = vec?.group;
+        if (!lane || !out || !vecGroup || typeof vecGroup.getWorldPosition !== 'function') {
+            return false;
+        }
+
+        if (lane.stopRise && lane.stopRiseTarget) {
+            if (!this._resolveStopRiseFollowReference(lane, vec, out)) {
+                vecGroup.getWorldPosition(out);
+            }
+        } else if (this._resolveStopRiseReleaseReference(lane, vec, out)) {
+            // Keep blending to the settled residual vector for a short
+            // release window after stopRise clears to avoid a final jerk.
+        } else if (!this._getVectorWorldCenter(vec, out)) {
+            this._clearStopRiseFollowState(lane);
+            vecGroup.getWorldPosition(out);
+        } else {
+            this._clearStopRiseFollowState(lane);
+        }
+
+        return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
     }
 
     _shouldUseKvDecodeVirtualCenter(layerIndex, laneCount) {
@@ -1399,7 +1444,7 @@ export class AutoCameraController {
         }
 
         const reference = this._autoCameraCenter;
-        const { laneIndex } = this._resolveActiveLanePosition(reference);
+        const { laneIndex, laneLabel } = this._resolveActiveLanePosition(reference);
         if (laneIndex < 0 || !Number.isFinite(reference.x) || !Number.isFinite(reference.y) || !Number.isFinite(reference.z)) {
             overlay.style.display = 'block';
             overlay.textContent = 'Offset vs Residual Lane —\nΔx: —\nΔy: —\nΔz: —';
@@ -1410,10 +1455,12 @@ export class AutoCameraController {
         const offset = this._autoCameraOffsetScratch;
         offset.copy(camera.position).sub(reference);
         const format = (value) => (Number.isFinite(value) ? value.toFixed(2) : '—');
-        const laneLabel = Number.isInteger(laneIndex) && laneIndex >= 0 ? (laneIndex + 1) : '—';
+        const laneLabelText = Number.isFinite(laneLabel)
+            ? laneLabel
+            : (Number.isInteger(laneIndex) && laneIndex >= 0 ? (laneIndex + 1) : '—');
 
         overlay.style.display = 'block';
-        overlay.textContent = `Offset vs Residual Lane ${laneLabel}\nΔx: ${format(offset.x)}\nΔy: ${format(offset.y)}\nΔz: ${format(offset.z)}`;
+        overlay.textContent = `Offset vs Residual Lane ${laneLabelText}\nΔx: ${format(offset.x)}\nΔy: ${format(offset.y)}\nΔz: ${format(offset.z)}`;
     }
 
     _isTopLayerNormCameraPhase(layer, lanes) {

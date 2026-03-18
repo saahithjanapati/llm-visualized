@@ -80,6 +80,7 @@ import {
 } from './selectionPanelTransformerView2dViewportUtils.js';
 import {
     shouldKeepTransformerView2dHeadDetailFitView,
+    TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS,
     TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
 } from './selectionPanelTransformerView2dTransitionUtils.js';
 import { initTransformerView2dTouchActionFallback } from './selectionPanelTransformerView2dTouchFallback.js';
@@ -1533,6 +1534,64 @@ export function createTransformerView2dDetailView(panelEl, {
                     !latestTransition
                     || latestTransition.phase !== 'overview-to-head'
                     || !state.visible
+                ) {
+                    return;
+                }
+                state.stagedHeadDetailTransition = {
+                    ...latestTransition,
+                    phase: 'head-focus-hold',
+                    phaseStartTime: now
+                };
+                scheduleStagedHeadDetailPhase(TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS, () => {
+                    const latestFocusHold = state.stagedHeadDetailTransition;
+                    if (
+                        !latestFocusHold
+                        || latestFocusHold.phase !== 'head-focus-hold'
+                        || !state.visible
+                        || !state.headDetailTarget
+                    ) {
+                        return;
+                    }
+                    const didActivateDepth = activateStagedHeadDetailDepth();
+                    if (!didActivateDepth) {
+                        clearStagedHeadDetailTransition();
+                        return;
+                    }
+                    if (!shouldKeepHeadDetailSceneFitView()) {
+                        focusHeadDetailTarget({
+                            animate: true,
+                            durationMs: 420
+                        });
+                    }
+                    clearStagedHeadDetailTransition();
+                });
+            });
+        });
+    }
+
+    function scheduleHeadDetailDepthActivationAfterFocus(
+        focusDurationMs = VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
+    ) {
+        return scheduleStagedHeadDetailPhase(focusDurationMs, (now) => {
+            const latestTransition = state.stagedHeadDetailTransition;
+            if (
+                !latestTransition
+                || latestTransition.phase !== 'overview-to-head'
+                || !state.visible
+            ) {
+                return;
+            }
+            state.stagedHeadDetailTransition = {
+                ...latestTransition,
+                phase: 'head-focus-hold',
+                phaseStartTime: now
+            };
+            scheduleStagedHeadDetailPhase(TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS, () => {
+                const latestFocusHold = state.stagedHeadDetailTransition;
+                if (
+                    !latestFocusHold
+                    || latestFocusHold.phase !== 'head-focus-hold'
+                    || !state.visible
                     || !state.headDetailTarget
                 ) {
                     return;
@@ -1551,6 +1610,30 @@ export function createTransformerView2dDetailView(panelEl, {
                 clearStagedHeadDetailTransition();
             });
         });
+    }
+
+    function startImmediateStagedHeadDetailTransition(headDetailTarget = null) {
+        const resolvedTarget = resolveHeadDetailTarget(headDetailTarget);
+        if (!resolvedTarget) return false;
+        clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
+        state.stagedHeadDetailTransition = {
+            headDetailTarget: resolvedTarget,
+            phase: 'overview-to-head',
+            phaseStartTime: null
+        };
+        const didOpenHeadDetail = openHeadDetail(resolvedTarget, {
+            animate: true,
+            focusDurationMs: VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS,
+            nextDepthActive: false
+        });
+        if (!didOpenHeadDetail) {
+            clearStagedHeadDetailTransition();
+            return false;
+        }
+        return scheduleHeadDetailDepthActivationAfterFocus(
+            VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
+        );
     }
 
     function openStagedSceneDetailTarget(detailTargets = null) {
@@ -1611,19 +1694,81 @@ export function createTransformerView2dDetailView(panelEl, {
                 clearStagedDetailTransition();
                 return;
             }
-            scheduleStagedDetailPhase(VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS, () => {
-                const latestStage = state.stagedDetailTransition;
+            scheduleStagedSceneDetailOpenAfterFocus(
+                VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS
+            );
+        });
+    }
+
+    function scheduleStagedSceneDetailOpenAfterFocus(
+        focusDurationMs = VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS
+    ) {
+        return scheduleStagedDetailPhase(focusDurationMs, (now) => {
+            const latestStage = state.stagedDetailTransition;
+            if (
+                !latestStage
+                || latestStage.phase !== 'overview-to-focus'
+                || !state.visible
+            ) {
+                return;
+            }
+            state.stagedDetailTransition = {
+                ...latestStage,
+                phase: 'focus-hold',
+                phaseStartTime: now
+            };
+            scheduleStagedDetailPhase(TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS, () => {
+                const latestFocusHold = state.stagedDetailTransition;
                 if (
-                    !latestStage
-                    || latestStage.phase !== 'overview-to-focus'
+                    !latestFocusHold
+                    || latestFocusHold.phase !== 'focus-hold'
                     || !state.visible
                 ) {
                     return;
                 }
-                openStagedSceneDetailTarget(latestStage.detailTargets);
+                openStagedSceneDetailTarget(latestFocusHold.detailTargets);
                 clearStagedDetailTransition();
             });
         });
+    }
+
+    function startImmediateStagedSceneDetailTransition({
+        semanticTarget = null,
+        focusLabel = '',
+        detailTargets = null
+    } = {}) {
+        const resolvedSemanticTarget = buildSemanticTarget(semanticTarget);
+        if (!resolvedSemanticTarget || !detailTargets) return false;
+        clearStagedHeadDetailTransition();
+        clearStagedDetailTransition();
+        state.baseSemanticTarget = deriveBaseSemanticTarget(resolvedSemanticTarget);
+        state.baseFocusLabel = String(focusLabel || '').trim()
+            || describeTransformerView2dTarget(state.baseSemanticTarget);
+        setDetailTargets({});
+        resetHeadDetailState(false);
+        syncActiveSelectionState();
+        rebuildSceneState();
+        if (!state.visible) return true;
+        const { width, height } = measureCanvasSize();
+        updateReadouts();
+        render();
+        state.stagedDetailTransition = {
+            detailTargets,
+            phase: 'overview-to-focus',
+            phaseStartTime: null
+        };
+        const didFocus = focusSelection({
+            animate: true,
+            durationMs: VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS
+        });
+        if (!didFocus) {
+            clearStagedDetailTransition();
+            return false;
+        }
+        trackAutoFrameViewportSize(width, height);
+        return scheduleStagedSceneDetailOpenAfterFocus(
+            VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS
+        );
     }
 
     function hideDetailFrame() {
@@ -2279,8 +2424,7 @@ export function createTransformerView2dDetailView(panelEl, {
             return hit?.entry || null;
         }
 
-        const worldPoint = viewportController.screenToWorld(localX, localY);
-        const worldHit = renderer.resolveInteractiveHitAtPoint(worldPoint.x, worldPoint.y);
+        const worldHit = resolveOverviewCanvasHit(localX, localY);
         const residualHoverPayload = buildResidualRowHoverPayload(worldHit?.rowHit, state.activationSource);
         if (residualHoverPayload && worldHit?.node?.id && Number.isFinite(worldHit?.rowHit?.rowIndex)) {
             const residualHoverKey = buildCanvasHoverTargetKey(worldHit, 'overview-row');
@@ -2617,9 +2761,19 @@ export function createTransformerView2dDetailView(panelEl, {
             return false;
         }
 
+        const stagedDepthTransitionPhase = String(
+            state.stagedHeadDetailTransition?.phase
+            || state.stagedDetailTransition?.phase
+            || ''
+        ).trim();
         const suppressAutoDepthActivation = (
-            state.stagedHeadDetailTransition?.phase === 'overview-to-head'
-            && !state.headDetailDepthActive
+            !state.headDetailDepthActive
+            && (
+                stagedDepthTransitionPhase === 'overview-to-head'
+                || stagedDepthTransitionPhase === 'head-focus-hold'
+                || stagedDepthTransitionPhase === 'overview-to-focus'
+                || stagedDepthTransitionPhase === 'focus-hold'
+            )
         );
 
         if (hasSceneBackedDetailTarget()) {
@@ -2993,13 +3147,16 @@ export function createTransformerView2dDetailView(panelEl, {
         });
         const activeSceneFocusState = getActiveSceneFocusState();
         const captionSceneState = renderer.getActiveCaptionSceneState();
+        const keepCaptionOverlayDuringInteraction = state.headDetailDepthActive
+            && hasSceneBackedDetailTarget();
         residualCaptionOverlay.sync({
             scene: captionSceneState?.scene || null,
             layout: captionSceneState?.layout || null,
             canvas,
             projectBounds: (bounds) => renderer.resolveScreenBounds(bounds),
             visible: state.visible,
-            enabled: !viewportAnimationActive,
+            enabled: !viewportAnimationActive
+                && (!useFastRenderPath || keepCaptionOverlayDuringInteraction),
             focusState: activeSceneFocusState
         });
         syncDetailFrame();
@@ -3175,15 +3332,87 @@ export function createTransformerView2dDetailView(panelEl, {
         return true;
     }
 
+    function resolveCanvasHitNodeId(hit = null) {
+        if (typeof hit?.node?.id === 'string' && hit.node.id.length) {
+            return hit.node.id;
+        }
+        if (typeof hit?.entry?.nodeId === 'string' && hit.entry.nodeId.length) {
+            return hit.entry.nodeId;
+        }
+        return '';
+    }
+
+    function resolveCanvasHitSpecificity(hit = null) {
+        if (!hit) return -1;
+        const entry = hit?.entry || hit?.node || null;
+        const semanticHoverPayload = buildSemanticNodeHoverPayload(hit);
+        let score = entry ? 1 : 0;
+        if (Number.isFinite(hit?.columnHit?.colIndex)) {
+            score += 16;
+        }
+        if (Number.isFinite(hit?.rowHit?.rowIndex)) {
+            score += 20;
+        }
+        if (Number.isFinite(hit?.cellHit?.rowIndex) && Number.isFinite(hit?.cellHit?.colIndex)) {
+            score += 24;
+        }
+        if (shouldOpenCanvasSceneNode(entry)) {
+            score += 6;
+        }
+        if (semanticHoverPayload?.label) {
+            score += 4;
+        }
+        return score;
+    }
+
+    function mergeCanvasHits(primaryHit = null, fallbackHit = null) {
+        if (!primaryHit) return fallbackHit || null;
+        if (!fallbackHit) return primaryHit;
+
+        const primaryNodeId = resolveCanvasHitNodeId(primaryHit);
+        const fallbackNodeId = resolveCanvasHitNodeId(fallbackHit);
+        if (primaryNodeId && primaryNodeId === fallbackNodeId) {
+            return {
+                ...primaryHit,
+                entry: primaryHit.entry || fallbackHit.entry || null,
+                node: primaryHit.node || fallbackHit.node || null,
+                rowHit: primaryHit.rowHit || fallbackHit.rowHit || null,
+                cellHit: primaryHit.cellHit || fallbackHit.cellHit || null,
+                columnHit: primaryHit.columnHit || fallbackHit.columnHit || null
+            };
+        }
+
+        const primaryScore = resolveCanvasHitSpecificity(primaryHit);
+        const fallbackScore = resolveCanvasHitSpecificity(fallbackHit);
+        if (fallbackScore > primaryScore) {
+            return fallbackHit;
+        }
+        return primaryHit;
+    }
+
+    function resolveOverviewCanvasHit(localX = 0, localY = 0) {
+        if (!Number.isFinite(localX) || !Number.isFinite(localY)) return null;
+        const worldPoint = getActiveViewportController().screenToWorld(localX, localY);
+        const worldHit = renderer.resolveInteractiveHitAtPoint(worldPoint.x, worldPoint.y);
+        const screenHit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
+        return mergeCanvasHits(worldHit, screenHit);
+    }
+
     function resolveCanvasPointerHit(event = null) {
         if (!canvas || !Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) {
             return null;
         }
         const rect = canvas.getBoundingClientRect();
-        return renderer.resolveInteractiveHitAtScreenPoint(
-            event.clientX - rect.left,
-            event.clientY - rect.top
-        )?.entry || null;
+        const localX = event.clientX - rect.left;
+        const localY = event.clientY - rect.top;
+        if (
+            state.headDetailDepthActive
+            && hasSceneBackedDetailTarget()
+            && state.detailSceneIndex
+        ) {
+            return renderer.resolveInteractiveHitAtScreenPoint(localX, localY)?.entry || null;
+        }
+        return resolveOverviewCanvasHit(localX, localY)?.entry || null;
     }
 
     function resolveCanvasScreenHit(event = null) {
@@ -3191,10 +3420,16 @@ export function createTransformerView2dDetailView(panelEl, {
             return null;
         }
         const rect = canvas.getBoundingClientRect();
-        return renderer.resolveInteractiveHitAtScreenPoint(
-            event.clientX - rect.left,
-            event.clientY - rect.top
-        ) || null;
+        const localX = event.clientX - rect.left;
+        const localY = event.clientY - rect.top;
+        if (
+            state.headDetailDepthActive
+            && hasSceneBackedDetailTarget()
+            && state.detailSceneIndex
+        ) {
+            return renderer.resolveInteractiveHitAtScreenPoint(localX, localY) || null;
+        }
+        return resolveOverviewCanvasHit(localX, localY) || null;
     }
 
     function updateCanvasCursor(entry = null) {
@@ -3233,12 +3468,9 @@ export function createTransformerView2dDetailView(panelEl, {
         };
         if (isMhsaHeadOverviewEntry(entry)) {
             clearDetailFocusTarget();
-            return openHeadDetail({
+            return startImmediateStagedHeadDetailTransition({
                 layerIndex: entry.semantic.layerIndex,
                 headIndex: entry.semantic.headIndex
-            }, {
-                animate: true,
-                nextDepthActive: true
             });
         }
         if (isConcatOverviewEntry(entry)) {
@@ -3251,27 +3483,39 @@ export function createTransformerView2dDetailView(panelEl, {
         }
         if (isOutputProjectionOverviewEntry(entry)) {
             clearDetailFocusTarget();
-            return openOutputProjectionDetail({
-                layerIndex: entry.semantic.layerIndex
-            }, {
-                animate: true
+            return startImmediateStagedSceneDetailTransition({
+                semanticTarget: entry.semantic,
+                focusLabel: describeTransformerView2dTarget(entry.semantic),
+                detailTargets: {
+                    outputProjectionDetailTarget: {
+                        layerIndex: entry.semantic.layerIndex
+                    }
+                }
             });
         }
         if (isMlpOverviewEntry(entry)) {
             clearDetailFocusTarget();
-            return openMlpDetail({
-                layerIndex: entry.semantic.layerIndex
-            }, {
-                animate: true
+            return startImmediateStagedSceneDetailTransition({
+                semanticTarget: entry.semantic,
+                focusLabel: describeTransformerView2dTarget(entry.semantic),
+                detailTargets: {
+                    mlpDetailTarget: {
+                        layerIndex: entry.semantic.layerIndex
+                    }
+                }
             });
         }
         if (isLayerNormOverviewEntry(entry)) {
             clearDetailFocusTarget();
-            return openLayerNormDetail({
-                layerNormKind: entry.semantic.stage === 'final-ln' ? 'final' : entry.semantic.stage,
-                layerIndex: entry.semantic.layerIndex
-            }, {
-                animate: true
+            return startImmediateStagedSceneDetailTransition({
+                semanticTarget: entry.semantic,
+                focusLabel: describeTransformerView2dTarget(entry.semantic),
+                detailTargets: {
+                    layerNormDetailTarget: {
+                        layerNormKind: entry.semantic.stage === 'final-ln' ? 'final' : entry.semantic.stage,
+                        layerIndex: entry.semantic.layerIndex
+                    }
+                }
             });
         }
         return false;

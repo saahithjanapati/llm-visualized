@@ -353,6 +353,31 @@ function loadTransformerView2dDetailViewModule() {
     }
     return transformerView2dDetailViewModulePromise;
 }
+
+function scheduleUiPrewarmFrame(callback) {
+    if (typeof callback !== 'function') return null;
+    if (typeof requestAnimationFrame === 'function') {
+        return {
+            kind: 'raf',
+            id: requestAnimationFrame(() => {
+                callback();
+            })
+        };
+    }
+    return {
+        kind: 'timeout',
+        id: setTimeout(callback, 16)
+    };
+}
+
+function cancelUiPrewarmFrame(handle = null) {
+    if (!handle || typeof handle !== 'object') return;
+    if (handle.kind === 'raf' && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(handle.id);
+        return;
+    }
+    clearTimeout(handle.id);
+}
 import {
     getAttentionBiasVectorSample,
     getAttentionBiasHeadSample,
@@ -3930,6 +3955,7 @@ export class SelectionPanel {
         this._softmaxSourceSelection = null;
         this._transformerView2dDetailView = null;
         this._transformerView2dDetailViewPromise = null;
+        this._transformerView2dDetailViewPrewarmHandle = null;
         this._transformerView2dDetailOpen = false;
         this._transformerView2dSourceSelection = null;
         this._currentTransformerView2dContext = null;
@@ -3987,6 +4013,7 @@ export class SelectionPanel {
         this._onLegendPointerLeave = this._onLegendPointerLeave.bind(this);
         this._onLegendPointerUp = this._onLegendPointerUp.bind(this);
         this._onLegendPointerCancel = this._onLegendPointerCancel.bind(this);
+        this._scheduleTransformerView2dDetailViewPrewarm = this._scheduleTransformerView2dDetailViewPrewarm.bind(this);
         this._scheduleResize = this._scheduleResize.bind(this);
         this._scheduleSelectionEquationFit = this._scheduleSelectionEquationFit.bind(this);
         this._applySelectionEquationFit = this._applySelectionEquationFit.bind(this);
@@ -4150,6 +4177,8 @@ export class SelectionPanel {
         this.closeBtn?.addEventListener('click', this._onCloseClick);
         this.copyContextBtn?.addEventListener('click', this._onCopyContextClick);
         this.fullscreenToggleBtn?.addEventListener('click', this._onFullscreenToggleClick);
+        this.transformerView2dActionBtn?.addEventListener('pointerenter', this._scheduleTransformerView2dDetailViewPrewarm);
+        this.transformerView2dActionBtn?.addEventListener('focus', this._scheduleTransformerView2dDetailViewPrewarm);
         this.closeBtn?.addEventListener('pointerdown', this._onClosePointerDown);
         this.resizeHandle?.addEventListener('pointerdown', this._onResizeHandlePointerDown);
         this.resizeHandle?.addEventListener('keydown', this._onResizeHandleKeydown);
@@ -4304,6 +4333,53 @@ export class SelectionPanel {
         this.showSelection(this._lastSelection, { fromHistory: true });
     }
 
+    _clearTransformerView2dDetailViewPrewarmHandle() {
+        if (!this._transformerView2dDetailViewPrewarmHandle) return;
+        cancelUiPrewarmFrame(this._transformerView2dDetailViewPrewarmHandle);
+        this._transformerView2dDetailViewPrewarmHandle = null;
+    }
+
+    _scheduleTransformerView2dDetailViewPrewarm(eventOrOptions = null) {
+        const immediate = !!(
+            eventOrOptions
+            && typeof eventOrOptions === 'object'
+            && (
+                ('immediate' in eventOrOptions && eventOrOptions.immediate === true)
+                || typeof eventOrOptions.type === 'string'
+            )
+        );
+        if (this._transformerView2dDetailView || this._transformerView2dDetailViewPromise) {
+            this._clearTransformerView2dDetailViewPrewarmHandle();
+            return false;
+        }
+        if (!this._currentTransformerView2dContext && !this._transformerView2dDetailOpen) {
+            return false;
+        }
+
+        const startPrewarm = () => {
+            this._transformerView2dDetailViewPrewarmHandle = null;
+            const prewarmResult = this._ensureTransformerView2dDetailView();
+            if (prewarmResult && typeof prewarmResult.catch === 'function') {
+                void prewarmResult.catch((error) => {
+                    console.warn('Failed to prewarm transformer 2D view:', error);
+                });
+            }
+            return true;
+        };
+
+        if (immediate) {
+            this._clearTransformerView2dDetailViewPrewarmHandle();
+            return startPrewarm();
+        }
+
+        if (this._transformerView2dDetailViewPrewarmHandle) {
+            return false;
+        }
+
+        this._transformerView2dDetailViewPrewarmHandle = scheduleUiPrewarmFrame(startPrewarm);
+        return !!this._transformerView2dDetailViewPrewarmHandle;
+    }
+
     _setTransformerView2dActionButtonState(actionConfig = null) {
         if (!this.transformerView2dActionBtn) return;
         const enabled = !!actionConfig;
@@ -4332,6 +4408,7 @@ export class SelectionPanel {
         }
         this.transformerView2dActionBtn.setAttribute('aria-label', ariaLabel);
         this.transformerView2dActionBtn.title = title;
+        this._scheduleTransformerView2dDetailViewPrewarm({ immediate: false });
         this._applyCopyContextButtonLayout();
     }
 

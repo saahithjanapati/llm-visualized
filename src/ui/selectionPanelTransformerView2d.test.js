@@ -3,7 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { D_HEAD, D_MODEL } from './selectionPanelConstants.js';
-import { TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS } from './selectionPanelTransformerView2dTransitionUtils.js';
+import {
+    TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS,
+    TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
+} from './selectionPanelTransformerView2dTransitionUtils.js';
 import { TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT } from './selectionPanelTransformerView2dViewportUtils.js';
 import { TRANSFORMER_VIEW2D_OVERVIEW_LABEL } from '../view2d/transformerView2dTargets.js';
 import { buildSceneLayout } from '../view2d/layout/buildSceneLayout.js';
@@ -259,6 +262,38 @@ function getStageReadouts(panelEl) {
     return {
         layer: panelEl.querySelector('[data-transformer-view2d-readout="layer"]'),
         stage: panelEl.querySelector('[data-transformer-view2d-readout="stage"]')
+    };
+}
+
+function resolveCompactRowScreenPoint(nodeEntry = null, rowIndex = 0, viewportState = null) {
+    const contentBounds = nodeEntry?.contentBounds || nodeEntry?.bounds || null;
+    const layoutData = nodeEntry?.layoutData || null;
+    if (!contentBounds || !layoutData) return null;
+
+    const innerPaddingX = Math.max(0, Number(layoutData.innerPaddingX) || 0);
+    const innerPaddingY = Math.max(0, Number(layoutData.innerPaddingY) || 0);
+    const rowHeight = Math.max(1, Number(layoutData.rowHeight) || 0);
+    const rowGap = Math.max(0, Number(layoutData.rowGap) || 0);
+    const compactWidth = Math.max(
+        1,
+        Math.min(
+            Number(layoutData.compactWidth) || 0,
+            contentBounds.width - (innerPaddingX * 2)
+        )
+    );
+    const worldX = contentBounds.x + innerPaddingX + (compactWidth * 0.5);
+    const worldY = (
+        contentBounds.y
+        + innerPaddingY
+        + (Math.max(0, Math.floor(rowIndex)) * (rowHeight + rowGap))
+        + (rowHeight * 0.5)
+    );
+    const scale = Number(viewportState?.scale) || 1;
+    const panX = Number(viewportState?.panX) || 0;
+    const panY = Number(viewportState?.panY) || 0;
+    return {
+        clientX: (worldX * scale) + panX,
+        clientY: (worldY * scale) + panY
     };
 }
 
@@ -813,7 +848,7 @@ describe('createTransformerView2dDetailView', () => {
         expect(worldCenterAfter.y).toBeCloseTo(worldCenterBefore.y, 6);
     });
 
-    it('keeps a stable interaction DPR and preserves the DOM caption overlay while zooming', async () => {
+    it('keeps a stable interaction DPR and leaves the DOM caption overlay visible during detail zoom', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
         const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
@@ -866,7 +901,7 @@ describe('createTransformerView2dDetailView', () => {
         expect(overlay?.style.display).toBe('block');
     });
 
-    it('opens canvas attention-head clicks directly into the head-detail scene', async () => {
+    it('stages canvas attention-head clicks through an overview zoom before entering the head-detail scene', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
         const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
@@ -901,6 +936,57 @@ describe('createTransformerView2dDetailView', () => {
         canvas.dispatchEvent(createPointerEvent('pointerdown'));
         canvas.dispatchEvent(createPointerEvent('pointerup'));
         await vi.advanceTimersByTimeAsync(500);
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(
+            TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
+            + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+        );
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+    });
+
+    it('stages canvas MLP clicks through an overview zoom before entering the deep detail scene', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const mlpEntry = {
+            role: 'module-card',
+            semantic: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: mlpEntry,
+            node: mlpEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C']
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown'));
+        canvas.dispatchEvent(createPointerEvent('pointerup'));
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(
+            1120 + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+        );
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
     });
@@ -1165,6 +1251,13 @@ describe('createTransformerView2dDetailView', () => {
         canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
         await vi.advanceTimersByTimeAsync(500);
 
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(
+            TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
+            + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+        );
+
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
     });
 
@@ -1204,6 +1297,13 @@ describe('createTransformerView2dDetailView', () => {
         canvas.dispatchEvent(createPointerEvent('pointerdown', { pointerType: 'touch' }));
         canvas.dispatchEvent(createPointerEvent('pointerup', { pointerType: 'touch' }));
         await vi.advanceTimersByTimeAsync(500);
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(
+            TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS
+            + TRANSFORMER_VIEW2D_STAGED_DETAIL_FOCUS_SETTLE_MS
+        );
 
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
     });
@@ -1285,6 +1385,164 @@ describe('createTransformerView2dDetailView', () => {
         expect(onOpenSelection).toHaveBeenCalledWith(
             expect.objectContaining({
                 label: 'Residual Stream Vector'
+            })
+        );
+    });
+
+    it('resolves overview residual row clicks from the live viewport transform even when screen-hit state is stale', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const residualNode = flattenSceneNodes(scene).find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+            && node?.semantic?.layerIndex === 0
+        ));
+        const residualEntry = residualNode ? layout.registry.getNodeEntry(residualNode.id) : null;
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+
+        const clickPoint = resolveCompactRowScreenPoint(
+            residualEntry,
+            1,
+            view.getViewportState()
+        );
+        expect(clickPoint).toBeTruthy();
+
+        const staleEmbeddingEntry = {
+            role: 'vocabulary-embedding-card',
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'vocabulary-embedding-card'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: staleEmbeddingEntry,
+            node: staleEmbeddingEntry
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', clickPoint));
+        canvas.dispatchEvent(createPointerEvent('pointerup', clickPoint));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'Residual Stream Vector',
+                info: expect.objectContaining({
+                    tokenIndex: 1,
+                    tokenLabel: 'B'
+                })
+            })
+        );
+    });
+
+    it('prefers the more specific screen-space residual row hit when the world-space hit falls back to a broad semantic card', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const onOpenSelection = vi.fn(() => true);
+        const view = createTransformerView2dDetailView(panelEl, {
+            onOpenSelection
+        });
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const residualNode = flattenSceneNodes(scene).find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+            && node?.semantic?.layerIndex === 0
+        ));
+        const residualEntry = residualNode ? layout.registry.getNodeEntry(residualNode.id) : null;
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+
+        const clickPoint = resolveCompactRowScreenPoint(
+            residualEntry,
+            1,
+            view.getViewportState()
+        );
+        expect(clickPoint).toBeTruthy();
+
+        const broadEmbeddingEntry = {
+            role: 'vocabulary-embedding-card',
+            semantic: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'vocabulary-embedding-card'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtPoint').mockReturnValue({
+            entry: broadEmbeddingEntry,
+            node: broadEmbeddingEntry
+        });
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: residualNode,
+            node: residualNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: residualNode?.rowItems?.[1]
+            }
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', clickPoint));
+        canvas.dispatchEvent(createPointerEvent('pointerup', clickPoint));
+
+        expect(onOpenSelection).toHaveBeenCalledTimes(1);
+        expect(onOpenSelection).toHaveBeenCalledWith(
+            expect.objectContaining({
+                label: 'Residual Stream Vector',
+                info: expect.objectContaining({
+                    tokenIndex: 1,
+                    tokenLabel: 'B'
+                })
             })
         );
     });

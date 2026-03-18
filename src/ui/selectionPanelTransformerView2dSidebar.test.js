@@ -44,6 +44,20 @@ function createPanelContext() {
         innerHTML: 'Why the model uses it in this layer.',
         className: 'detail-subtitle'
     };
+    panel.transformerView2dActionRow = {
+        hidden: false,
+        setAttribute: vi.fn()
+    };
+    panel.transformerView2dActionBtn = {
+        hidden: false,
+        dataset: {},
+        setAttribute: vi.fn(),
+        removeAttribute: vi.fn(),
+        title: ''
+    };
+    panel.transformerView2dActionBtnLabel = {
+        textContent: ''
+    };
     panel._lastSelection = null;
     panel._lastSelectionLabel = '';
     panel._transformerView2dDetailView = {
@@ -71,6 +85,7 @@ function createPanelContext() {
     panel._stopLoop = vi.fn();
     panel._setAttentionVisibility = vi.fn();
     panel._setPanelTokenHoverEntry = vi.fn();
+    panel._applyCopyContextButtonLayout = vi.fn();
     panel._buildHistoryEntry = vi.fn(() => ({ key: 'history-entry' }));
     panel._pushHistoryEntry = vi.fn();
     panel._updateHistoryNavigationControls = vi.fn();
@@ -91,6 +106,61 @@ function createPanelContext() {
 }
 
 describe('SelectionPanel transformer-view2d sidebar handoff', () => {
+    it('schedules hidden 2D view prewarm when the action button becomes available', () => {
+        const panel = createPanelContext();
+        panel._scheduleTransformerView2dDetailViewPrewarm = vi.fn();
+
+        panel._setTransformerView2dActionButtonState({
+            label: 'View in 2D / matrix form',
+            ariaLabel: 'View Token embeddings in 2D / matrix form',
+            title: 'View Token embeddings in 2D / matrix form'
+        });
+
+        expect(panel._scheduleTransformerView2dDetailViewPrewarm).toHaveBeenCalledWith({
+            immediate: false
+        });
+    });
+
+    it('prewarms the hidden 2D detail view off the click path', async () => {
+        vi.useFakeTimers();
+        vi.stubGlobal('requestAnimationFrame', vi.fn((callback) => setTimeout(() => callback(16), 16)));
+        vi.stubGlobal('cancelAnimationFrame', vi.fn((id) => clearTimeout(id)));
+
+        try {
+            const panel = createPanelContext();
+            panel._currentTransformerView2dContext = {
+                semanticTarget: {
+                    componentKind: 'embedding',
+                    stage: 'embedding.token',
+                    role: 'module'
+                }
+            };
+            panel._transformerView2dDetailView = null;
+            panel._transformerView2dDetailViewPromise = null;
+            panel._transformerView2dDetailViewPrewarmHandle = null;
+            panel._ensureTransformerView2dDetailView = vi.fn(() => Promise.resolve({}));
+
+            const scheduled = panel._scheduleTransformerView2dDetailViewPrewarm({
+                immediate: false
+            });
+
+            expect(scheduled).toBe(true);
+            expect(panel._ensureTransformerView2dDetailView).not.toHaveBeenCalled();
+
+            await vi.advanceTimersByTimeAsync(20);
+
+            expect(panel._ensureTransformerView2dDetailView).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+            vi.unstubAllGlobals();
+            vi.stubGlobal('localStorage', {
+                getItem: () => null,
+                setItem: () => {},
+                removeItem: () => {}
+            });
+        }
+    });
+
     it('opens the docked 2D selection sidebar when entering the canvas from a selection', () => {
         const panel = createPanelContext();
         const selection = {
