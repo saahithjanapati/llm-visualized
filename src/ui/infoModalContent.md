@@ -46,6 +46,7 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - 3Blue1Brown's [Neural Networks series](https://www.youtube.com/playlist?list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi)
 - Welch Labs' [deep learning videos](https://www.youtube.com/@WelchLabs/videos)
 - Maarten Grootendorst's [Exploring Language Models](https://newsletter.maartengrootendorst.com/)
+- Sebastian Raschka's [LLM Architecture Gallery](https://sebastianraschka.com/llm-architecture-gallery/)
 - Khan Academy's black-and-colored visual style
 - Jack Morris' [Transformer visualization thread](https://x.com/jxmnop/status/1757129193442173367?s=20)
 - Will Depue's [WebGPT](https://github.com/0hq/WebGPT)

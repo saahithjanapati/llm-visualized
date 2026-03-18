@@ -1,7 +1,5 @@
 import { getLayerNormParamMeta } from '../data/layerNormParams.js';
 import {
-    formatLayerNormProductVectorLabel,
-    isLayerNormProductStage,
     isLayerNormNormalizedStage,
     resolveLayerNormKind
 } from '../utils/layerNormLabels.js';
@@ -153,33 +151,6 @@ export function resolveLayerNormParameterSummary(selectionInfo = null, engine = 
         ...previewContext,
         perParameterCount: hiddenSize,
         totalParameterCount: hiddenSize * 2
-    };
-}
-
-export function resolveLayerNormProductStageSummary(selectionInfo = null, engine = null) {
-    const activationStage = String(getActivationDataFromSelection(selectionInfo)?.stage || '').toLowerCase();
-    if (!isLayerNormProductStage(activationStage)) return null;
-
-    const previewContext = resolveLayerNormPreviewContext(selectionInfo, engine);
-    const layerNormKind = previewContext?.layerNormKind || resolveLayerNormKind({
-        label: selectionInfo?.label || '',
-        stage: activationStage,
-        explicitKind: findUserDataString(selectionInfo, 'layerNormKind') || null
-    });
-    const vectorLabel = formatLayerNormProductVectorLabel(layerNormKind);
-
-    let summary = 'Normalized vector multiplied elementwise by gamma, before beta is added.';
-    if (layerNormKind === 'ln1') {
-        summary = 'Normalized vector multiplied elementwise by gamma, before beta is added and attention reads the LayerNorm output.';
-    } else if (layerNormKind === 'ln2') {
-        summary = 'Normalized vector multiplied elementwise by gamma, before beta is added and the MLP reads the LayerNorm output.';
-    } else if (layerNormKind === 'final') {
-        summary = 'Normalized vector multiplied elementwise by gamma, before the final beta shift and the unembedding step.';
-    }
-
-    return {
-        label: 'Current stage',
-        value: `${vectorLabel}: ${summary}`
     };
 }
 

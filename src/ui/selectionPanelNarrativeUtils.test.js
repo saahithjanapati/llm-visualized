@@ -80,6 +80,7 @@ describe('selectionPanelNarrativeUtils bias narratives', () => {
         expect(description).toContain('after normalization');
         expect(description).toContain('multiplication by the learned scale vector');
         expect(description).toContain('before the learned shift');
+        expect(description).toContain('self-attention sublayer in Layer 5 actually reads');
     });
 
     it('treats final_ln.scale as the final LayerNorm product-vector stage, not the gamma parameter', () => {
@@ -97,6 +98,7 @@ describe('selectionPanelNarrativeUtils bias narratives', () => {
         const description = resolveDescription('LayerNorm (Top) Product Vector', 'vector', selection);
         expect(description).toContain('after normalization');
         expect(description).toContain('before the learned shift');
+        expect(description).toContain('unembedding matrix uses to score vocabulary logits');
         expect(description).not.toContain('learned scale vector for the final LayerNorm');
     });
 

@@ -964,6 +964,64 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.activationData?.isMasked).toBe(true);
     });
 
+    it('preserves 2D masked-cell metadata when hydrating a live attention-score selection', () => {
+        const panel = createPanelContext();
+        const liveObject = createSceneNode('Pre-Softmax Attention Score');
+        panel._findAttentionScoreSceneSelection = vi.fn(() => ({
+            label: 'Pre-Softmax Attention Score',
+            kind: 'attentionSphere',
+            object: liveObject,
+            hit: {
+                object: liveObject,
+                instanceId: 7
+            },
+            info: {
+                activationData: {
+                    label: 'Pre-Softmax Attention Score',
+                    stage: 'attention.pre',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    tokenIndex: 0,
+                    keyTokenIndex: 1,
+                    preScore: 0.25
+                }
+            }
+        }));
+
+        const selection = {
+            label: 'Pre-Softmax Attention Score',
+            info: {
+                activationData: {
+                    label: 'Pre-Softmax Attention Score',
+                    stage: 'attention.pre',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    tokenIndex: 0,
+                    queryTokenIndex: 0,
+                    keyTokenIndex: 1,
+                    tokenLabel: 'Token A',
+                    keyTokenLabel: 'Token B',
+                    preScore: 0.25,
+                    postScore: 0,
+                    maskValue: Number.NEGATIVE_INFINITY,
+                    isMasked: true
+                }
+            }
+        };
+
+        const resolved = panel._resolveTransformerView2dCanvasSelection(selection);
+
+        expect(resolved?.object).toBe(liveObject);
+        expect(resolved?.hit?.instanceId).toBe(7);
+        expect(resolved?.info?.activationData?.stage).toBe('attention.pre');
+        expect(resolved?.info?.activationData?.queryTokenIndex).toBe(0);
+        expect(resolved?.info?.activationData?.tokenLabel).toBe('Token A');
+        expect(resolved?.info?.activationData?.keyTokenLabel).toBe('Token B');
+        expect(resolved?.info?.activationData?.postScore).toBe(0);
+        expect(resolved?.info?.activationData?.maskValue).toBe(Number.NEGATIVE_INFINITY);
+        expect(resolved?.info?.activationData?.isMasked).toBe(true);
+    });
+
     it('keeps masked post-softmax 2D canvas selections at zero when packed capture rows stop at the diagonal', () => {
         const panel = createPanelContext();
         panel.activationSource = new CaptureActivationSource({

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    resolveLayerNormProductStageSummary,
     resolveLayerNormParameterSummary,
     resolveLiveLayerNormNormalizedPreviewSelection
 } from './selectionPanelLayerNormPreviewUtils.js';
@@ -106,26 +105,5 @@ describe('resolveLayerNormParameterSummary', () => {
         expect(hydrated?.info?.vectorRef).toBe(movingVecLN2);
         expect(hydrated?.object).toBe(movingVecLN2.mesh);
         expect(hydrated?.hit?.instanceId).toBe(0);
-    });
-
-    it('returns a dedicated product-stage summary for LayerNorm product vectors', () => {
-        const summary = resolveLayerNormProductStageSummary({
-            label: 'LayerNorm 1 Scale',
-            info: {
-                layerIndex: 3,
-                activationData: {
-                    stage: 'ln1.scale',
-                    layerIndex: 3,
-                    tokenIndex: 2
-                }
-            }
-        }, {
-            _layers: Array.from({ length: 12 }, (_, index) => createLayer(index))
-        });
-
-        expect(summary).toEqual({
-            label: 'Current stage',
-            value: 'LayerNorm 1 Product Vector: Normalized vector multiplied elementwise by gamma, before beta is added and attention reads the LayerNorm output.'
-        });
     });
 });

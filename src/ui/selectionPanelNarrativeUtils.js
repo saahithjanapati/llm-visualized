@@ -535,9 +535,19 @@ function buildFinalLayerNormNormalizedVectorDescription(selectionInfo = null) {
 function buildLayerNormScaledVectorDescription(selectionInfo = null) {
     const tokenRef = buildSelectionTokenReference(selectionInfo, 'this token');
     const layerRef = buildSelectionLayerReference(selectionInfo);
+    const layerNormKind = resolveSelectionLayerNormKind(selectionInfo);
+    let nextStageSentence = 'The next step is to add the learned shift so this affine LayerNorm result becomes the final post-LayerNorm vector that the following computation actually reads.';
+    if (layerNormKind === 'ln1') {
+        nextStageSentence = `The next step is to add the learned shift ${inlineMath('\\beta')}, producing the post-LayerNorm vector that the self-attention sublayer in ${layerRef} actually reads.`;
+    } else if (layerNormKind === 'ln2') {
+        nextStageSentence = `The next step is to add the learned shift ${inlineMath('\\beta')}, producing the post-LayerNorm vector that the MLP sublayer in ${layerRef} reads next.`;
+    } else if (layerNormKind === 'final') {
+        nextStageSentence = `The next step is to add the learned shift ${inlineMath('\\beta')}, producing the final hidden state that the unembedding matrix uses to score vocabulary logits.`;
+    }
     return joinParagraphs(
         `This is the LayerNorm token-state vector for ${tokenRef}${layerRef !== 'this layer' ? ` in ${layerRef}` : ''} after normalization and after elementwise multiplication by the learned scale vector ${inlineMath('\\gamma')}, but before the learned shift ${inlineMath('\\beta')} is added.`,
-        'The scale parameters let the model decide which normalized features should be amplified, damped, or even sign-flipped before the token moves on to the next sublayer.'
+        'The scale parameters let the model decide which normalized features should be amplified, damped, or even sign-flipped before the token moves on to the next sublayer.',
+        nextStageSentence
     );
 }
 

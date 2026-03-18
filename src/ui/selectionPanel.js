@@ -124,8 +124,7 @@ import {
 } from './selectionPanelVectorSamplingUtils.js';
 import {
     resolveLiveLayerNormNormalizedPreviewSelection,
-    resolveLayerNormParameterSummary,
-    resolveLayerNormProductStageSummary
+    resolveLayerNormParameterSummary
 } from './selectionPanelLayerNormPreviewUtils.js';
 import { resolveSelectionPrimaryActionConfig } from './selectionPanelPrimaryActionUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
@@ -8566,8 +8565,10 @@ export class SelectionPanel {
                 sourceTokenIndex: tokenContext.queryTokenIndex,
                 targetTokenIndex: tokenContext.keyTokenIndex
             };
-            return this._findAttentionScoreSceneSelection(link)
-                || this._buildFallbackAttentionScoreSelection(link);
+            return this._mergeTransformerView2dAttentionScoreSelection(
+                this._findAttentionScoreSceneSelection(link),
+                fallbackSelection
+            ) || this._buildFallbackAttentionScoreSelection(link);
         }
 
         const layerNormParamSpec = resolveLayerNormParamPreviewSpec(label, fallbackSelection);
@@ -9948,42 +9949,77 @@ export class SelectionPanel {
         };
     }
 
-    _buildTransformerView2dCausalMaskSelection(selection = null, link = null) {
-        if (!link) return null;
-        const liveSelection = this._findAttentionScoreSceneSelection(link)
-            || this._buildFallbackAttentionScoreSelection(link);
-        if (!liveSelection?.label) return null;
-
-        const fallbackSelection = this._buildTransformerView2dFallbackSelection(selection);
+    _mergeTransformerView2dAttentionScoreSelection(liveSelection = null, fallbackSelection = null, {
+        label = '',
+        activationStage = ''
+    } = {}) {
+        const liveInfo = liveSelection?.info && typeof liveSelection.info === 'object'
+            ? { ...liveSelection.info }
+            : {};
+        const liveActivation = liveInfo.activationData && typeof liveInfo.activationData === 'object'
+            ? liveInfo.activationData
+            : {};
         const fallbackInfo = fallbackSelection?.info && typeof fallbackSelection.info === 'object'
             ? fallbackSelection.info
             : {};
         const fallbackActivation = fallbackInfo.activationData && typeof fallbackInfo.activationData === 'object'
             ? fallbackInfo.activationData
             : {};
-        const liveInfo = liveSelection.info && typeof liveSelection.info === 'object'
-            ? { ...liveSelection.info }
-            : {};
-        const liveActivation = liveInfo.activationData && typeof liveInfo.activationData === 'object'
-            ? liveInfo.activationData
-            : {};
-        const label = fallbackSelection?.label || fallbackActivation.label || 'Causal Mask';
+        const resolvedLabel = String(
+            label
+            || fallbackSelection?.label
+            || fallbackActivation.label
+            || liveSelection?.label
+            || liveActivation.label
+            || ''
+        ).trim();
+        if (!resolvedLabel) return null;
 
-        return {
-            ...liveSelection,
-            label,
-            kind: 'attentionSphere',
+        const {
+            info: _ignoredLiveInfo,
+            object: liveObject,
+            hit: liveHit,
+            ...liveSelectionRest
+        } = liveSelection && typeof liveSelection === 'object'
+            ? liveSelection
+            : {};
+
+        const result = {
+            ...liveSelectionRest,
+            label: resolvedLabel,
+            kind: String(liveSelection?.kind || fallbackSelection?.kind || 'attentionSphere'),
             info: {
                 ...liveInfo,
                 ...fallbackInfo,
                 activationData: {
                     ...liveActivation,
                     ...fallbackActivation,
-                    label,
-                    stage: 'attention.mask'
+                    label: resolvedLabel,
+                    ...(activationStage ? { stage: activationStage } : {})
                 }
             }
         };
+
+        if (liveObject) {
+            result.object = liveObject;
+        }
+        if (liveHit) {
+            result.hit = liveHit;
+        }
+
+        return result;
+    }
+
+    _buildTransformerView2dCausalMaskSelection(selection = null, link = null) {
+        if (!link) return null;
+        return this._mergeTransformerView2dAttentionScoreSelection(
+            this._findAttentionScoreSceneSelection(link),
+            this._buildTransformerView2dFallbackSelection(selection)
+                || this._buildFallbackAttentionScoreSelection(link),
+            {
+                activationStage: 'attention.mask'
+            }
+        );
     }
 
     _resolveLinkedAttentionScoreSelection(link = null) {
@@ -15385,6 +15421,11 @@ export class SelectionPanel {
         const isLogitSelection = !!resolveLogitSelectionHeader(label, selection);
         const isMlpDownSelection = lower.startsWith('mlp down projection')
             || activationStage === 'mlp.down';
+        const isLayerNormProductVectorSelection = !!normalizeLayerNormProductStage(activationStage)
+            || (
+                (lower.includes('layernorm') || lower.includes('layer norm') || lower.includes('final ln'))
+                && lower.includes('product vector')
+            );
         const isPositionEmbeddingSelection = lower.startsWith('position:')
             || lower.includes('position embedding')
             || lower.includes('positional embedding')
@@ -15485,6 +15526,11 @@ export class SelectionPanel {
         }
 
         if (isMlpDownSelection) {
+            hideRows();
+            return metadata;
+        }
+
+        if (isLayerNormProductVectorSelection) {
             hideRows();
             return metadata;
         }
@@ -15977,7 +16023,6 @@ export class SelectionPanel {
         const layerNormParameterSummary = hideLayerNormFields
             ? resolveLayerNormParameterSummary(selection, this.engine)
             : null;
-        const layerNormProductStageSummary = resolveLayerNormProductStageSummary(selection, this.engine);
         const isLogitTokenSelection = !!logitHeader;
         const hideTensorDimsField = hideLayerNormFields
             || isAttentionScore
@@ -16016,15 +16061,9 @@ export class SelectionPanel {
                 this.params.textContent = showParamCount ? metadata.params : '';
             }
         }
-        if (this.layerNormStageRow) {
-            this.layerNormStageRow.style.display = layerNormProductStageSummary ? '' : 'none';
-        }
-        if (this.layerNormStageLabel) {
-            this.layerNormStageLabel.textContent = layerNormProductStageSummary?.label || 'Current stage';
-        }
-        if (this.layerNormStageValue) {
-            this.layerNormStageValue.textContent = layerNormProductStageSummary?.value || '';
-        }
+        if (this.layerNormStageRow) this.layerNormStageRow.style.display = 'none';
+        if (this.layerNormStageLabel) this.layerNormStageLabel.textContent = 'Current stage';
+        if (this.layerNormStageValue) this.layerNormStageValue.textContent = '';
         const showBiasDim = !hideTensorDimsField && !isVectorMetadata && metadata.hasBiasDim;
         if (this.biasDimRow) this.biasDimRow.style.display = showBiasDim ? '' : 'none';
         if (this.biasDim) this.biasDim.textContent = showBiasDim ? metadata.biasDim : '';
