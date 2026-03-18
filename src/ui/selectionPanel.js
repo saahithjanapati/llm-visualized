@@ -3883,6 +3883,9 @@ export class SelectionPanel {
         this._mobilePauseActive = false;
         this._mobileFocusActive = false;
         this._pauseMainFlowOnMobileFocus = options.pauseMainFlowOnMobileFocus === true;
+        this._onOpenInfo = typeof options.onOpenInfo === 'function'
+            ? options.onOpenInfo
+            : openProjectInfoPage;
         this._pendingResizeRaf = null;
         this._previewRafId = null;
         this._previewPausedForPanelResize = false;
@@ -9192,7 +9195,7 @@ export class SelectionPanel {
                         this.close({ clearHistory: false });
                     },
                     onOpenInfo: () => {
-                        openProjectInfoPage();
+                        this._onOpenInfo?.();
                     },
                     onOpenSelection: (selection) => {
                         return this._openTransformerView2dCanvasSelection(selection);

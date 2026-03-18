@@ -1,4 +1,4 @@
-> If you have any ideas or feedback to make the site better, I'd love to hear from you. You can send it through [this form](https://forms.gle/YD5UPKAnasYtCutbA), or as a DM on X.
+> If you have any ideas or feedback to make the site better, I'd love to hear from you! You can send it through [this form](https://forms.gle/YD5UPKAnasYtCutbA), or as a DM on X.
 
 This site is an interactive 3D and 2D visualization of GPT-2 (124M) performing forward passes.
 
@@ -62,7 +62,7 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - Attention is still organized in a somewhat weird way. The z-axis is used for context, the y-axis is used for layer depth, and the x-axis is used for attention heads. That works for now, but I still want to find a better way to use the 3D space to depict the Transformer.
 - I plan to add more prompts and generations once I get a better sense of steady-state traffic. I also plan to release my extraction script so people can visualize forward passes of their own prompts.
 - There are still a lot of small things that do not need to be so laggy, plus interaction bugs that need to be fixed. A lot of the current work is still bug hunting and cleanup.
-- If you run into any problems or have suggestions, please let me know through the form above.
+- If you run into any problems or have suggestions, please let me know through the form above!
 
 ## Acknowledgements
 
@@ -72,6 +72,6 @@ Thank you to the people on the internet who have already been generous with thei
 
 Thank you to my friends and family who gave me a lot of ideas throughout development. This project would not be the same without their feedback.
 
-And thank you for visiting the site. If you have any ideas or feedback to make it better, I'd love to hear from you.
+And thank you for visiting the site! If you have any ideas or feedback to make it better, I'd love to hear from you!
 
-I hope you enjoy the site.
+I hope you enjoy the site 😊🫡

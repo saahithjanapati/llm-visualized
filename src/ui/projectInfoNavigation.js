@@ -84,6 +84,64 @@ export function syncProjectInfoBackLink(anchorEl, {
     return true;
 }
 
+export function shouldUseProjectInfoHistoryBack({
+    locationRef = null,
+    documentRef = null,
+    historyRef = null,
+    defaultHref = PROJECT_INFO_DEFAULT_RETURN_PATH
+} = {}) {
+    const resolvedHistory = historyRef || (typeof window !== 'undefined' ? window.history : null);
+    if (!resolvedHistory || typeof resolvedHistory.back !== 'function') return false;
+    if (Number.isFinite(resolvedHistory.length) && resolvedHistory.length < 2) return false;
+
+    const referrerHref = String(
+        documentRef?.referrer
+        || (typeof document !== 'undefined' ? document.referrer : '')
+        || ''
+    ).trim();
+    if (!referrerHref.length) return false;
+
+    const referrerUrl = resolveUrlLike(referrerHref);
+    if (!referrerUrl || referrerUrl.origin !== 'https://llm-visualized.local') {
+        return false;
+    }
+
+    const expectedBackHref = resolveProjectInfoBackHref(locationRef, { defaultHref });
+    const referrerPath = normalizeProjectInfoReturnPath(
+        `${referrerUrl.pathname}${referrerUrl.search}${referrerUrl.hash}`
+    );
+    return referrerPath === expectedBackHref;
+}
+
+export function bindProjectInfoBackLink(anchorEl, {
+    locationRef = null,
+    documentRef = null,
+    historyRef = null,
+    defaultHref = PROJECT_INFO_DEFAULT_RETURN_PATH
+} = {}) {
+    if (!anchorEl || typeof anchorEl.addEventListener !== 'function') return false;
+    if (anchorEl.dataset.projectInfoBackBound === 'true') return true;
+
+    const resolvedHistory = historyRef || (typeof window !== 'undefined' ? window.history : null);
+    anchorEl.addEventListener('click', (event) => {
+        if (!shouldUseProjectInfoHistoryBack({
+            locationRef,
+            documentRef,
+            historyRef: resolvedHistory,
+            defaultHref
+        })) {
+            return;
+        }
+        if (event.defaultPrevented) return;
+        if (Number.isFinite(event.button) && event.button !== 0) return;
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        resolvedHistory?.back?.();
+    });
+    anchorEl.dataset.projectInfoBackBound = 'true';
+    return true;
+}
+
 export function openProjectInfoPage(locationRef = null) {
     const resolvedLocation = locationRef || (typeof window !== 'undefined' ? window.location : null);
     if (!resolvedLocation || typeof resolvedLocation.assign !== 'function') {

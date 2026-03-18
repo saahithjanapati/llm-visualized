@@ -1760,6 +1760,228 @@ body.detail-panel-resizing * {
     z-index: 10; /* above everything */
 }
 
+#projectInfoOverlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding:
+        max(16px, env(safe-area-inset-top))
+        max(16px, env(safe-area-inset-right))
+        max(16px, env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
+    box-sizing: border-box;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    background:
+        radial-gradient(900px 500px at 50% -10%, rgba(110, 168, 255, 0.08), transparent 60%),
+        rgba(2, 4, 8, 0.78);
+    backdrop-filter: blur(14px) saturate(1.04);
+    -webkit-backdrop-filter: blur(14px) saturate(1.04);
+    z-index: 11;
+}
+
+.project-info-modal {
+    width: min(100%, 940px);
+    max-height: min(860px, calc(100dvh - 32px));
+    display: flex;
+    flex-direction: column;
+    color: #f5f5f5;
+    font-family: "Rajdhani", "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+    background:
+        linear-gradient(180deg, rgba(9, 10, 12, 0.97), rgba(4, 4, 5, 0.96));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 22px;
+    box-shadow:
+        0 24px 72px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 255, 255, 0.03);
+    overflow: hidden;
+}
+
+.project-info-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.04), rgba(10, 12, 18, 0.12) 60%),
+        rgba(8, 10, 14, 0.78);
+}
+
+.project-info-modal-title-group {
+    min-width: 0;
+}
+
+.project-info-modal-eyebrow {
+    margin: 0 0 6px;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+.project-info-modal-title {
+    font-size: clamp(1.5rem, 3.5vw, 2.35rem);
+    line-height: 0.94;
+    letter-spacing: -0.035em;
+}
+
+.project-info-modal-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.project-info-modal-standalone,
+#projectInfoClose {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 10px 14px;
+    border-radius: 11px;
+    font: inherit;
+    font-size: 13px;
+    letter-spacing: 0.03em;
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.project-info-modal-standalone {
+    border: 1px solid rgba(110, 168, 255, 0.34);
+    background: rgba(110, 168, 255, 0.08);
+    color: #8fb8ff;
+}
+
+.project-info-modal-standalone:hover,
+.project-info-modal-standalone:focus-visible {
+    border-color: rgba(110, 168, 255, 0.56);
+    background: rgba(110, 168, 255, 0.14);
+    color: #b6d0ff;
+    box-shadow: 0 0 18px rgba(110, 168, 255, 0.14);
+}
+
+#projectInfoClose {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: #f5f5f5;
+}
+
+#projectInfoClose:hover,
+#projectInfoClose:focus-visible {
+    border-color: rgba(255, 255, 255, 0.26);
+    background: rgba(255, 255, 255, 0.11);
+    box-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
+}
+
+.project-info-modal-content {
+    --project-info-link: #6ea8ff;
+    --project-info-link-hover: #9bc2ff;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 18px 20px 24px;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.project-info-modal-content > * {
+    margin: 0;
+    max-width: 72ch;
+}
+
+.project-info-modal-content h2,
+.project-info-modal-content h3 {
+    color: #f5f5f5;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+}
+
+.project-info-modal-content h2 {
+    margin-top: 8px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: clamp(1.28rem, 2vw, 1.58rem);
+    line-height: 1.1;
+}
+
+.project-info-modal-content h3 {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: clamp(0.98rem, 1.3vw, 1.08rem);
+    line-height: 1.25;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.project-info-modal-content p,
+.project-info-modal-content li {
+    color: #f5f5f5;
+    font-size: clamp(1rem, 1vw, 1.06rem);
+    line-height: 1.78;
+    text-wrap: pretty;
+}
+
+.project-info-modal-content > blockquote + p {
+    font-size: clamp(1.05rem, 1.14vw, 1.16rem);
+    line-height: 1.7;
+}
+
+.project-info-modal-content ul {
+    margin: 0;
+    padding-left: 1.15rem;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.project-info-modal-content li::marker {
+    color: rgba(255, 255, 255, 0.56);
+}
+
+.project-info-modal-content strong {
+    color: #ffffff;
+}
+
+.project-info-modal-content a {
+    color: var(--project-info-link);
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 0.18em;
+    text-decoration-color: rgba(110, 168, 255, 0.38);
+}
+
+.project-info-modal-content a:hover,
+.project-info-modal-content a:focus-visible {
+    color: var(--project-info-link-hover);
+    text-decoration-color: rgba(155, 194, 255, 0.86);
+}
+
+.project-info-modal-content blockquote {
+    margin: 0;
+    padding: 16px 18px;
+    border: 1px solid rgba(110, 168, 255, 0.42);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(110, 168, 255, 0.1), rgba(110, 168, 255, 0.035));
+    box-shadow:
+        0 0 0 1px rgba(110, 168, 255, 0.12),
+        0 14px 42px rgba(0, 0, 0, 0.24);
+}
+
+.project-info-modal-content blockquote p {
+    color: #dce9ff;
+    line-height: 1.65;
+}
+
 /* Modal panel */
 .settings-modal {
     width: min(100%, 420px);
@@ -2362,4 +2584,50 @@ body.detail-panel-resizing * {
 /* Detail side panel styles lazy-load with the selection panel bundle. */
 #detailPanel {
     display: none;
+}
+
+@media (max-width: 880px) {
+    .project-info-modal {
+        width: 100%;
+        max-height: min(100dvh, calc(100dvh - 12px));
+        border-radius: 18px;
+    }
+
+    .project-info-modal-header {
+        padding: 16px 16px 14px;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .project-info-modal-header-actions {
+        justify-content: stretch;
+    }
+
+    .project-info-modal-standalone,
+    #projectInfoClose {
+        width: 100%;
+    }
+
+    .project-info-modal-content {
+        padding: 16px 16px 20px;
+        gap: 16px;
+    }
+
+    .project-info-modal-content > * {
+        max-width: none;
+    }
+
+    .project-info-modal-content h2 {
+        padding-top: 16px;
+        font-size: 1.24rem;
+    }
+
+    .project-info-modal-content h3 {
+        font-size: 0.95rem;
+    }
+
+    .project-info-modal-content blockquote {
+        padding: 15px 14px;
+        border-radius: 16px;
+    }
 }

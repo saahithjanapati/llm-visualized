@@ -2386,8 +2386,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     display: flex;
     align-items: center;
     align-self: flex-start;
-    gap: 8px;
-    flex-wrap: wrap;
+    gap: 6px;
+    flex-wrap: nowrap;
     justify-content: flex-end;
     flex: 0 0 auto;
 }
@@ -2722,23 +2722,24 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     -webkit-user-select: none;
     user-select: none;
     border-radius: 10px;
-    background: rgba(94, 154, 255, 0.12);
-    border-color: rgba(148, 193, 255, 0.34);
+    background: rgba(8, 10, 14, 0.9);
+    border-color: rgba(255,255,255,0.16);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
-    color: #fff;
-    box-shadow: none;
-    transition: background .15s ease, border-color .15s ease, color .15s ease;
+    color: #dbe4ef;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+    transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
 }
 .detail-transformer-view2d-action--info:hover {
-    background: rgba(94, 154, 255, 0.2);
-    border-color: rgba(173, 210, 255, 0.52);
+    background: rgba(14, 18, 24, 0.96);
+    border-color: rgba(255,255,255,0.28);
+    color: #fff;
 }
 .detail-transformer-view2d-action--info:active {
     transform: none;
 }
 .detail-transformer-view2d-action--info:focus-visible {
-    outline: 2px solid rgba(122,202,255,0.9);
+    outline: 2px solid rgba(236, 243, 252, 0.78);
     outline-offset: 2px;
 }
 .detail-transformer-view2d-canvas {
@@ -2989,15 +2990,15 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info {
-    background: rgba(94, 154, 255, 0.12);
-    border-color: rgba(148, 193, 255, 0.34);
-    box-shadow: none;
+    background: rgba(0, 0, 0, 0.56);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info:hover {
-    background: rgba(94, 154, 255, 0.2);
-    border-color: rgba(173, 210, 255, 0.52);
+    background: rgba(10, 10, 12, 0.72);
+    border-color: rgba(255, 255, 255, 0.26);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card {
     position: absolute;
@@ -3129,7 +3130,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     }
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-actions {
         align-self: stretch;
-        justify-content: flex-start;
+        justify-content: flex-end;
         flex: 0 0 auto;
     }
 }

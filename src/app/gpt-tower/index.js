@@ -51,7 +51,7 @@ import { initGoogleAnalyticsPageTracking } from './googleAnalytics.js';
 import { formatTokenLabel } from './tokenLabels.js';
 import { initPassIntroOverlay } from './passIntroOverlay.js';
 import { createLazySelectionPanel } from './lazySelectionPanel.js';
-import { openProjectInfoPage } from '../../ui/projectInfoNavigation.js';
+import { initProjectInfoOverlay } from '../../ui/projectInfoOverlay.js';
 import {
     NUM_LAYERS,
     PROMPT_TOKENS,
@@ -295,6 +295,7 @@ const infoBtn = document.getElementById('infoBtn');
 const topControls = document.getElementById('topControls');
 const settingsOverlay = document.getElementById('settingsOverlay');
 const { showTopControls } = initTopControlsAutohide({ topControls, settingsOverlay });
+const projectInfoOverlay = initProjectInfoOverlay({ pipeline });
 
 const selectionPanel = createLazySelectionPanel({
     activationSource,
@@ -302,7 +303,10 @@ const selectionPanel = createLazySelectionPanel({
     tokenLabels: initialPassState.tokenLabels,
     engine: pipeline.engine,
     pipeline,
-    pauseMainFlowOnMobileFocus: true
+    pauseMainFlowOnMobileFocus: true,
+    onOpenInfo: () => {
+        projectInfoOverlay.open();
+    }
 });
 
 transformerView2dBtn?.addEventListener('click', (event) => {
@@ -316,7 +320,8 @@ transformerView2dBtn?.addEventListener('click', (event) => {
 
 infoBtn?.addEventListener('click', (event) => {
     event.preventDefault();
-    openProjectInfoPage();
+    showTopControls();
+    projectInfoOverlay.open({ restoreFocusTarget: infoBtn });
 });
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {

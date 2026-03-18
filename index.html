@@ -75,7 +75,14 @@
                 <circle cx="12" cy="12" r="3.5"></circle>
             </svg>
         </button>
-        <button id="infoBtn" type="button" aria-label="Open project info page" title="Open project info page">
+        <button
+            id="infoBtn"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="projectInfoOverlay"
+            aria-label="Open project info page"
+            title="Open project info page"
+        >
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <circle cx="12" cy="12" r="9"></circle>
                 <path d="M12 10.2V16"></path>
@@ -457,6 +464,32 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="projectInfoOverlay" aria-hidden="true">
+        <div class="project-info-modal" role="dialog" aria-modal="true" aria-labelledby="projectInfoOverlayTitle">
+            <div class="project-info-modal-header">
+                <div class="project-info-modal-title-group">
+                    <div class="project-info-modal-eyebrow">About the project</div>
+                    <div id="projectInfoOverlayTitle" class="project-info-modal-title">LLM-Visualized</div>
+                </div>
+                <div class="project-info-modal-header-actions">
+                    <a
+                        id="projectInfoStandaloneLink"
+                        class="project-info-modal-standalone"
+                        href="/info/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        Open standalone page
+                    </a>
+                    <button id="projectInfoClose" type="button" aria-label="Back to the visualization">
+                        Back to visualization
+                    </button>
+                </div>
+            </div>
+            <div id="projectInfoOverlayContent" class="project-info-modal-content"></div>
         </div>
     </div>
 

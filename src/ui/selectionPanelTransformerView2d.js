@@ -2865,6 +2865,16 @@ export function createTransformerView2dDetailView(panelEl, {
     function updateReadouts() {
         syncHeadDetailChrome();
         syncFitSceneActionVisibility();
+        if (openInfoBtn) {
+            const shouldShowInfoAction = isTransformerView2dGraphOverview();
+            openInfoBtn.hidden = !shouldShowInfoAction;
+            openInfoBtn.setAttribute('aria-hidden', shouldShowInfoAction ? 'false' : 'true');
+            if (shouldShowInfoAction) {
+                openInfoBtn.removeAttribute('tabindex');
+            } else {
+                openInfoBtn.tabIndex = -1;
+            }
+        }
         const stageHeader = resolveTransformerView2dStageHeader(resolveDisplayedStageSemanticTarget());
         if (stageLayerReadout) {
             setNodeText(stageLayerReadout, stageHeader.layerLabel);

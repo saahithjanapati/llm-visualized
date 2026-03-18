@@ -352,6 +352,44 @@ describe('createTransformerView2dDetailView', () => {
         expect(onOpenInfo).toHaveBeenCalledTimes(1);
     });
 
+    it('shows the project info action in the outer overview and hides it for focused inner 2D views', () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const infoBtn = panelEl.querySelector('[data-transformer-view2d-action="open-info"]');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: null,
+            focusLabel: TRANSFORMER_VIEW2D_OVERVIEW_LABEL
+        });
+
+        expect(infoBtn?.hidden).toBe(false);
+        expect(infoBtn?.getAttribute('aria-hidden')).toBe('false');
+
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'module'
+            },
+            focusLabel: 'Token Embedding'
+        });
+
+        expect(infoBtn?.hidden).toBe(true);
+        expect(infoBtn?.getAttribute('aria-hidden')).toBe('true');
+    });
+
     it('stages MHSA entries from the tower overview into the head-detail scene', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);

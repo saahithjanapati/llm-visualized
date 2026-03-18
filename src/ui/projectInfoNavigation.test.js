@@ -3,9 +3,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+    bindProjectInfoBackLink,
     buildProjectInfoPageUrl,
     openProjectInfoPage,
     resolveProjectInfoBackHref,
+    shouldUseProjectInfoHistoryBack,
     syncProjectInfoBackLink
 } from './projectInfoNavigation.js';
 
@@ -84,5 +86,77 @@ describe('projectInfoNavigation', () => {
 
         expect(opened).toBe(true);
         expect(assign).toHaveBeenCalledWith('/info/?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa');
+    });
+
+    it('prefers history back when the referrer matches the encoded visualization route', () => {
+        const shouldUseHistoryBack = shouldUseProjectInfoHistoryBack({
+            locationRef: createLocationRef({
+                href: 'https://llm-visualized.local/info/?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa%26layer%3D3',
+                pathname: '/info/',
+                search: '?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa%26layer%3D3'
+            }),
+            documentRef: {
+                referrer: 'https://llm-visualized.local/?view=2d&component=mhsa&layer=3'
+            },
+            historyRef: {
+                back: vi.fn(),
+                length: 2
+            }
+        });
+
+        expect(shouldUseHistoryBack).toBe(true);
+    });
+
+    it('does not use history back for mismatched or direct-entry info pages', () => {
+        const shouldUseHistoryBack = shouldUseProjectInfoHistoryBack({
+            locationRef: createLocationRef({
+                href: 'https://llm-visualized.local/info/?returnTo=%2F%3Fview%3D2d',
+                pathname: '/info/',
+                search: '?returnTo=%2F%3Fview%3D2d'
+            }),
+            documentRef: {
+                referrer: 'https://llm-visualized.local/'
+            },
+            historyRef: {
+                back: vi.fn(),
+                length: 1
+            }
+        });
+
+        expect(shouldUseHistoryBack).toBe(false);
+    });
+
+    it('uses history traversal for the info-page back link when returning to the same app state', () => {
+        document.body.innerHTML = '<a class="info-page-back-link" href="/">Back to visualization</a>';
+        const anchorEl = document.querySelector('.info-page-back-link');
+        const back = vi.fn();
+
+        syncProjectInfoBackLink(anchorEl, {
+            locationRef: createLocationRef({
+                href: 'https://llm-visualized.local/info/?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa',
+                pathname: '/info/',
+                search: '?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa'
+            })
+        });
+        bindProjectInfoBackLink(anchorEl, {
+            locationRef: createLocationRef({
+                href: 'https://llm-visualized.local/info/?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa',
+                pathname: '/info/',
+                search: '?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa'
+            }),
+            documentRef: {
+                referrer: 'https://llm-visualized.local/?view=2d&component=mhsa'
+            },
+            historyRef: {
+                back,
+                length: 2
+            }
+        });
+
+        const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+        anchorEl?.dispatchEvent(event);
+
+        expect(back).toHaveBeenCalledTimes(1);
+        expect(event.defaultPrevented).toBe(true);
     });
 });

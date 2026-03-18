@@ -1,5 +1,8 @@
 import infoMarkdown from '../ui/infoModalContent.md?raw';
-import { syncProjectInfoBackLink } from '../ui/projectInfoNavigation.js';
+import {
+    bindProjectInfoBackLink,
+    syncProjectInfoBackLink
+} from '../ui/projectInfoNavigation.js';
 import { renderSimpleMarkdown } from '../ui/simpleMarkdown.js';
 import './page.css';
 
@@ -8,6 +11,7 @@ const backLinkEl = document.querySelector('.info-page-back-link');
 
 if (backLinkEl) {
     syncProjectInfoBackLink(backLinkEl);
+    bindProjectInfoBackLink(backLinkEl);
 }
 
 if (contentEl) {
