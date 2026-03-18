@@ -4995,6 +4995,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 
 @media (max-width: 600px) {
     #topControls {
+        gap: 3px;
         left: max(8px, env(safe-area-inset-left));
         right: max(8px, env(safe-area-inset-right));
         max-width: none;
@@ -5013,7 +5014,8 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         align-items: center;
         justify-content: center;
         min-width: 0;
-        padding-inline: clamp(10px, 3vw, 14px);
+        padding-inline: clamp(6px, 2vw, 10px);
+        font-size: 11px;
     }
 }
 

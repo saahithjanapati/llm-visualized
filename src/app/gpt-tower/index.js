@@ -38,7 +38,11 @@ import {
 } from '../../ui/tokenChipHoverSync.js';
 import { resolveHoverTokenChipSyncEntries } from '../../engine/coreHoverTokenContext.js';
 import { loadActivationState } from './activation.js';
-import { initFollowModeControls, initTopControlsAutohide } from './topControls.js';
+import {
+    initFollowModeControls,
+    initTopControlsAutohide,
+    initTransformerView2dButtonLabel
+} from './topControls.js';
 import { buildPassState, initGenerationController } from './generationController.js';
 import {
     PRECOMPUTED_COMPONENTS_SLICE_URL
@@ -290,6 +294,7 @@ const followModeControls = initFollowModeControls({
     followModeBtn
 });
 const transformerView2dBtn = document.getElementById('transformerView2dBtn');
+initTransformerView2dButtonLabel(transformerView2dBtn);
 const infoBtn = document.getElementById('infoBtn');
 
 const topControls = document.getElementById('topControls');

@@ -2,7 +2,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { initFollowModeControls } from './topControls.js';
+import {
+    initFollowModeControls,
+    initTransformerView2dButtonLabel
+} from './topControls.js';
 
 describe('initFollowModeControls', () => {
     const originalMatchMedia = window.matchMedia;
@@ -53,7 +56,7 @@ describe('initFollowModeControls', () => {
         smallScreen = true;
         window.dispatchEvent(new Event('resize'));
 
-        expect(followModeBtn.textContent).toBe('Follow Mode');
+        expect(followModeBtn.textContent).toBe('Follow');
         expect(followModeBtn.getAttribute('aria-label')).toBe('Enable follow mode');
         expect(followModeBtn.getAttribute('title')).toBe('Enable follow mode');
     });
@@ -93,8 +96,31 @@ describe('initFollowModeControls', () => {
             followModeBtn
         });
 
-        expect(followModeBtn.textContent).toBe('Follow Mode');
+        expect(followModeBtn.textContent).toBe('Follow');
         expect(followModeBtn.disabled).toBe(true);
         expect(followModeBtn.getAttribute('aria-label')).toBe('Follow mode enabled');
+    });
+
+    it('uses a shorter mobile label for the 2D top-control button and restores the full label on resize', () => {
+        let smallScreen = true;
+        window.matchMedia = vi.fn((query) => ({
+            matches: query === '(max-aspect-ratio: 1/1), (max-width: 880px)' ? smallScreen : false,
+            media: query,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn()
+        }));
+
+        const transformerView2dBtn = document.createElement('button');
+        initTransformerView2dButtonLabel(transformerView2dBtn);
+
+        expect(transformerView2dBtn.textContent).toBe('2D');
+
+        smallScreen = false;
+        window.dispatchEvent(new Event('resize'));
+
+        expect(transformerView2dBtn.textContent).toBe('2D View');
     });
 });

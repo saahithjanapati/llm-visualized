@@ -1,7 +1,9 @@
-function isSmallScreenViewport() {
+const SMALL_SCREEN_TOP_CONTROLS_MEDIA_QUERY = '(max-aspect-ratio: 1/1), (max-width: 880px)';
+
+export function isSmallScreenTopControlsViewport() {
     if (typeof window === 'undefined') return false;
     if (typeof window.matchMedia === 'function') {
-        return window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+        return window.matchMedia(SMALL_SCREEN_TOP_CONTROLS_MEDIA_QUERY).matches;
     }
     return window.innerWidth <= 880 || window.innerHeight <= window.innerWidth;
 }
@@ -10,8 +12,8 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
     const updateFollowButton = (enabled) => {
         if (!followModeBtn) return;
         const isOn = !!enabled;
-        const visibleLabel = isSmallScreenViewport()
-            ? 'Follow Mode'
+        const visibleLabel = isSmallScreenTopControlsViewport()
+            ? 'Follow'
             : (isOn ? 'Follow mode on' : 'Enable Follow Mode');
         followModeBtn.dataset.state = isOn ? 'enabled' : 'disabled';
         followModeBtn.setAttribute('aria-pressed', String(isOn));
@@ -228,8 +230,30 @@ export function initFollowModeControls({ pipeline, appState, followModeBtn }) {
     return { setFollowMode, updateFollowButton, suppressPendingFollowDisable };
 }
 
+export function initTransformerView2dButtonLabel(transformerView2dBtn) {
+    if (!transformerView2dBtn) {
+        return {
+            update: () => false
+        };
+    }
+
+    const update = () => {
+        transformerView2dBtn.textContent = isSmallScreenTopControlsViewport()
+            ? '2D'
+            : '2D View';
+        return true;
+    };
+
+    update();
+    if (typeof window !== 'undefined') {
+        window.addEventListener('resize', update);
+    }
+
+    return { update };
+}
+
 export function initTopControlsAutohide({ topControls, settingsOverlay }) {
-    const isSkinnyScreen = () => window.matchMedia('(max-aspect-ratio: 1/1), (max-width: 880px)').matches;
+    const isSkinnyScreen = () => window.matchMedia(SMALL_SCREEN_TOP_CONTROLS_MEDIA_QUERY).matches;
     const isTouchUi = () => window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     let topControlsHideTimer = null;
     const autoHideDelayMs = () => (isTouchUi() ? 9000 : 5000);
