@@ -17,8 +17,8 @@ const SKIP_OPTION_LABELS = Object.freeze({
     skipLayerBtn: 'Skip layer',
     skipConveyorBtn: 'Skip attention',
     skipToEndBtn: 'Skip to end',
-    skipNextPassBtn: 'Next pass',
-    skipLastPassBtn: 'Last pass'
+    skipNextPassBtn: 'Skip to next pass',
+    skipLastPassBtn: 'Skip to last pass'
 });
 
 const SKIP_OPTION_DESCRIPTIONS = Object.freeze({
