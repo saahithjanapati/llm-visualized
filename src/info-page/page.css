@@ -19,6 +19,7 @@
 html,
 body {
     min-height: 100%;
+    height: 100%;
     margin: 0;
 }
 
@@ -41,21 +42,24 @@ body::before {
 }
 
 .info-page-shell {
-    width: min(920px, calc(100vw - 40px));
-    margin: 0 auto;
-    padding:
-        max(28px, calc(env(safe-area-inset-top) + 16px))
-        max(16px, env(safe-area-inset-right))
-        max(56px, calc(env(safe-area-inset-bottom) + 20px))
-        max(16px, env(safe-area-inset-left));
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
 }
 
 .info-page-back-link {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 22px;
-    padding: 10px 0;
+    margin: 0;
+    padding:
+        max(24px, calc(env(safe-area-inset-top) + 12px))
+        max(20px, calc(env(safe-area-inset-right) + 16px))
+        18px
+        max(20px, calc(env(safe-area-inset-left) + 16px));
     color: var(--info-link);
     text-decoration: none;
     font-size: 14px;
@@ -74,11 +78,17 @@ body::before {
 }
 
 .info-page-card {
-    padding: 22px 28px 30px;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding:
+        24px
+        max(30px, calc(env(safe-area-inset-right) + 22px))
+        max(32px, calc(env(safe-area-inset-bottom) + 20px))
+        max(30px, calc(env(safe-area-inset-left) + 22px));
     border: 1px solid var(--info-surface-border);
-    border-radius: 28px;
+    border-radius: 0;
     background: linear-gradient(180deg, var(--info-surface), rgba(255, 255, 255, 0.008));
-    box-shadow: 0 20px 64px rgba(0, 0, 0, 0.36);
+    box-shadow: none;
 }
 
 .info-page-card::before {
@@ -197,21 +207,26 @@ body::before {
 @media (max-width: 700px) {
     .info-page-shell {
         width: 100%;
-        padding-top: max(18px, calc(env(safe-area-inset-top) + 10px));
-        padding-left: max(12px, env(safe-area-inset-left));
-        padding-right: max(12px, env(safe-area-inset-right));
-        padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 14px));
+        min-height: 100dvh;
+        padding: 0;
     }
 
     .info-page-back-link {
-        margin-bottom: 14px;
-        padding: 10px 0;
+        padding:
+            max(16px, calc(env(safe-area-inset-top) + 8px))
+            max(16px, calc(env(safe-area-inset-right) + 12px))
+            14px
+            max(16px, calc(env(safe-area-inset-left) + 12px));
         font-size: 14px;
     }
 
     .info-page-card {
-        padding: 18px 16px 20px;
-        border-radius: 22px;
+        padding:
+            18px
+            max(16px, calc(env(safe-area-inset-right) + 12px))
+            max(20px, calc(env(safe-area-inset-bottom) + 14px))
+            max(16px, calc(env(safe-area-inset-left) + 12px));
+        border-radius: 0;
     }
 
     .info-page-title {
