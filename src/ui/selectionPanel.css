@@ -2702,9 +2702,9 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     min-width: 96px;
 }
 .detail-transformer-view2d-action--icon {
-    width: 40px;
-    min-width: 40px;
-    height: 40px;
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
     padding: 0;
 }
 .detail-transformer-view2d-action--icon svg {
@@ -2718,13 +2718,28 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     stroke-linejoin: round;
 }
 .detail-transformer-view2d-action--info {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    border-radius: 10px;
     background: rgba(94, 154, 255, 0.12);
     border-color: rgba(148, 193, 255, 0.34);
-    color: #e2f2ff;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    box-shadow: none;
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
 .detail-transformer-view2d-action--info:hover {
     background: rgba(94, 154, 255, 0.2);
     border-color: rgba(173, 210, 255, 0.52);
+}
+.detail-transformer-view2d-action--info:active {
+    transform: none;
+}
+.detail-transformer-view2d-action--info:focus-visible {
+    outline: 2px solid rgba(122,202,255,0.9);
+    outline-offset: 2px;
 }
 .detail-transformer-view2d-canvas {
     width: 100%;
@@ -2974,11 +2989,14 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info {
-    background: rgba(56, 132, 255, 0.18);
+    background: rgba(94, 154, 255, 0.12);
     border-color: rgba(148, 193, 255, 0.34);
+    box-shadow: none;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-action--info:hover {
-    background: rgba(56, 132, 255, 0.26);
+    background: rgba(94, 154, 255, 0.2);
     border-color: rgba(173, 210, 255, 0.52);
 }
 #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-canvas-card {
