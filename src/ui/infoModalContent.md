@@ -10,9 +10,9 @@ When most people refer to GPT-2, they are usually referring to the 1.5B paramete
 
 The vectors, attention scores, and logit probabilities on this site were extracted from GPT-2 as it processed a prompt. The main goal is to help you follow one real forward pass as it moves through the model.
 
-The 3D view and 2D view show the same model state in two different ways. The 3D view is meant to show the forward pass. The 2D view is meant to make the same information easier to follow, so you can clearly see the matrix operations performed.
+The 3D view and 2D view show the same model state in two different ways. The 3D view is meant to show the forward pass in motion. The 2D view is meant to make the same information readable in matrix form.
 
-For the vectors shown here, I extracted one value every 64 dimensions and used those sampled values to color the vectors. For example, for a 768-dimensional vector, I extract the values at positions 0, 64, 128, and so on up to 704. Those 12 sampled values are what drive the colors you see. For a 64-dimensional vector, I just use the value at position 0. If you turn on Dev mode in Settings and click a vector in the scene, you can inspect the extracted values in the sidebar.
+For the vectors shown here, I extracted one value every 64 dimensions and used those sampled values to color the vectors. For example, for a 768-dimensional vector, I extract the values at positions 0, 64, 128, and so on up to 704. Those 12 sampled values determine the shades used to color the vector. For a 64-dimensional vector, I just use the value at position 0. If you turn on Dev mode in Settings and click a vector in the scene, you can inspect the extracted values in the sidebar.
 
 The 3D visualization was built with Three.js and the site is currently deployed on Vercel.
 
@@ -33,7 +33,7 @@ The 3D visualization was built with Three.js and the site is currently deployed 
 
 ## Some Sources of Inspiration
 
-Below is an incomplete list of projects, papers, and references that inspired this project in one way or another.
+Below is an incomplete list of projects, papers, and references that inspired the project in some way.
 
 - [Andrej Karpathy's minGPT repo](https://github.com/karpathy/minGPT) and the [Zero to Hero series](https://www.youtube.com/playlist?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ)
 - The diagrams in Anthropic's [A Mathematical Framework for Transformer Circuits](https://transformer-circuits.pub/2021/framework/index.html)
@@ -66,9 +66,9 @@ Below is an incomplete list of projects, papers, and references that inspired th
 
 - I plan to add more prompts/generations once I get a better sense of traffic volume. I also plan to release my extraction script so people can visualize forward passes of their own prompts.
 
-- The `Copy context to Ask Robot` button in the sidebars is also still pretty experimental. The prompt for that feature could definitely be made better and optimized.
+- The `Copy context to Ask Robot` button in the sidebars is also still pretty experimental. The generated prompts could definitely be made better and optimized.
 
-- There is a lot of unnecessary lag, plus interaction bugs that need to be fixed. A lot of the current work is optimization, bug hunting, and cleanup.
+- There is a lot of unnecessary lag and several interaction bugs that need to be fixed. A lot of the current work is optimization, bug hunting, and cleanup.
 
 If you run into any problems or have suggestions, please let me know through the [form above](#project-info-feedback)!
 

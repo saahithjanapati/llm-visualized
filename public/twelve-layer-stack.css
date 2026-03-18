@@ -487,7 +487,7 @@ body.touch-ui * {
     -webkit-appearance: none;
     width: 100%;
     text-align: left;
-    border: 1px solid rgba(108, 182, 255, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 11px;
     background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
     color: #f1f1f1;
@@ -500,11 +500,11 @@ body.touch-ui * {
     transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
 }
 .skip-option:hover {
-    border-color: rgba(255, 255, 255, 0.34);
-    background: linear-gradient(160deg, rgba(24, 24, 24, 0.9), rgba(10, 10, 10, 0.94));
+    border-color: rgba(122, 202, 255, 0.72);
+    background: linear-gradient(160deg, rgba(22, 34, 56, 0.94), rgba(8, 16, 30, 0.96));
     box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.06),
-        0 10px 24px rgba(0, 0, 0, 0.42);
+        0 0 0 1px rgba(122, 202, 255, 0.16),
+        0 10px 24px rgba(5, 18, 36, 0.42);
     transform: translateY(-1px);
 }
 .skip-option:focus-visible {
@@ -2283,11 +2283,12 @@ body.detail-panel-resizing * {
     touch-action: manipulation;
     transition: border-color .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease;
 }
-#settingsClose:hover {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.3);
+#settingsClose:hover,
+#settingsClose:focus-visible {
+    background: rgba(66, 125, 212, 0.18);
+    border-color: rgba(122, 202, 255, 0.62);
     color: #fff;
-    box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+    box-shadow: 0 0 12px rgba(122, 202, 255, 0.22);
 }
 
 .settings-content {
@@ -2327,6 +2328,7 @@ body.detail-panel-resizing * {
     border-radius: 11px;
     background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
     margin-bottom: 0;
+    transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
 }
 .settings-field {
     padding: 10px 12px;
@@ -2334,6 +2336,18 @@ body.detail-panel-resizing * {
     border-radius: 11px;
     background: linear-gradient(160deg, rgba(18, 18, 18, 0.86), rgba(8, 8, 8, 0.9));
     margin-bottom: 0;
+    transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.slider-row:hover,
+.slider-row:focus-within,
+.settings-field:hover,
+.settings-field:focus-within {
+    border-color: rgba(122, 202, 255, 0.72);
+    background: linear-gradient(160deg, rgba(22, 34, 56, 0.94), rgba(8, 16, 30, 0.96));
+    box-shadow:
+        0 0 0 1px rgba(122, 202, 255, 0.16),
+        0 10px 24px rgba(5, 18, 36, 0.42);
+    transform: translateY(-1px);
 }
 .settings-field-label {
     display: block;
@@ -2363,9 +2377,9 @@ body.detail-panel-resizing * {
 }
 .settings-select:focus {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.34);
+    border-color: rgba(122, 202, 255, 0.62);
     box-shadow:
-        0 0 0 2px rgba(255, 255, 255, 0.08),
+        0 0 0 2px rgba(122, 202, 255, 0.14),
         inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .settings-select:disabled {
@@ -2409,10 +2423,10 @@ body.detail-panel-resizing * {
 .slider-value-button:hover,
 .slider-value-button:focus-visible {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.32);
-    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(122, 202, 255, 0.66);
+    background: rgba(66, 125, 212, 0.2);
     color: #f3f8ff;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 2px rgba(122, 202, 255, 0.14);
 }
 .slider-value-input-shell {
     display: inline-flex;
@@ -2425,6 +2439,11 @@ body.detail-panel-resizing * {
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.08);
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+.slider-value-input-shell:focus-within {
+    border-color: rgba(122, 202, 255, 0.66);
+    background: rgba(66, 125, 212, 0.2);
+    box-shadow: 0 0 0 2px rgba(122, 202, 255, 0.14);
 }
 .slider-value-input-shell[hidden] { display: none !important; }
 .slider-value-input {
@@ -2506,12 +2525,25 @@ body.detail-panel-resizing * {
     transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
 }
 .toggle-row:hover {
-    border-color: rgba(255, 255, 255, 0.34);
-    background: linear-gradient(160deg, rgba(24, 24, 24, 0.9), rgba(10, 10, 10, 0.94));
+    border-color: rgba(122, 202, 255, 0.72);
+    background: linear-gradient(160deg, rgba(22, 34, 56, 0.94), rgba(8, 16, 30, 0.96));
     box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.06),
-        0 10px 24px rgba(0, 0, 0, 0.42);
+        0 0 0 1px rgba(122, 202, 255, 0.16),
+        0 10px 24px rgba(5, 18, 36, 0.42);
     transform: translateY(-1px);
+}
+.toggle-row:hover .toggle-track {
+    background: linear-gradient(180deg, rgba(84, 154, 255, 0.32), rgba(47, 92, 161, 0.2));
+    border-color: rgba(122, 202, 255, 0.72);
+    box-shadow:
+        inset 0 0 0 1px rgba(122, 202, 255, 0.16),
+        0 0 0 1px rgba(122, 202, 255, 0.08),
+        0 6px 14px rgba(5, 18, 36, 0.36);
+}
+.toggle-row:hover .toggle-track::after {
+    box-shadow:
+        0 2px 7px rgba(0, 0, 0, 0.44),
+        0 0 0 1px rgba(122, 202, 255, 0.18);
 }
 .toggle-row .toggle-text {
     flex: 1;

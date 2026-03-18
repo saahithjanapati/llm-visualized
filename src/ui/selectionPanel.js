@@ -134,6 +134,7 @@ import {
 import { resolveSelectionPrimaryActionConfig } from './selectionPanelPrimaryActionUtils.js';
 import { buildSelectionPromptContext } from './selectionPanelPromptContextUtils.js';
 import { buildSelectionChatPrompt } from './selectionPanelChatPromptUtils.js';
+import { resolveLiveSceneState } from './selectionPanelLiveSceneStateUtils.js';
 import {
     formatKvCachePhaseLabel,
     isKvCacheInfoSelection,
@@ -4903,6 +4904,12 @@ export class SelectionPanel {
         };
     }
 
+    _resolveCopyContextLiveSceneState() {
+        return resolveLiveSceneState({
+            pipeline: this.pipeline
+        });
+    }
+
     _buildSelectionContextPayload() {
         const selection = this._lastSelection;
         const normalizedLabel = this._lastSelectionLabel
@@ -4939,7 +4946,8 @@ export class SelectionPanel {
                 vectorTokenMetadata,
                 activationSource: this.activationSource,
                 kvState: this._resolveCopyContextKvState(selection),
-                surfaceState: this._resolveCopyContextSurfaceState()
+                surfaceState: this._resolveCopyContextSurfaceState(),
+                liveSceneState: this._resolveCopyContextLiveSceneState()
             });
         }
 
@@ -4989,7 +4997,8 @@ export class SelectionPanel {
             vectorTokenMetadata,
             activationSource: this.activationSource,
             kvState: this._resolveCopyContextKvState(selection),
-            surfaceState: this._resolveCopyContextSurfaceState()
+            surfaceState: this._resolveCopyContextSurfaceState(),
+            liveSceneState: this._resolveCopyContextLiveSceneState()
         });
     }
 

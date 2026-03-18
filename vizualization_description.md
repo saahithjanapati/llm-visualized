@@ -306,7 +306,7 @@ The visualization also includes supporting UI elements outside the main 3D scene
 
 In addition to the main 3D scene, the app also includes a **2D semantic canvas**. This is not a separate model or a separate explanation. It is a parallel view of the **same GPT-2 runtime state** shown in the 3D scene, but presented as a scalable semantic diagram / matrix-style canvas rather than as moving 3D geometry.
 
-The 2D view is designed for panning, zooming, and semantic focus. Instead of reading motion in depth, the viewer reads module layout, matrix placement, connector flow, and local detail views.
+The 2D view is designed for panning, zooming, and semantic focus. Instead of reading motion in depth, the viewer reads module layout, matrix placement, connector flow, and local detail views. Like the 3D scene, the 2D canvas still has a directional sense of computation. The model is laid out broadly from left to right, so moving rightward usually means moving later in the computation.
 
 ### 1. 2D overview / outer view
 
@@ -317,23 +317,32 @@ The outer 2D view presents the model as a large semantic map of the transformer:
 * **Per-layer transformer modules** for LayerNorm 1, self-attention, output projection, LayerNorm 2, and the MLP
 * **Final output modules** for final layer norm, unembedding / logits, and chosen-token output
 
-The overview is meant to show where each major computation lives in the stack and how information flows from one module to the next.
+The overview is meant to show where each major computation lives in the stack and how information flows from one module to the next. It is essentially a horizontal 2D version of the same GPT-2 pipeline shown in 3D: token and position embeddings on the left, then repeated transformer blocks moving to the right, then final layer norm and output logits at the far right.
+
+In this 2D view, matrices are typically drawn as rounded-rectangle cards or panels. For token-by-feature matrices such as **X_ln**, **Q**, **K**, **V**, **A**, **Z**, **O**, and related residual states, the rows correspond to token positions in the current context, and the user can often hover over individual rows to inspect token-specific values.
 
 ### 2. 2D detail views
 
-From the overview, the app can focus into more detailed 2D views for specific components.
+From the overview, the app can focus into more detailed 2D views for specific components. These detailed views also read primarily from left to right, so the spatial layout itself helps communicate the order of operations.
 
 **Attention head detail**
 
-For a selected attention head, the 2D canvas can focus into a head-specific detail view. This view can show:
+For a selected attention head, the 2D canvas can focus into a head-specific detail view. The incoming matrix is **X_ln**, with **T** rows where **T** is the current context length, and width **768**. The head detail then lays out the attention computation as a left-to-right equation:
 
-* **Query, key, and value projection areas**
-* **Query / key / value weight matrices and bias vectors**
-* **Projected query, key, and value vectors**
-* **Pre-softmax scores, post-softmax attention weights, the attention mask, and softmax-related elements**
-* **Weighted-value products and the head's final weighted-sum / head-output region**
+* **X_ln** appears as the incoming matrix, drawn as a rounded-rectangle matrix card, and it is copied into three parallel branches labeled **query**, **key**, and **value**
+* each branch shows the same input shape, **T x 768**, with dimension labels under the matrices
+* because **X_ln**, **Q**, **K**, **V**, **A_pre**, **A_post**, and **H_i** are token-indexed matrices, the user can hover over rows to inspect particular token rows in the current context
+* the query branch multiplies by the head-specific **W_Q** matrix, the key branch multiplies by **W_K**, and the value branch multiplies by **W_V**
+* these learned matrices are shown as blue rounded weight rectangles with shape **768 x 64**, because each GPT-2 Small head projects from model width into head width
+* each branch also adds a learned bias vector, **b_Q**, **b_K**, or **b_V**, each with shape **1 x 64**
+* this produces **Q**, **K**, and **V**, each with shape **T x 64**
+* the query and key paths then combine into the scaled dot-product attention term **Q K^T / sqrt(d_head)**, producing **A_pre**, the pre-softmax attention score matrix of shape **T x T**
+* the view then shows masking and normalization explicitly: **A_pre + M_causal -> softmax -> A_post**
+* the causal mask represents blocked future-token attention, so masked positions are driven to very negative values before softmax
+* **A_post**, also **T x T**, is then multiplied by **V** to produce the per-head output **H_i**, with shape **T x 64**
+* that head output points to the right, matching the overall left-to-right flow of the transformer
 
-This is the 2D counterpart of the 3D QKV and attention-routing sequence.
+This is the 2D counterpart of the 3D QKV, masking, softmax, and attention-routing sequence.
 
 **Output projection detail**
 
@@ -341,14 +350,16 @@ For the post-attention recombination stage, the 2D canvas can focus into an **ou
 
 This detail view follows the full recombination path for one layer:
 
-* the twelve per-head outputs **H_1, H_2, ..., H_12**
-* the explicit **concatenation** step that forms **H_concat**
-* a copied / forwarded version of the concatenated output as it enters the projection stage
-* the learned **output projection weight matrix** **W_O**
-* the learned **output projection bias vector** **b_O**
-* the final projected attention output **O**
+* the twelve per-head outputs **H_1, H_2, ..., H_12**, each with shape **T x 64**
+* the explicit horizontal **concatenation** step that forms **H_concat**, with shape **T x 768**
+* a copied / forwarded version of **H_concat** as it enters the projection stage
+* the learned **output projection weight matrix** **W_O**, with shape **768 x 768**
+* the learned **output projection bias vector** **b_O**, with shape **1 x 768**
+* the final projected attention output **O**, with shape **T x 768**
 
-So this view is not just a single matrix card. It shows the flow from separate head outputs, through concatenation, into the learned projection that maps the concatenated attention result back to model width.
+The token-by-feature matrices in this view are also shown as rounded matrix cards, and the rows of **H_i**, **H_concat**, and **O** can be hovered to inspect token-specific rows.
+
+So this view is not just a single matrix card. It shows the flow from separate head outputs, through concatenation, into the learned projection that maps the concatenated attention result back to model width and then sends **O** onward to the right.
 
 **MLP detail**
 
@@ -356,17 +367,17 @@ For the feed-forward block, the 2D canvas can focus into an **MLP** detail view.
 
 This detail view lays out the MLP pipeline explicitly:
 
-* the incoming post-LayerNorm vector **x_ln**
-* the learned **up-projection weight matrix** **W_up**
-* the learned **up-projection bias vector** **b_up**
-* the up-projection output **a**
-* the **GELU** activation step
-* the post-GELU activation **z**
-* the learned **down-projection weight matrix** **W_down**
-* the learned **down-projection bias vector** **b_down**
-* the final MLP output **MLP(x_ln)**
+* the incoming post-LayerNorm matrix **X_ln**, with shape **T x 768**
+* the learned **up-projection weight matrix** **W_up**, with shape **768 x 3072**
+* the learned **up-projection bias vector** **b_up**, with shape **1 x 3072**
+* the affine result **A = X_ln W_up + b_up**, with shape **T x 3072**
+* the **GELU** activation step applied to **A**
+* the post-GELU activation **Z**, also with shape **T x 3072**
+* the learned **down-projection weight matrix** **W_down**, with shape **3072 x 768**
+* the learned **down-projection bias vector** **b_down**, with shape **1 x 768**
+* the final MLP output **MLP(X_ln) = Z W_down + b_down**, with shape **T x 768**
 
-In practice the layout also includes copied intermediate vectors where helpful, so the viewer can follow the path from the up projection into GELU and then into the down projection without losing the relationship between stages.
+In practice the layout also includes copied intermediate matrices where helpful, so the viewer can follow the path from the up projection into GELU and then into the down projection without losing the relationship between stages. These matrices are shown as rounded cards, and token rows in **X_ln**, **A**, **Z**, and **MLP(X_ln)** can be hovered. The final MLP output also points to the right, matching the outer-view flow.
 
 **LayerNorm detail**
 
@@ -374,16 +385,17 @@ For layer norms, the 2D canvas can focus into a **LayerNorm** detail view for LN
 
 This detail view breaks LayerNorm into its visible pipeline stages:
 
-* the incoming vector **x**
-* the explicit normalization equation that produces the normalized vector **x_hat**
-* a copied normalized vector used to feed the next step
-* the learned **scale** parameter vector **gamma**
-* the scaled result **gamma ⊙ x_hat**
-* a copied scaled vector used to feed the final additive step
-* the learned **shift** parameter vector **beta**
-* the final LayerNorm output, such as **x_ln** or the final-layer output vector
+* the incoming matrix **X**, with shape **T x 768**
+* the explicit normalization equation, shown above the flow, that produces **X_hat = (X - mu) / sqrt(sigma^2 + epsilon)**
+* the normalized output **X_hat**, again with shape **T x 768**
+* a copied version of **X_hat** feeding the next step
+* the learned **scale** parameter vector **gamma**, with shape **1 x 768**
+* the elementwise scaled result **gamma * X_hat**
+* a copied scaled matrix feeding the final additive step
+* the learned **shift** parameter vector **beta**, with shape **1 x 768**
+* the final LayerNorm output, such as **X_ln**, again with shape **T x 768**
 
-So the LayerNorm detail view is a full normalize -> scale -> shift pipeline rather than a single abstract module card.
+So the LayerNorm detail view is a full normalize -> scale -> shift pipeline rather than a single abstract module card, and its output continues to the right into the next transformer operation. The matrix states are rendered as rounded cards, and the token rows in **X**, **X_hat**, **gamma * X_hat**, and **X_ln** can be hovered.
 
 ### 3. 2D interaction model
 

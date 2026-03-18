@@ -80,6 +80,63 @@ function buildSemanticTargetSummary(target = null) {
     return parts.join(', ');
 }
 
+function buildActive2dDetailSummaryLines(surfaceState = null) {
+    if (!surfaceState || surfaceState.activeMode !== 'transformer-view2d') return [];
+
+    const target = surfaceState.current2dSemanticTarget;
+    const componentKind = String(target?.componentKind || '').trim().toLowerCase();
+    const transitionMode = String(surfaceState.current2dTransitionMode || '').trim().toLowerCase();
+    const detailFocusLabel = String(surfaceState.current2dDetailFocusLabel || '').trim().toLowerCase();
+    const focusLabel = String(surfaceState.current2dFocusLabel || '').trim().toLowerCase();
+
+    if (componentKind === 'mhsa') {
+        return [
+            'This 2D attention-head detail view reads left to right: X_ln is copied into query, key, and value branches before the head-specific attention computation continues to the right.',
+            'The matrices are shown as rounded matrix cards, and token-indexed matrices such as X_ln, Q, K, V, A_pre, A_post, and H_i can be inspected row by row by hovering their rows.',
+            'Each branch starts from a T x 768 input matrix and applies the head-specific W_Q, W_K, or W_V matrix with shape 768 x 64 plus the corresponding 1 x 64 bias vector to produce Q, K, and V with shape T x 64.',
+            'The query and key branches combine into Q K^T / sqrt(d_head) to form the T x T pre-softmax matrix A_pre, then masking and softmax produce A_post, and A_post multiplies V to produce the head output H_i with shape T x 64.'
+        ];
+    }
+
+    if (componentKind === 'output-projection') {
+        return [
+            'This 2D output-projection detail view also reads left to right.',
+            'The matrix states are shown as rounded cards, and token rows in H_i, H_concat, and O can be hovered to inspect the corresponding row for a given token position.',
+            'The twelve head outputs H_1 through H_12, each with shape T x 64, are concatenated horizontally into H_concat with shape T x 768.',
+            'H_concat then passes through the learned output projection W_O with shape 768 x 768 plus the bias vector b_O with shape 1 x 768 to produce O with shape T x 768.'
+        ];
+    }
+
+    if (componentKind === 'mlp') {
+        return [
+            'This 2D MLP detail view shows the feed-forward path from left to right.',
+            'The matrix states are shown as rounded cards, and token rows in X_ln, A, Z, and MLP(X_ln) can be hovered to inspect token-specific activations.',
+            'The incoming X_ln matrix with shape T x 768 is multiplied by W_up with shape 768 x 3072 and added to b_up with shape 1 x 3072 to produce A with shape T x 3072.',
+            'After GELU, the post-activation matrix Z still has shape T x 3072, and Z then multiplies W_down with shape 3072 x 768 and adds b_down with shape 1 x 768 to produce MLP(X_ln) with shape T x 768.'
+        ];
+    }
+
+    if (componentKind === 'layer-norm') {
+        return [
+            'This 2D LayerNorm detail view shows a left-to-right normalize -> scale -> shift pipeline.',
+            'The matrix states are shown as rounded cards, and token rows in X, X_hat, gamma * X_hat, and X_ln can be hovered to inspect the corresponding token row.',
+            'The incoming X matrix has shape T x 768, and the normalization equation produces X_hat with the same shape.',
+            'A copied X_hat is multiplied elementwise by gamma with shape 1 x 768, then the result is added to beta with shape 1 x 768 to produce the final normalized output X_ln, which continues to the right.'
+        ];
+    }
+
+    const looksLikeOverview = !componentKind || transitionMode.includes('overview') || focusLabel.includes('overview');
+    const looksLikeDetailScene = transitionMode.includes('detail') || detailFocusLabel.length > 0;
+    if (looksLikeOverview && !looksLikeDetailScene) {
+        return [
+            'The 2D outer view is a horizontal semantic map of the whole GPT-2 pipeline.',
+            'Embeddings appear on the left, each transformer layer sits to the right of the previous one, and within each layer the flow goes through LayerNorm, self-attention, output projection, LayerNorm, and MLP before reaching final layer norm and logits at the far right.'
+        ];
+    }
+
+    return [];
+}
+
 function buildVisualizationSurfaceLines(surfaceState = null) {
     if (!surfaceState || typeof surfaceState !== 'object') return [];
     const lines = [];
@@ -124,6 +181,8 @@ function buildVisualizationSurfaceLines(surfaceState = null) {
         lines.push(`The current 2D transition mode is: ${current2dTransitionMode}`);
     }
 
+    lines.push(...buildActive2dDetailSummaryLines(surfaceState));
+
     if (surfaceState.activeMode === 'transformer-view2d') {
         lines.push(`The 2D selection sidebar is currently visible: ${surfaceState.current2dSelectionSidebarVisible ? 'yes' : 'no'}`);
     }
@@ -139,6 +198,88 @@ function buildVisualizationSurfaceLines(surfaceState = null) {
     }
 
     lines.push('The current selection and current visualization-state sections below describe what I am focused on right now and may still be useful even if my question is broader.');
+    return lines;
+}
+
+function normalizeStageComparisonToken(value = '') {
+    const lower = String(value || '').trim().toLowerCase();
+    if (!lower.length) return '';
+    if (lower.startsWith('embedding.')) return 'embedding';
+    if (lower.startsWith('ln1')) return 'ln1';
+    if (lower.startsWith('qkv.') || lower.startsWith('attention.')) return 'attention';
+    if (lower === 'layer.incoming') return 'ln1';
+    if (lower.startsWith('residual.post_attention') || lower.startsWith('ln2')) return 'ln2';
+    if (lower.startsWith('mlp.')) return 'mlp';
+    if (lower.startsWith('residual.post_mlp') || lower.startsWith('final_ln')) return 'final';
+    if (lower.includes('logit') || lower.includes('unembedding') || lower.includes('generation.')) return 'output';
+    return lower;
+}
+
+function normalizeLiveDisplayStageToken(value = '') {
+    const lower = String(value || '').trim().toLowerCase();
+    if (!lower.length) return '';
+    if (lower.includes('embedding')) return 'embedding';
+    if (lower.includes('layernorm 1')) return 'ln1';
+    if (lower.includes('self-attention')) return 'attention';
+    if (lower.includes('layernorm 2')) return 'ln2';
+    if (lower.includes('perceptron')) return 'mlp';
+    if (lower.includes('final layernorm')) return 'final';
+    if (lower.includes('output logits')) return 'output';
+    return lower;
+}
+
+function buildLiveSceneLines({
+    liveSceneState = null,
+    selection = null
+} = {}) {
+    if (!liveSceneState || typeof liveSceneState !== 'object') return [];
+    const lines = [
+        'This section describes what the live visualization is actually animating right now, separately from whatever I have selected in the sidebar.'
+    ];
+
+    if (Number.isFinite(liveSceneState.currentLayerIndex)) {
+        lines.push(
+            liveSceneState.isFinalStage
+                ? `The live scene is currently at the output head after Layer ${Math.floor(liveSceneState.currentLayerIndex) + 1}.`
+                : `The live scene is currently working in Layer ${Math.floor(liveSceneState.currentLayerIndex) + 1}.`
+        );
+    }
+
+    const displayStage = String(liveSceneState.displayStage || '').trim();
+    if (displayStage) {
+        lines.push(`The live scene is currently in: ${displayStage}`);
+    }
+
+    const detailStageLabel = String(liveSceneState.detailStageLabel || '').trim();
+    if (detailStageLabel && detailStageLabel !== displayStage) {
+        lines.push(`A more specific live substage appears to be: ${detailStageLabel}`);
+    }
+
+    if (liveSceneState.forwardPassComplete) {
+        lines.push('The current forward pass appears to be complete.');
+    }
+
+    const selectionLayerIndex = findUserDataNumber(selection, 'layerIndex');
+    const selectionStage = String(getActivationDataFromSelection(selection)?.stage || '').trim();
+    const liveLayerIndex = Number.isFinite(liveSceneState.currentLayerIndex)
+        ? Math.floor(liveSceneState.currentLayerIndex)
+        : null;
+    const selectionStageToken = normalizeStageComparisonToken(selectionStage);
+    const liveStageToken = normalizeLiveDisplayStageToken(displayStage)
+        || normalizeStageComparisonToken(liveSceneState.detailStageKey);
+    const layerMismatch = Number.isFinite(selectionLayerIndex)
+        && Number.isFinite(liveLayerIndex)
+        && Math.floor(selectionLayerIndex) !== liveLayerIndex;
+    const stageMismatch = selectionStageToken
+        && liveStageToken
+        && selectionStageToken !== liveStageToken;
+
+    if (layerMismatch || stageMismatch) {
+        lines.push('My selected sidebar item does not appear to match the part of the scene that is actively animating right now.');
+    } else {
+        lines.push('My selected sidebar item appears to be aligned with the currently active part of the scene, or close to it.');
+    }
+
     return lines;
 }
 
@@ -363,7 +504,8 @@ export function buildSelectionChatPrompt({
     vectorTokenMetadata = null,
     activationSource = null,
     kvState = null,
-    surfaceState = null
+    surfaceState = null,
+    liveSceneState = null
 } = {}) {
     const instructionText = buildChatPromptInstructionText();
 
@@ -396,6 +538,10 @@ export function buildSelectionChatPrompt({
         buildMarkdownBulletSection('Question Context', buildVisualizationSurfaceLines(surfaceState)),
         buildMarkdownSection('Visualization Reference Markdown', String(visualizationDescriptionMarkdown || '').trim()),
         buildMarkdownBulletSection('Self-Attention Color Cues', buildSelfAttentionColorCueLines()),
+        buildMarkdownBulletSection('Current Live Scene', buildLiveSceneLines({
+            liveSceneState,
+            selection
+        })),
         buildMarkdownBulletSection('Current Selection', buildSpecificSelectionLines({
             selection,
             normalizedLabel,
