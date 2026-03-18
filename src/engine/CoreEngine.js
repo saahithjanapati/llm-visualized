@@ -252,7 +252,7 @@ export class CoreEngine {
 
         // Cache canvas bounds so pointer events can reuse them without forcing
         // a layout read on every move event. Updated via the resize listener.
-        this._canvasRect = this.renderer.domElement.getBoundingClientRect();
+        this._canvasRect = this._refreshCanvasRect();
         this._logTrailDebugMetrics('init', initialViewport.width, initialViewport.height);
 
         // ────────────────────────────────────────────────────────────────────
@@ -604,6 +604,7 @@ export class CoreEngine {
         this._touchTapData = null;
         this._clickTapData = null;
         this._resetControlsState();
+        this._refreshCanvasRect();
     }
 
     setDevMode(enabled) {
@@ -1004,7 +1005,7 @@ export class CoreEngine {
         if (this.composer) this.composer.setSize(width, height);
         refreshTrailDisplayScales(this.scene);
         this._logTrailDebugMetrics('resize', width, height);
-        this._canvasRect = this.renderer.domElement.getBoundingClientRect();
+        this._canvasRect = this._refreshCanvasRect();
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
     };
@@ -1206,6 +1207,15 @@ export class CoreEngine {
             clearTimeout(this._controlsInteractionEndTimer);
         }
         this._controlsInteractionEndTimer = null;
+    }
+
+    _refreshCanvasRect() {
+        const domElement = this.renderer?.domElement;
+        if (!domElement || typeof domElement.getBoundingClientRect !== 'function') {
+            return this._canvasRect || null;
+        }
+        this._canvasRect = domElement.getBoundingClientRect();
+        return this._canvasRect;
     }
 
     _applyZoomOutSupersample(baseRatio) {
@@ -1714,7 +1724,10 @@ export class CoreEngine {
         }
         if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
 
-        const rect = this._canvasRect;
+        let rect = this._canvasRect;
+        if (force || !rect || !rect.width || !rect.height) {
+            rect = this._refreshCanvasRect();
+        }
         if (!rect || !rect.width || !rect.height) return;
 
         this._pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -2040,7 +2053,10 @@ export class CoreEngine {
         if (!force && this._isUserNavigating) return;
         if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
 
-        const rect = this._canvasRect;
+        let rect = this._canvasRect;
+        if (force || !rect || !rect.width || !rect.height) {
+            rect = this._refreshCanvasRect();
+        }
         if (!rect || !rect.width || !rect.height) return;
 
         this._pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;

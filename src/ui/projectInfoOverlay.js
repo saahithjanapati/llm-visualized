@@ -1,10 +1,13 @@
 import infoMarkdown from './infoModalContent.md?raw';
-import { appState } from '../state/appState.js';
 import {
     PROJECT_INFO_PAGE_PATH,
     buildProjectInfoPageUrl,
     resolveProjectInfoBackHref
 } from './projectInfoNavigation.js';
+import {
+    acquireModalUiLock,
+    acquireSceneBackgroundInteractionLock
+} from './overlayLockManager.js';
 import { renderSimpleMarkdown } from './simpleMarkdown.js';
 
 export const PROJECT_INFO_OVERLAY_PAUSE_REASON = 'project-info-overlay';
@@ -59,60 +62,20 @@ export function initProjectInfoOverlay({
 
     let isOverlayOpen = false;
     let restoreFocusEl = null;
-    let previousModalPausedState = false;
-    let previousBodyOverflow = '';
-    let previousCanvasPointerEvents = null;
-    let previousControlsState = null;
+    let releaseModalUiLock = null;
+    let releaseSceneInteractionLock = null;
     let historyCloseRestoreFocus = true;
     let historyTraversalPending = false;
 
     const lockBackgroundInteraction = () => {
-        const engine = pipeline?.engine;
-        if (!engine) return;
-
-        const controls = engine.controls;
-        if (controls && !previousControlsState) {
-            previousControlsState = {
-                enabled: controls.enabled,
-                enableRotate: controls.enableRotate,
-                enablePan: controls.enablePan,
-                enableZoom: controls.enableZoom
-            };
-            controls.enabled = false;
-            controls.enableRotate = false;
-            controls.enablePan = false;
-            controls.enableZoom = false;
-        }
-
-        const canvas = engine.renderer?.domElement || null;
-        if (canvas && previousCanvasPointerEvents === null) {
-            previousCanvasPointerEvents = canvas.style.pointerEvents || '';
-            canvas.style.pointerEvents = 'none';
-        }
-
-        engine.resetInteractionState?.();
+        if (releaseSceneInteractionLock) return;
+        releaseSceneInteractionLock = acquireSceneBackgroundInteractionLock(pipeline?.engine || null);
     };
 
     const unlockBackgroundInteraction = () => {
-        const engine = pipeline?.engine;
-        if (!engine) return;
-
-        const controls = engine.controls;
-        if (controls && previousControlsState) {
-            controls.enabled = previousControlsState.enabled;
-            controls.enableRotate = previousControlsState.enableRotate;
-            controls.enablePan = previousControlsState.enablePan;
-            controls.enableZoom = previousControlsState.enableZoom;
-            previousControlsState = null;
-        }
-
-        const canvas = engine.renderer?.domElement || null;
-        if (canvas && previousCanvasPointerEvents !== null) {
-            canvas.style.pointerEvents = previousCanvasPointerEvents;
-            previousCanvasPointerEvents = null;
-        }
-
-        engine.resetInteractionState?.();
+        if (!releaseSceneInteractionLock) return;
+        releaseSceneInteractionLock();
+        releaseSceneInteractionLock = null;
     };
 
     const closeInternal = ({
@@ -125,8 +88,10 @@ export function initProjectInfoOverlay({
         overlay.setAttribute('aria-hidden', 'true');
         pipeline?.engine?.resume?.(PROJECT_INFO_OVERLAY_PAUSE_REASON);
         unlockBackgroundInteraction();
-        appState.modalPaused = previousModalPausedState;
-        document.body.style.overflow = previousBodyOverflow;
+        if (releaseModalUiLock) {
+            releaseModalUiLock();
+            releaseModalUiLock = null;
+        }
 
         const nextRestoreFocusEl = restoreFocusEl;
         restoreFocusEl = null;
@@ -187,12 +152,9 @@ export function initProjectInfoOverlay({
             || (document.activeElement && typeof document.activeElement.focus === 'function'
                 ? document.activeElement
                 : null);
-        previousModalPausedState = !!appState.modalPaused;
-        previousBodyOverflow = document.body.style.overflow || '';
         lockBackgroundInteraction();
+        releaseModalUiLock = acquireModalUiLock();
         pipeline?.engine?.pause?.(PROJECT_INFO_OVERLAY_PAUSE_REASON);
-        appState.modalPaused = true;
-        document.body.style.overflow = 'hidden';
         overlay.style.display = 'flex';
         overlay.setAttribute('aria-hidden', 'false');
         isOverlayOpen = true;

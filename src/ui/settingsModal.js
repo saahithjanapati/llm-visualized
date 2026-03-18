@@ -15,6 +15,7 @@ import { ENVIRONMENT_MAP_OPTIONS } from '../utils/environmentMaps.js';
 import { initPerfOverlay } from './perfOverlay.js';
 import { createModalReopenGuard } from './modalReopenGuard.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
+import { acquireModalUiLock } from './overlayLockManager.js';
 
 const BRIGHTNESS_PREF_KEY = 'displayBrightnessScale';
 const PLAYBACK_SPEED_PREF_KEY = 'playbackSpeedPercent';
@@ -127,6 +128,7 @@ export function initSettingsModal(pipeline, {
     let followInspectorEl = null;
     let followInspectorRaf = null;
     let perfOverlayController = null;
+    let releaseModalUiLock = null;
 
     const setPerfOverlayEnabled = (enabled) => {
         const nextValue = !!enabled;
@@ -365,9 +367,8 @@ export function initSettingsModal(pipeline, {
         if (!reopenGuard.shouldAllowOpen()) return;
         settingsOverlay.style.display = 'flex';
         settingsOverlay.setAttribute('aria-hidden', 'false');
-        document.body.style.overflow = 'hidden';
+        releaseModalUiLock = acquireModalUiLock();
         pipeline?.engine?.pause?.('modal');
-        appState.modalPaused = true;
         const eq = document.getElementById('toggleEquations');
         if (eq) eq.checked = !!appState.showEquations;
         const promptTokenStrip = document.getElementById('togglePromptTokenStrip');
@@ -399,9 +400,11 @@ export function initSettingsModal(pipeline, {
         }
         settingsOverlay.style.display = 'none';
         settingsOverlay.setAttribute('aria-hidden', 'true');
-        document.body.style.overflow = '';
         pipeline?.engine?.resume?.('modal');
-        appState.modalPaused = false;
+        if (releaseModalUiLock) {
+            releaseModalUiLock();
+            releaseModalUiLock = null;
+        }
     }
 
     settingsBtn?.addEventListener('click', openSettings);

@@ -1,5 +1,8 @@
-import { appState } from '../state/appState.js';
 import { initTouchClickFallback } from './touchClickFallback.js';
+import {
+    acquireModalUiLock,
+    acquireSceneBackgroundInteractionLock
+} from './overlayLockManager.js';
 
 const PAUSE_REASON = 'skip-options-modal';
 const SKIP_OPTION_ORDER = Object.freeze([
@@ -56,10 +59,8 @@ export function initSkipMenu(pipeline) {
     let rafId = null;
     let modalOpen = false;
     let menuPausedAnimation = false;
-    let previousModalPausedState = false;
-    let previousBodyOverflow = '';
-    let previousCanvasPointerEvents = null;
-    let previousControlsState = null;
+    let releaseModalUiLock = null;
+    let releaseSceneInteractionLock = null;
     let restoreFocusEl = null;
 
     const setOpen = (open) => {
@@ -78,64 +79,21 @@ export function initSkipMenu(pipeline) {
     };
 
     const lockBackgroundInteraction = () => {
-        const engine = pipeline?.engine;
-        if (!engine) return;
-
-        engine.resetInteractionState?.();
-
-        const controls = engine.controls;
-        if (controls && !previousControlsState) {
-            previousControlsState = {
-                enabled: controls.enabled,
-                enableRotate: controls.enableRotate,
-                enablePan: controls.enablePan,
-                enableZoom: controls.enableZoom
-            };
-        }
-        if (controls) {
-            controls.enabled = false;
-            controls.enableRotate = false;
-            controls.enablePan = false;
-            controls.enableZoom = false;
-        }
-
-        const canvas = engine?.renderer?.domElement;
-        if (canvas && previousCanvasPointerEvents === null) {
-            previousCanvasPointerEvents = canvas.style.pointerEvents || '';
-            canvas.style.pointerEvents = 'none';
-        }
+        if (releaseSceneInteractionLock) return;
+        releaseSceneInteractionLock = acquireSceneBackgroundInteractionLock(pipeline?.engine || null);
     };
 
     const unlockBackgroundInteraction = () => {
-        const engine = pipeline?.engine;
-        if (!engine) return;
-
-        const controls = engine.controls;
-        if (controls && previousControlsState) {
-            controls.enabled = previousControlsState.enabled;
-            controls.enableRotate = previousControlsState.enableRotate;
-            controls.enablePan = previousControlsState.enablePan;
-            controls.enableZoom = previousControlsState.enableZoom;
-            previousControlsState = null;
-        }
-
-        const canvas = engine?.renderer?.domElement;
-        if (canvas && previousCanvasPointerEvents !== null) {
-            canvas.style.pointerEvents = previousCanvasPointerEvents;
-            previousCanvasPointerEvents = null;
-        }
-
-        engine.resetInteractionState?.();
+        if (!releaseSceneInteractionLock) return;
+        releaseSceneInteractionLock();
+        releaseSceneInteractionLock = null;
     };
 
     const pauseForModal = () => {
         if (menuPausedAnimation) return;
-        previousModalPausedState = !!appState.modalPaused;
-        previousBodyOverflow = document.body.style.overflow || '';
         lockBackgroundInteraction();
+        releaseModalUiLock = acquireModalUiLock();
         pipeline?.engine?.pause?.(PAUSE_REASON);
-        appState.modalPaused = true;
-        document.body.style.overflow = 'hidden';
         menuPausedAnimation = true;
     };
 
@@ -143,8 +101,10 @@ export function initSkipMenu(pipeline) {
         if (!menuPausedAnimation) return;
         pipeline?.engine?.resume?.(PAUSE_REASON);
         unlockBackgroundInteraction();
-        appState.modalPaused = previousModalPausedState;
-        document.body.style.overflow = previousBodyOverflow;
+        if (releaseModalUiLock) {
+            releaseModalUiLock();
+            releaseModalUiLock = null;
+        }
         menuPausedAnimation = false;
     };
 
