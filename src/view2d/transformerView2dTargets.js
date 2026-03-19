@@ -1526,16 +1526,8 @@ export function resolveTransformerView2dOpenTransitionMode({
     if (!safeTarget) return '';
 
     const detailTargets = resolveDetailTargetsFromSemanticTarget(safeTarget);
-    if (detailTargets.headDetailTarget) {
-        return 'staged-head-detail';
-    }
-    if (
-        detailTargets.concatDetailTarget
-        || detailTargets.outputProjectionDetailTarget
-        || detailTargets.mlpDetailTarget
-        || detailTargets.layerNormDetailTarget
-    ) {
-        return '';
+    if (hasActiveDetailTarget(detailTargets)) {
+        return 'direct';
     }
     return 'staged-focus';
 }
@@ -2133,20 +2125,9 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
     const resolvedDetailFocusLabel = detailSemanticTargets.length
         ? resolveMhsaDetailFocusLabel(label, stageLower)
         : detailFocusLabel;
-    const transitionMode = (
-        semanticTarget?.componentKind === 'mhsa'
-        && Number.isFinite(semanticTarget?.headIndex)
-    )
-        ? 'staged-head-detail'
-        : (
-            semanticTarget?.componentKind === 'output-projection'
-            || semanticTarget?.componentKind === 'mlp'
-            || semanticTarget?.componentKind === 'layer-norm'
-        )
-            ? 'staged-detail'
-            : resolveTransformerView2dOpenTransitionMode({
-                semanticTarget
-            });
+    const transitionMode = resolveTransformerView2dOpenTransitionMode({
+        semanticTarget
+    });
     const focusLabel = describeTransformerView2dTarget(semanticTarget);
     return {
         semanticTarget,

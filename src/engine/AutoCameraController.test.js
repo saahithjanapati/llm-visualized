@@ -16,12 +16,17 @@ function createController() {
     controller._autoCameraForceEmbedVocabStartLock = false;
     controller._autoCameraEmbedVocabOffsetsEnabled = false;
     controller._startupCameraIntroPlayed = true;
+    controller._startupCameraIntroActive = false;
     controller._startupCameraOverviewPending = false;
+    controller._devMode = false;
+    controller._panelShiftViewActive = false;
     controller._overviewCameraPosition = new THREE.Vector3(0, 0, 0);
     controller._overviewCameraTarget = new THREE.Vector3(0, 0, 0);
     controller._autoCameraCenter = new THREE.Vector3(10, 20, 30);
     controller._autoCameraCurrentCameraOffset = new THREE.Vector3(1, 2, 3);
     controller._autoCameraCurrentTargetOffset = new THREE.Vector3(4, 5, 6);
+    controller._autoCameraDesiredCameraOffset = new THREE.Vector3(1, 2, 3);
+    controller._autoCameraDesiredTargetOffset = new THREE.Vector3(4, 5, 6);
     controller._autoCameraInspectorRef = new THREE.Vector3();
     controller._autoCameraViewFromCameraOffset = new THREE.Vector3();
     controller._autoCameraViewFromTargetOffset = new THREE.Vector3();
@@ -33,6 +38,7 @@ function createController() {
     controller._autoCameraLnTargetOffset = new THREE.Vector3(10, 11, 12);
     controller._autoCameraTravelCameraOffset = new THREE.Vector3(13, 14, 15);
     controller._autoCameraTravelTargetOffset = new THREE.Vector3(16, 17, 18);
+    controller._pipeline = { _layers: [] };
 
     controller._syncAutoCameraSemanticView = vi.fn();
     controller._resetAutoCameraReferenceMotion = vi.fn();
@@ -65,6 +71,49 @@ function createController() {
 
     return controller;
 }
+
+describe('AutoCameraController frame demand', () => {
+    it('stays idle when follow mode is off and no transitions are active', () => {
+        const controller = createController();
+        controller._autoCameraViewPendingKey = controller._autoCameraViewKey;
+        controller._autoCameraViewBlendT = 1;
+
+        expect(controller.needsFrameUpdate()).toBe(false);
+    });
+
+    it('keeps requesting frames while follow mode tracks an active pipeline layer', () => {
+        const controller = createController();
+        controller._autoCameraFollow = true;
+        controller._pipeline = {
+            _layers: [
+                { isActive: false, _transitionPhase: 'complete' },
+                { isActive: true, _transitionPhase: 'complete' }
+            ]
+        };
+
+        expect(controller.needsFrameUpdate()).toBe(true);
+    });
+
+    it('does not keep the loop alive from follow mode alone while paused', () => {
+        const controller = createController();
+        controller._autoCameraFollow = true;
+        controller._autoCameraViewPendingKey = controller._autoCameraViewKey;
+        controller._autoCameraViewBlendT = 1;
+        controller._pipeline = {
+            _layers: [{ isActive: true, _transitionPhase: 'complete' }]
+        };
+
+        expect(controller.needsFrameUpdate({ paused: true })).toBe(false);
+    });
+
+    it('still requests frames while camera offsets are settling', () => {
+        const controller = createController();
+        controller._autoCameraDesiredCameraOffset = new THREE.Vector3(10, 2, 3);
+
+        expect(controller.needsFrameUpdate()).toBe(true);
+        expect(controller.needsFrameUpdate({ paused: true })).toBe(true);
+    });
+});
 
 describe('AutoCameraController follow re-enable', () => {
     it('preserves any pending semantic view transition when follow is turned back on', () => {

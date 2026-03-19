@@ -9359,6 +9359,7 @@ export class SelectionPanel {
         syncRoute = true
     } = {}) {
         return this._openTransformerView2dPreview({
+            inheritCurrentSelection: false,
             sourceSelection: null,
             syncRoute,
             view2dContext: {
@@ -9487,7 +9488,10 @@ export class SelectionPanel {
         }
         if (!this._dockTransformerView2dSelectionSidebarSections()) return false;
         this._syncTransformerView2dSelectionSidebarHeader();
-        this._transformerView2dDetailView?.setSelectionSidebarVisible?.(true);
+        const sidebarAlreadyVisible = this._transformerView2dDetailView?.isSelectionSidebarVisible?.() === true;
+        if (!sidebarAlreadyVisible) {
+            this._transformerView2dDetailView?.setSelectionSidebarVisible?.(true);
+        }
         if (scrollToTop) {
             this._transformerView2dDetailView?.scrollSelectionSidebarToTop?.();
         }
@@ -9555,9 +9559,11 @@ export class SelectionPanel {
         fromHistory = false,
         sourceSelection = null,
         view2dContext = null,
+        inheritCurrentSelection = true,
         syncRoute = true
     } = {}) {
-        const resolvedSelection = sourceSelection || this._lastSelection;
+        const resolvedSelection = sourceSelection
+            || (inheritCurrentSelection ? this._lastSelection : null);
         const sourceLabel = this._lastSelectionLabel;
         const resolvedLabel = resolvedSelection?.label
             ? normalizeSelectionLabel(resolvedSelection.label, resolvedSelection)

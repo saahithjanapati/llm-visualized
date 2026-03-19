@@ -545,6 +545,130 @@ describe('createTransformerView2dDetailView', () => {
         expect(view.getViewportState().scale).toBeLessThan(focusedDetailScale);
     });
 
+    it('opens external MHSA detail entries directly inside the head-detail scene', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 2 Attention Head 3',
+            detailSemanticTargets: [{
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'attention-post'
+            }],
+            detailFocusLabel: 'Post-Softmax Attention Score',
+            transitionMode: 'direct'
+        });
+
+        const { layer, stage } = getStageReadouts(panelEl);
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+        expect(stage?.textContent).toBe('Attention Head 3');
+        expect(layer?.textContent).toBe('Layer 2');
+        expect(layer?.hidden).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(64);
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+        expect(stage?.textContent).toBe('Attention Head 3');
+    });
+
+    it('shows the matching overview module immediately when exiting a direct deep-detail view', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const backToGraphBtn = panelEl.querySelector(
+            '[data-transformer-view2d-action="exit-deep-detail"]'
+        );
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-weight'
+            }],
+            detailFocusLabel: 'MLP Up Weight Matrix',
+            transitionMode: 'direct'
+        });
+
+        const overviewScene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const overviewLayout = buildSceneLayout(overviewScene, {
+            isSmallScreen: false
+        });
+        const overviewFocusBounds = resolveSemanticTargetBounds(overviewLayout.registry, {
+            componentKind: 'mlp',
+            layerIndex: 1,
+            stage: 'mlp',
+            role: 'module-card'
+        });
+        const seededOverviewTransform = resolveViewportFitTransform(overviewFocusBounds, {
+            width: 960,
+            height: 600
+        }, {
+            padding: 36,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        });
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+
+        backToGraphBtn?.click();
+
+        const { layer, stage } = getStageReadouts(panelEl);
+        const seededViewportState = view.getViewportState();
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+        expect(stage?.textContent).toBe(TRANSFORMER_VIEW2D_OVERVIEW_LABEL);
+        expect(layer?.hidden).toBe(true);
+        expect(seededViewportState.scale).toBeCloseTo(seededOverviewTransform.scale, 6);
+        expect(seededViewportState.panX).toBeCloseTo(seededOverviewTransform.panX, 6);
+        expect(seededViewportState.panY).toBeCloseTo(seededOverviewTransform.panY, 6);
+
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(view.getViewportState().scale).toBeLessThan(seededViewportState.scale);
+    });
+
     it('keeps the overview title visible during staged focus entry until the canvas leaves the outer overview', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
@@ -656,6 +780,68 @@ describe('createTransformerView2dDetailView', () => {
             transitionMode: 'direct'
         });
 
+        expect(view.getViewportState().scale).toBeLessThan(legacyTightFocusTransform.scale);
+    });
+
+    it('uses a looser overview zoom before opening a staged deep-detail target', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const semanticTarget = {
+            componentKind: 'mlp',
+            layerIndex: 1,
+            stage: 'mlp',
+            role: 'module'
+        };
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const focusBounds = resolveSemanticTargetBounds(layout.registry, {
+            ...semanticTarget,
+            role: 'module-card'
+        });
+        const legacyTightFocusTransform = resolveViewportFitTransform(focusBounds, {
+            width: 960,
+            height: 600
+        }, {
+            padding: 36,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget,
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-weight'
+            }],
+            detailFocusLabel: 'MLP Up Weight Matrix',
+            transitionMode: 'staged-detail'
+        });
+
+        await vi.advanceTimersByTimeAsync(700);
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
         expect(view.getViewportState().scale).toBeLessThan(legacyTightFocusTransform.scale);
     });
 
@@ -854,6 +1040,88 @@ describe('createTransformerView2dDetailView', () => {
         expect(stableViewportState.scale).toBeCloseTo(initialViewportState.scale, 5);
         expect(stableViewportState.panX).toBeCloseTo(initialViewportState.panX, 5);
         expect(stableViewportState.panY).toBeCloseTo(initialViewportState.panY, 5);
+    });
+
+    it('re-fits the overview after the canvas settles later on open', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 720, 420);
+        setElementRect(canvasCard, 720, 420);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C']
+        });
+
+        const initialViewportState = view.getViewportState();
+        expect(initialViewportState.viewport.width).toBe(720);
+        expect(initialViewportState.viewport.height).toBe(420);
+
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        await vi.advanceTimersByTimeAsync(320);
+
+        const stabilizedViewportState = view.getViewportState();
+        expect(stabilizedViewportState.viewport.width).toBe(960);
+        expect(stabilizedViewportState.viewport.height).toBe(600);
+        expect(stabilizedViewportState.scale).toBeGreaterThan(initialViewportState.scale);
+    });
+
+    it('keeps the startup refit alive when the already-visible docked sidebar is shown again', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const selectionSidebar = panelEl.querySelector('.detail-transformer-view2d-selection-sidebar');
+        setElementRect(canvas, 720, 420);
+        setElementRect(canvasCard, 720, 420);
+        setElementRectAt(selectionSidebar, {
+            left: 336,
+            top: 56,
+            width: 384,
+            height: 364
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            initialSelectionSidebarVisible: true
+        });
+
+        const initialViewportState = view.getViewportState();
+        expect(initialViewportState.viewport.width).toBe(720);
+        expect(initialViewportState.viewport.height).toBe(420);
+        expect(initialViewportState.viewportInsets.right).toBe(384);
+
+        view.setSelectionSidebarVisible(true);
+
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+        setElementRectAt(selectionSidebar, {
+            left: 576,
+            top: 56,
+            width: 384,
+            height: 544
+        });
+
+        await vi.advanceTimersByTimeAsync(320);
+
+        const stabilizedViewportState = view.getViewportState();
+        expect(stabilizedViewportState.viewport.width).toBe(960);
+        expect(stabilizedViewportState.viewport.height).toBe(600);
+        expect(stabilizedViewportState.viewportInsets.right).toBe(384);
+        expect(
+            Math.abs(stabilizedViewportState.panX - initialViewportState.panX)
+        ).toBeGreaterThan(1);
     });
 
     it('anchors keyboard zoom to the unobscured viewport center when the docked sidebar is visible', () => {

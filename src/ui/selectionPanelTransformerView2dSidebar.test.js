@@ -203,7 +203,7 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
             },
             focusLabel: 'Layer 2 Attention Head 3',
             detailInteractionTargets: [],
-            transitionMode: 'staged-head-detail'
+            transitionMode: 'direct'
         };
 
         const opened = panel._openTransformerView2dPreview({
@@ -235,6 +235,25 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         expect(panel._stopLoop).not.toHaveBeenCalled();
     });
 
+    it('does not redundantly reopen the docked 2D sidebar when it is already visible', () => {
+        const panel = createPanelContext();
+        panel._dockTransformerView2dSelectionSidebarSections = vi.fn(() => true);
+        panel._syncTransformerView2dSelectionSidebarHeader = vi.fn();
+        panel._transformerView2dDetailView = {
+            isSelectionSidebarVisible: vi.fn(() => true),
+            setSelectionSidebarVisible: vi.fn(),
+            scrollSelectionSidebarToTop: vi.fn()
+        };
+
+        const shown = SelectionPanel.prototype._showTransformerView2dSelectionSidebar.call(panel, {
+            scrollToTop: true
+        });
+
+        expect(shown).toBe(true);
+        expect(panel._transformerView2dDetailView.setSelectionSidebarVisible).not.toHaveBeenCalled();
+        expect(panel._transformerView2dDetailView.scrollSelectionSidebarToTop).toHaveBeenCalledTimes(1);
+    });
+
     it('does not auto-open the docked 2D selection sidebar on small screens when entering from a selection', () => {
         const panel = createPanelContext();
         panel._isSmallScreen = vi.fn(() => true);
@@ -253,7 +272,7 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
             },
             focusLabel: 'Layer 2 Attention Head 3',
             detailInteractionTargets: [],
-            transitionMode: 'staged-head-detail'
+            transitionMode: 'direct'
         };
 
         const opened = panel._openTransformerView2dPreview({
@@ -348,6 +367,33 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         );
         expect(panel._transformerView2dDetailView.setSelectionSidebarHeaderContent).not.toHaveBeenCalled();
         expect(panel._stopLoop).toHaveBeenCalled();
+    });
+
+    it('does not inherit the active 3D selection when the top-level 2D overview is opened explicitly', () => {
+        const panel = createPanelContext();
+        panel._lastSelection = {
+            label: 'MLP Up Weight Matrix',
+            kind: 'mesh'
+        };
+        panel._lastSelectionLabel = 'MLP Up Weight Matrix';
+
+        const opened = panel.openTransformerView2d({
+            semanticTarget: null,
+            focusLabel: 'GPT-2 (124M)',
+            syncRoute: false
+        });
+
+        expect(opened).toBe(true);
+        expect(panel._showTransformerView2dSelectionSidebar).not.toHaveBeenCalled();
+        expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
+            expect.objectContaining({
+                semanticTarget: null,
+                focusLabel: 'GPT-2 (124M)',
+                initialSelectionSidebarVisible: false
+            })
+        );
+        expect(panel._transformerView2dDetailView.setSelectionSidebarHeaderContent).not.toHaveBeenCalled();
+        expect(panel._transformerView2dSourceSelection).toBeNull();
     });
 
     it('refreshes the open 2D canvas in place when panel data changes', () => {

@@ -330,6 +330,10 @@ function isSingleRowCaptionAssistExcludedNode(node = null) {
         || nodeRole === 'layer-norm-shift';
 }
 
+function shouldDisableSingleRowCaptionAssist(node = null) {
+    return node?.metadata?.caption?.disableSingleRowAssist === true;
+}
+
 function applyCaptionRoleStyling(itemEl, node = null) {
     if (!itemEl) return;
     const nodeRole = String(node?.role || '').trim().toLowerCase();
@@ -876,7 +880,8 @@ export function createTransformerView2dResidualCaptionOverlay({
                 });
                 const useCompactRowCaptionAssist = shouldUseSingleRowCompactRowCaptionAssist
                     && isBottomCompactRowCaption
-                    && !isSingleRowCaptionAssistExcludedNode(node);
+                    && !isSingleRowCaptionAssistExcludedNode(node)
+                    && !shouldDisableSingleRowCaptionAssist(node);
                 const isPrimaryMhsaSingleRowCompactCaption = isPrimaryMhsaDetailScene(scene)
                     && useCompactRowCaptionAssist
                     && rowCount === 1;

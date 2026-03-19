@@ -1320,6 +1320,67 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
+    it('keeps single-token layer norm captions scene-relative instead of pinning them to a screen-font floor', () => {
+        const fixtures = buildLayerNormDetailFixtures({
+            tokenLabels: ['Token A']
+        });
+        const {
+            scene,
+            layout,
+            inputNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const zoomedOutScale = 0.34;
+            const zoomedInScale = 1.36;
+            const projectBounds = (scale) => (bounds) => ({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width * scale,
+                height: bounds.height * scale
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedOutScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedOutLabelSize = Number.parseFloat(
+                queryCaptionItem(inputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds: projectBounds(zoomedInScale),
+                visible: true,
+                enabled: true
+            });
+
+            const zoomedInLabelSize = Number.parseFloat(
+                queryCaptionItem(inputNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            const labelScaleRatio = zoomedInLabelSize / Math.max(0.0001, zoomedOutLabelSize);
+            const rawViewportScaleRatio = zoomedInScale / zoomedOutScale;
+
+            expect(zoomedOutLabelSize).toBeGreaterThan(0);
+            expect(zoomedOutLabelSize).toBeLessThan(10);
+            expect(zoomedInLabelSize).toBeGreaterThan(zoomedOutLabelSize);
+            expect(labelScaleRatio).toBeGreaterThan(rawViewportScaleRatio * 0.98);
+            expect(labelScaleRatio).toBeLessThan(rawViewportScaleRatio * 1.02);
+        } finally {
+            cleanup();
+        }
+    });
+
     it('prefers KaTeX rendering for MHSA bias, score, and scale labels when available', () => {
         const fixtures = buildMhsaFixtures();
         const {

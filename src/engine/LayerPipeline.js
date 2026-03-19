@@ -392,8 +392,11 @@ export class LayerPipeline extends EventTarget {
         // Drive auto-camera follow from the CoreEngine RAF instead of a
         // secondary requestAnimationFrame loop.
         this._autoCameraDriver = {
-            isActive: true,
+            isActive: false,
             updateWhenPaused: true,
+            needsFrameUpdate: ({ paused = false } = {}) => (
+                this._autoCamera?.needsFrameUpdate?.({ paused }) === true
+            ),
             update: () => {
                 this._autoCamera?.update?.();
             },

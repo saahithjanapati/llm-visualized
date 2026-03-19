@@ -94,6 +94,9 @@ export class CoreEngine {
         this._cameraDebugRadius = 260;
         this._cameraDebugMinRadius = 140;
         this._cameraDebugMaxRadius = 700;
+        this._animationFrame = null;
+        this._renderInvalidated = false;
+        this._disposed = false;
         // Enable/disable expensive post-processing effects (e.g. bloom).
         // Bloom is disabled by default to reduce initial load; set opts.enableBloom=true to re-enable.
         this._enableBloom = typeof opts.enableBloom === 'boolean' ? opts.enableBloom : false;
@@ -558,12 +561,15 @@ export class CoreEngine {
             TWEEN.Tween.prototype.start = function patchedStart(time) {
                 const hasExplicitTime = typeof time === 'number' && Number.isFinite(time);
                 const effectiveTime = hasExplicitTime ? time : engine._tweenTimelineMs;
-                return originalStart.call(this, effectiveTime);
+                const startedTween = originalStart.call(this, effectiveTime);
+                engine.requestRender('tween-start');
+                return startedTween;
             };
         }
 
-        // Kick off RAF loop
-        requestAnimationFrame(this._animate);
+        // Render on demand once the engine is initialized; subsequent frames
+        // are only scheduled while the scene is actively changing.
+        this.requestRender('init');
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -571,6 +577,18 @@ export class CoreEngine {
     // ────────────────────────────────────────────────────────────────────────
     setSpeed(multiplier) {
         this._speed = multiplier;
+        this.requestRender('speed-change');
+    }
+
+    /** Request a render/update frame on the next animation tick. */
+    requestRender(reason = 'generic') {
+        this._renderInvalidated = true;
+        if (this._disposed || this._isVisibilityPauseOnly()) return false;
+        return this._ensureAnimationFrame();
+    }
+
+    invalidateRender(reason = 'generic') {
+        return this.requestRender(reason);
     }
 
     /** Enable or disable hover raycasting and label updates at runtime. */
@@ -621,6 +639,7 @@ export class CoreEngine {
         } else if (this._cameraDebugGroup) {
             this._cameraDebugGroup.visible = false;
         }
+        this.requestRender('camera-debug-toggle');
     }
 
     isCameraDebugEnabled() {
@@ -648,6 +667,7 @@ export class CoreEngine {
         if (!root || typeof root !== 'object' || !root.isObject3D) return;
         if (!this._raycastRoots.includes(root)) {
             this._raycastRoots.push(root);
+            this.requestRender('raycast-root-register');
         }
     }
 
@@ -659,6 +679,7 @@ export class CoreEngine {
         const idx = this._raycastRoots.indexOf(root);
         if (idx !== -1) {
             this._raycastRoots.splice(idx, 1);
+            this.requestRender('raycast-root-unregister');
         }
     }
 
@@ -682,6 +703,7 @@ export class CoreEngine {
         if (!this.controls) return;
         this._updateCameraFarFromControls();
         this._updateRendererPixelRatio();
+        this.requestRender('camera-updated');
     }
 
     pause(reason = 'generic') {
@@ -708,10 +730,12 @@ export class CoreEngine {
                     console.error(`CoreEngine: layer ${i} onEngineResume() failed`, err);
                 }
             }
+            this.requestRender(`resume:${reason}`);
         }
     }
 
     dispose() {
+        this._disposed = true;
         this._cancelPendingPixelRatioRefresh();
         this._cancelPendingControlsInteractionEnd();
         window.removeEventListener('resize', this._onResize);
@@ -778,6 +802,10 @@ export class CoreEngine {
             cancelAnimationFrame(this._raycastRaf);
             this._raycastRaf = null;
         }
+        if (this._animationFrame !== null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._animationFrame);
+            this._animationFrame = null;
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -835,6 +863,52 @@ export class CoreEngine {
             }
         }
     };
+
+    _ensureAnimationFrame() {
+        if (this._animationFrame !== null || this._disposed) return false;
+        if (typeof requestAnimationFrame !== 'function') return false;
+        this._animationFrame = requestAnimationFrame(this._animate);
+        return true;
+    }
+
+    _isVisibilityPauseOnly() {
+        return this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
+    }
+
+    _shouldUpdateLayer(layer, { paused = false } = {}) {
+        if (!layer || typeof layer.update !== 'function') return false;
+        if (typeof layer.needsFrameUpdate === 'function') {
+            try {
+                return !!layer.needsFrameUpdate({ paused });
+            } catch (_) {
+                return false;
+            }
+        }
+        if (paused) {
+            return layer.updateWhenPaused === true;
+        }
+        return !!(layer.isActive || layer._transitionPhase === 'positioning');
+    }
+
+    _hasLayerFrameWork({ paused = false } = {}) {
+        if (!Array.isArray(this._layers) || !this._layers.length) return false;
+        for (let i = 0; i < this._layers.length; i += 1) {
+            if (this._shouldUpdateLayer(this._layers[i], { paused })) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    _shouldKeepAnimationLoopRunning({ controlsChanged = false, activeTweenCount = 0 } = {}) {
+        if (this._disposed) return false;
+        if (this._renderInvalidated) return true;
+        if (this._needsFreshFrameAfterResume) return true;
+        if (controlsChanged) return true;
+        if (Number.isFinite(activeTweenCount) && activeTweenCount > 0) return true;
+        if (this._keyState?.size) return true;
+        return this._hasLayerFrameWork({ paused: !!this._paused });
+    }
 
     _hasManualRenderPixelRatioOverride() {
         if (typeof window === 'undefined') return false;
@@ -948,6 +1022,7 @@ export class CoreEngine {
         this._adaptiveRenderDprCap = Math.round(nextCap / step) * step;
         this._adaptiveRenderDprLastAdjustAt = now;
         this._updateRendererPixelRatio({ force: true });
+        this.requestRender('adaptive-dpr');
     }
 
     _onResize = () => {
@@ -966,6 +1041,7 @@ export class CoreEngine {
         this._canvasRect = this._refreshCanvasRect();
         this._applyCameraZoomLimit();
         this._updateCameraFarFromControls();
+        this.requestRender('resize');
     };
 
     _logTrailDebugMetrics = (reason, viewportWidth = null, viewportHeight = null) => {
@@ -1132,6 +1208,7 @@ export class CoreEngine {
     };
 
     _onControlsChangePixelRatio() {
+        this.requestRender('controls-change');
         if (this._isUserNavigating) return;
         this._schedulePixelRatioRefresh();
     }
@@ -1148,6 +1225,7 @@ export class CoreEngine {
         this._pixelRatioRefreshTimer = setTimeout(() => {
             this._pixelRatioRefreshTimer = null;
             this._updateRendererPixelRatio();
+            this.requestRender('pixel-ratio-refresh');
         }, debounceMs);
     }
 
@@ -1214,6 +1292,7 @@ export class CoreEngine {
         this._cancelPendingPixelRatioRefresh();
         this._resetAdaptiveRenderDprSampling();
         this._clearRaycastHoverState();
+        this.requestRender('controls-start');
     }
 
     _onControlsEndInteraction() {
@@ -1223,6 +1302,7 @@ export class CoreEngine {
         if (idleMs <= 0 || typeof setTimeout !== 'function') {
             this._isUserNavigating = false;
             this._updateRendererPixelRatio();
+            this.requestRender('controls-end');
             return;
         }
         // OrbitControls emits wheel zoom as many short start/end pairs.
@@ -1232,6 +1312,7 @@ export class CoreEngine {
             this._controlsInteractionEndTimer = null;
             this._isUserNavigating = false;
             this._updateRendererPixelRatio();
+            this.requestRender('controls-end');
         }, idleMs);
     }
 
@@ -1319,6 +1400,7 @@ export class CoreEngine {
         if (!this._keyboardCodes.has(code)) return;
         this._keyState.add(code);
         event.preventDefault();
+        this.requestRender(`keyboard:${code}`);
     };
 
     _onKeyUp = (event) => {
@@ -2269,7 +2351,8 @@ export class CoreEngine {
     }
 
     _animate = () => {
-        requestAnimationFrame(this._animate);
+        this._animationFrame = null;
+        if (this._disposed) return;
         const now = this._now();
 
         const liveDpr = (typeof window !== 'undefined' && typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
@@ -2282,16 +2365,17 @@ export class CoreEngine {
 
         const lastFrameTime = this._lastFrameTime;
         if (lastFrameTime !== null && (now - lastFrameTime) < this._minFrameIntervalMs) {
+            this._ensureAnimationFrame();
             return;
         }
+        this._renderInvalidated = false;
         this._lastFrameTime = now;
         const frameIntervalMs = lastFrameTime !== null ? (now - lastFrameTime) : null;
         const frameDelta = lastFrameTime !== null
             ? Math.min(frameIntervalMs / 1000, 0.1)
             : (1 / 60);
 
-        const visibilityPauseOnly = this._paused && this._pauseReasons.size === 1 && this._pauseReasons.has('visibility');
-        if (visibilityPauseOnly) return;
+        if (this._isVisibilityPauseOnly()) return;
 
         const perfEnabled = perfStats.enabled;
         if (perfEnabled) {
@@ -2299,6 +2383,7 @@ export class CoreEngine {
         }
 
         const layerErrorLogThrottleMs = 1000;
+        let activeTweenCount = 0;
 
         if (!this._paused) {
             const layers = this._layers;
@@ -2307,19 +2392,17 @@ export class CoreEngine {
             const dt = Math.min(rawDt, this._maxUpdateDeltaSec);
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
-                if (!layer) continue;
-                if (layer.isActive || layer._transitionPhase === 'positioning') {
-                    try {
-                        layer.update(dt);
-                    } catch (err) {
-                        const logNow = this._now();
-                        const lastLogAt = Number.isFinite(layer.__lastUpdateErrorLogAt)
-                            ? layer.__lastUpdateErrorLogAt
-                            : -Infinity;
-                        if ((logNow - lastLogAt) >= layerErrorLogThrottleMs) {
-                            console.error(`CoreEngine: layer ${i} update() failed`, err);
-                            layer.__lastUpdateErrorLogAt = logNow;
-                        }
+                if (!this._shouldUpdateLayer(layer, { paused: false })) continue;
+                try {
+                    layer.update(dt);
+                } catch (err) {
+                    const logNow = this._now();
+                    const lastLogAt = Number.isFinite(layer.__lastUpdateErrorLogAt)
+                        ? layer.__lastUpdateErrorLogAt
+                        : -Infinity;
+                    if ((logNow - lastLogAt) >= layerErrorLogThrottleMs) {
+                        console.error(`CoreEngine: layer ${i} update() failed`, err);
+                        layer.__lastUpdateErrorLogAt = logNow;
                     }
                 }
             }
@@ -2331,11 +2414,12 @@ export class CoreEngine {
                 const tweenStart = perfEnabled ? this._now() : 0;
                 this._tweenTimelineMs += dt * 1000;
                 TWEEN.update(this._tweenTimelineMs);
+                activeTweenCount = (typeof TWEEN.getAll === 'function')
+                    ? TWEEN.getAll().length
+                    : 0;
                 if (perfEnabled) {
                     perfStats.addTime('tween', this._now() - tweenStart);
-                    if (typeof TWEEN.getAll === 'function') {
-                        perfStats.setGauge('tweens', TWEEN.getAll().length);
-                    }
+                    perfStats.setGauge('tweens', activeTweenCount);
                 }
             }
 
@@ -2362,9 +2446,7 @@ export class CoreEngine {
             const layers = this._layers;
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
-                if (!layer || layer.updateWhenPaused !== true || typeof layer.update !== 'function') {
-                    continue;
-                }
+                if (!this._shouldUpdateLayer(layer, { paused: true })) continue;
                 try {
                     layer.update(0);
                 } catch (err) {
@@ -2387,7 +2469,7 @@ export class CoreEngine {
                 frameDelta
             );
         }
-        this.controls.update(frameDelta);
+        const controlsChanged = this.controls.update(frameDelta) === true;
         this._updateCameraDebug();
         const renderStart = perfEnabled ? this._now() : 0;
         if (this._needsFreshFrameAfterResume) {
@@ -2408,6 +2490,10 @@ export class CoreEngine {
 
         if (perfEnabled) {
             perfStats.endFrame(this._now());
+        }
+
+        if (this._shouldKeepAnimationLoopRunning({ controlsChanged, activeTweenCount })) {
+            this._ensureAnimationFrame();
         }
     };
 }

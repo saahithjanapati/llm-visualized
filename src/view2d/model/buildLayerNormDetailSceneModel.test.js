@@ -423,6 +423,30 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(requestedLengths).toContainEqual(['ln2.norm', 12]);
     });
 
+    it('marks single-token layer norm vector captions to skip single-row caption assist', () => {
+        const scene = buildLayerNormDetailSceneModel({
+            activationSource: createMockActivationSource(),
+            layerNormDetailTarget: {
+                layerNormKind: 'ln1',
+                layerIndex: 3
+            },
+            tokenRefs: [
+                { rowIndex: 0, tokenIndex: 0, tokenLabel: 'Token A' }
+            ],
+            layerCount: 12
+        });
+        const nodes = flattenSceneNodes(scene);
+        const inputNode = nodes.find((node) => node?.role === 'layer-norm-input') || null;
+        const normalizedNode = nodes.find((node) => node?.role === 'layer-norm-normalized') || null;
+        const scaleNode = nodes.find((node) => node?.role === 'layer-norm-scale') || null;
+        const outputNode = nodes.find((node) => node?.role === 'layer-norm-output') || null;
+
+        expect(inputNode?.metadata?.caption?.disableSingleRowAssist).toBe(true);
+        expect(normalizedNode?.metadata?.caption?.disableSingleRowAssist).toBe(true);
+        expect(scaleNode?.metadata?.caption?.disableSingleRowAssist).toBe(true);
+        expect(outputNode?.metadata?.caption?.disableSingleRowAssist).toBe(true);
+    });
+
     it('uses the residual-stream palette for layer norm parameter rows', () => {
         const scene = buildScene();
         const nodes = flattenSceneNodes(scene);

@@ -47,7 +47,7 @@ describe('transformerView2dTargets', () => {
             }],
             detailFocusLabel: 'LayerNorm 1 Scale'
         });
-        expect(context?.transitionMode || '').toBe('staged-detail');
+        expect(context?.transitionMode || '').toBe('direct');
     });
 
     it('maps token selections onto the overview chip target that exists in the 2D scene', () => {
@@ -312,7 +312,7 @@ describe('transformerView2dTargets', () => {
         ]));
     });
 
-    it('uses the staged head-detail opening flow for attention head targets', () => {
+    it('opens attention head targets directly into the head-detail scene', () => {
         expect(resolveTransformerView2dOpenTransitionMode({
             semanticTarget: {
                 componentKind: 'mhsa',
@@ -321,7 +321,41 @@ describe('transformerView2dTargets', () => {
                 stage: 'attention',
                 role: 'head'
             }
-        })).toBe('staged-head-detail');
+        })).toBe('direct');
+    });
+
+    it('maps attention-score selections to a direct head-detail open', () => {
+        const context = resolveTransformerView2dActionContext({
+            label: 'Post-Softmax Attention Score',
+            info: {
+                layerIndex: 1,
+                headIndex: 2,
+                activationData: {
+                    stage: 'attention.post',
+                    layerIndex: 1,
+                    headIndex: 2
+                }
+            }
+        }, 'Post-Softmax Attention Score');
+
+        expect(context).toMatchObject({
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            },
+            detailSemanticTargets: [{
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'attention-post'
+            }],
+            detailFocusLabel: 'Post-Softmax Attention Score'
+        });
+        expect(context?.transitionMode || '').toBe('direct');
     });
 
     it('prefers the layer norm card and title when resolving focus candidates', () => {
@@ -378,7 +412,7 @@ describe('transformerView2dTargets', () => {
         ]);
     });
 
-    it('leaves non-head detail routes on the existing direct-open path', () => {
+    it('uses the explicit direct-open mode for non-head detail routes', () => {
         expect(resolveTransformerView2dOpenTransitionMode({
             semanticTarget: {
                 componentKind: 'output-projection',
@@ -386,7 +420,7 @@ describe('transformerView2dTargets', () => {
                 stage: 'attn-out',
                 role: 'projection-weight'
             }
-        })).toBe('');
+        })).toBe('direct');
     });
 
     it('opens layer norm targets on the direct scene-backed detail path', () => {
@@ -397,7 +431,7 @@ describe('transformerView2dTargets', () => {
                 stage: 'ln2',
                 role: 'module'
             }
-        })).toBe('');
+        })).toBe('direct');
     });
 
     it('redirects concat overview targets into output-projection detail', () => {
@@ -463,10 +497,10 @@ describe('transformerView2dTargets', () => {
             detailFocusLabel: 'Concatenate Heads',
             focusLabel: 'Layer 5 Output Projection'
         });
-        expect(context?.transitionMode || '').toBe('staged-detail');
+        expect(context?.transitionMode || '').toBe('direct');
     });
 
-    it('maps output-projection bias selections to a staged detail open with bias highlighting', () => {
+    it('maps output-projection bias selections to a direct detail open with bias highlighting', () => {
         const context = resolveTransformerView2dActionContext({
             label: 'Output Projection Bias Vector',
             info: {
@@ -493,7 +527,7 @@ describe('transformerView2dTargets', () => {
             }],
             detailFocusLabel: 'Output Projection Bias Vector'
         });
-        expect(context?.transitionMode || '').toBe('staged-detail');
+        expect(context?.transitionMode || '').toBe('direct');
     });
 
     it('maps MLP output selections to the overview module and detail-row highlight target', () => {
@@ -525,7 +559,7 @@ describe('transformerView2dTargets', () => {
             }],
             detailFocusLabel: 'MLP Down Projection'
         });
-        expect(context?.transitionMode || '').toBe('staged-detail');
+        expect(context?.transitionMode || '').toBe('direct');
     });
 
     it('formats the top-left stage header for layer stages', () => {

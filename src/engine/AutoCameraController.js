@@ -105,6 +105,18 @@ export class AutoCameraController {
         this._updateCameraOffsetOverlay();
     }
 
+    needsFrameUpdate({ paused = false } = {}) {
+        if (this._startupCameraIntroActive) return true;
+        if (this._startupCameraOverviewPending && this._autoCameraFollow) return true;
+        if (this._hasPanelShift()) return true;
+        if (this._isAutoCameraViewTransitionActive()) return true;
+        if (this._hasAutoCameraOffsetDelta()) return true;
+        if (this._autoCameraPostAddLockActive) return true;
+        if (paused) return false;
+        if (!this._autoCameraFollow) return false;
+        return this._hasPipelineFrameWork();
+    }
+
     setEnabled(enabled, { immediate = false, resetView = false, smoothReset = false } = {}) {
         const nextValue = !!enabled;
         if (nextValue === this._autoCameraFollow) {
@@ -826,6 +838,47 @@ export class AutoCameraController {
         if (this._panelShiftTween) return true;
         if (Math.abs(this._panelShiftPxCurrent) > 0.5) return true;
         return this._panelShiftViewActive;
+    }
+
+    _hasPipelineFrameWork() {
+        const layers = Array.isArray(this._pipeline?._layers)
+            ? this._pipeline._layers
+            : [];
+        for (let i = 0; i < layers.length; i += 1) {
+            const layer = layers[i];
+            if (!layer) continue;
+            if (layer.isActive || layer._transitionPhase === 'positioning') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    _isAutoCameraViewTransitionActive() {
+        return this._autoCameraViewBlendT < 1
+            || !!(
+                this._autoCameraViewPendingKey
+                && this._autoCameraViewPendingKey !== this._autoCameraViewKey
+            );
+    }
+
+    _hasAutoCameraOffsetDelta() {
+        const currentCameraOffset = this._autoCameraCurrentCameraOffset;
+        const currentTargetOffset = this._autoCameraCurrentTargetOffset;
+        const desiredCameraOffset = this._autoCameraDesiredCameraOffset;
+        const desiredTargetOffset = this._autoCameraDesiredTargetOffset;
+        if (
+            !isFiniteVector3(currentCameraOffset)
+            || !isFiniteVector3(currentTargetOffset)
+            || !isFiniteVector3(desiredCameraOffset)
+            || !isFiniteVector3(desiredTargetOffset)
+        ) {
+            return false;
+        }
+
+        const offsetEpsilonSq = 1e-6;
+        return currentCameraOffset.distanceToSquared(desiredCameraOffset) > offsetEpsilonSq
+            || currentTargetOffset.distanceToSquared(desiredTargetOffset) > offsetEpsilonSq;
     }
 
     _applyAbsoluteCameraPose(cameraPosition, cameraTarget) {

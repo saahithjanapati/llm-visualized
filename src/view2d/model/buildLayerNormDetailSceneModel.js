@@ -498,9 +498,10 @@ function createLayerNormVectorNode({
     visualStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     stripStyleKey = VIEW2D_STYLE_KEYS.RESIDUAL,
     disableEdgeOrnament = false,
-    cornerRadius = LAYER_NORM_VECTOR_CORNER_RADIUS
+    cornerRadius = LAYER_NORM_VECTOR_CORNER_RADIUS,
+    disableSingleRowCaptionAssist = false
 } = {}) {
-    return createVectorStripMatrixNode({
+    const node = createVectorStripMatrixNode({
         role,
         semantic,
         labelTex,
@@ -532,6 +533,10 @@ function createLayerNormVectorNode({
             ...(disableEdgeOrnament ? { disableEdgeOrnament: true } : {})
         }
     });
+    if (disableSingleRowCaptionAssist && node?.metadata?.caption) {
+        node.metadata.caption.disableSingleRowAssist = true;
+    }
+    return node;
 }
 
 export function buildLayerNormDetailSceneModel({
@@ -567,6 +572,7 @@ export function buildLayerNormDetailSceneModel({
         columnCount: D_MODEL
     });
     const sourceVectorLength = resolveActivationSourceVectorLength(activationSource, D_MODEL);
+    const disableSingleRowCaptionAssist = rowCount === 1;
 
     const inputRows = buildLayerNormActivationRows(tokenRefs, {
         stageConfig,
@@ -721,7 +727,8 @@ export function buildLayerNormDetailSceneModel({
         rowHeight: vectorMetrics.rowHeight,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
         stripStyleKey: 'layer-norm-input',
-        disableEdgeOrnament: true
+        disableEdgeOrnament: true,
+        disableSingleRowCaptionAssist
     });
     const normalizedNode = createLayerNormVectorNode({
         role: 'layer-norm-normalized',
@@ -737,7 +744,8 @@ export function buildLayerNormDetailSceneModel({
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: vectorMetrics.rowHeight,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
-        stripStyleKey: 'layer-norm-normalized'
+        stripStyleKey: 'layer-norm-normalized',
+        disableSingleRowCaptionAssist
     });
     const normalizedCopyNode = createLayerNormVectorNode({
         role: 'layer-norm-normalized-copy',
@@ -753,7 +761,8 @@ export function buildLayerNormDetailSceneModel({
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: vectorMetrics.rowHeight,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
-        stripStyleKey: 'layer-norm-normalized-copy'
+        stripStyleKey: 'layer-norm-normalized-copy',
+        disableSingleRowCaptionAssist
     });
     const scaleNode = createLayerNormVectorNode({
         role: 'layer-norm-scale',
@@ -771,7 +780,8 @@ export function buildLayerNormDetailSceneModel({
         captionLabelScale: PARAM_SYMBOL_CAPTION_LABEL_SCALE,
         cornerRadius: LAYER_NORM_PARAM_CORNER_RADIUS,
         visualStyleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
-        stripStyleKey: 'layer-norm-scale'
+        stripStyleKey: 'layer-norm-scale',
+        disableSingleRowCaptionAssist
     });
     const scaledNode = createLayerNormVectorNode({
         role: 'layer-norm-scaled',
@@ -787,7 +797,8 @@ export function buildLayerNormDetailSceneModel({
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: vectorMetrics.rowHeight,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
-        stripStyleKey: 'layer-norm-scaled'
+        stripStyleKey: 'layer-norm-scaled',
+        disableSingleRowCaptionAssist
     });
     const scaledCopyNode = createLayerNormVectorNode({
         role: 'layer-norm-scaled-copy',
@@ -803,7 +814,8 @@ export function buildLayerNormDetailSceneModel({
         compactWidth: vectorMetrics.compactWidth,
         rowHeight: vectorMetrics.rowHeight,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
-        stripStyleKey: 'layer-norm-scaled-copy'
+        stripStyleKey: 'layer-norm-scaled-copy',
+        disableSingleRowCaptionAssist
     });
     const shiftNode = createLayerNormVectorNode({
         role: 'layer-norm-shift',
@@ -821,7 +833,8 @@ export function buildLayerNormDetailSceneModel({
         captionLabelScale: PARAM_SYMBOL_CAPTION_LABEL_SCALE,
         cornerRadius: LAYER_NORM_PARAM_CORNER_RADIUS,
         visualStyleKey: VIEW2D_STYLE_KEYS.LAYER_NORM,
-        stripStyleKey: 'layer-norm-shift'
+        stripStyleKey: 'layer-norm-shift',
+        disableSingleRowCaptionAssist
     });
     const outputNode = createLayerNormVectorNode({
         role: 'layer-norm-output',
@@ -838,7 +851,8 @@ export function buildLayerNormDetailSceneModel({
         rowHeight: vectorMetrics.rowHeight,
         visualStyleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
         stripStyleKey: 'layer-norm-output',
-        disableEdgeOrnament: true
+        disableEdgeOrnament: true,
+        disableSingleRowCaptionAssist
     });
 
     const incomingArrowSpacerNode = createHiddenSpacer({
