@@ -52,6 +52,70 @@ describe('selectionPanelTransformerView2dTransitionUtils', () => {
         }])).toBe(true);
     });
 
+    it('keeps MHSA vector detail targets at fit scene', () => {
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mhsa',
+            layerIndex: 1,
+            headIndex: 3,
+            stage: 'projection-q',
+            role: 'projection-output'
+        }, {
+            componentKind: 'mhsa',
+            layerIndex: 1,
+            headIndex: 3,
+            stage: 'attention',
+            role: 'attention-query-source'
+        }])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mhsa',
+            layerIndex: 1,
+            headIndex: 3,
+            stage: 'head-output',
+            role: 'attention-head-output'
+        }])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mhsa',
+            layerIndex: 1,
+            headIndex: 3,
+            stage: 'head-output',
+            role: 'attention-head-output-product'
+        }, {
+            componentKind: 'mhsa',
+            layerIndex: 1,
+            headIndex: 3,
+            stage: 'head-output',
+            role: 'attention-value-post'
+        }])).toBe(true);
+    });
+
+    it('keeps other non-score deep-detail targets at fit scene by default', () => {
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'output-projection',
+            layerIndex: 1,
+            stage: 'attn-out',
+            role: 'projection-bias'
+        }])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mlp',
+            layerIndex: 1,
+            stage: 'mlp-up',
+            role: 'mlp-up-output'
+        }])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'layer-norm',
+            layerIndex: 1,
+            stage: 'ln1',
+            role: 'layer-norm-scale'
+        }])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mhsa',
+            layerIndex: 1,
+            headIndex: 3,
+            stage: 'attention',
+            role: 'attention-softmax-body'
+        }])).toBe(true);
+    });
+
     it('keeps the scene fit when no component target is provided', () => {
         expect(shouldKeepTransformerView2dHeadDetailFitView([])).toBe(true);
         expect(shouldKeepTransformerView2dHeadDetailFitView(null)).toBe(true);
