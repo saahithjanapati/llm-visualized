@@ -1306,6 +1306,49 @@ describe('MHSA detail transpose view', () => {
         expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVNode?.id);
     });
 
+    it('locks prefill V rows onto the mirrored V cache row on click', () => {
+        const {
+            index,
+            valueProjectionOutputNode,
+            valueCacheNode,
+            connectorVCacheNode
+        } = buildSceneFixtures(TOKEN_LABELS.length, {
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: true
+            }
+        });
+
+        const hoverState = resolveMhsaDetailHoverState(index, {
+            node: valueProjectionOutputNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: valueProjectionOutputNode?.rowItems?.[1]
+            }
+        });
+        const clickState = resolveMhsaDetailHoverState(index, {
+            node: valueProjectionOutputNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: valueProjectionOutputNode?.rowItems?.[1]
+            }
+        }, {
+            interactionKind: 'click'
+        });
+
+        expect(
+            hoverState?.focusState?.rowSelections?.some((selection) => (
+                selection.nodeId === valueCacheNode?.id && selection.rowIndex === 1
+            ))
+        ).toBe(false);
+        expect(clickState?.focusState?.activeNodeIds).toContain(valueCacheNode?.id);
+        expect(clickState?.focusState?.activeConnectorIds).toContain(connectorVCacheNode?.id);
+        expect(clickState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueCacheNode?.id,
+            rowIndex: 1
+        });
+    });
+
     it('can resolve deep-hover tooltip payloads without building focus state', () => {
         const {
             index,
@@ -1766,7 +1809,7 @@ describe('MHSA detail transpose view', () => {
         });
     });
 
-    it('maps decode V_current and its copied live row to the live combined V path', () => {
+    it('maps decode V_current and its copied live row to the live combined V path while mirroring the cache row', () => {
         const {
             index,
             projectionSourceNode,
@@ -1804,13 +1847,31 @@ describe('MHSA detail transpose view', () => {
                     rowIndex: 0,
                     rowItem: valueProjectionOutputCopyNode?.rowItems?.[0]
                 }
+            }),
+            resolveMhsaDetailHoverState(index, {
+                node: valueProjectionOutputNode,
+                rowHit: {
+                    rowIndex: 0,
+                    rowItem: valueProjectionOutputNode?.rowItems?.[0]
+                }
+            }, {
+                interactionKind: 'click'
+            }),
+            resolveMhsaDetailHoverState(index, {
+                node: valueProjectionOutputCopyNode,
+                rowHit: {
+                    rowIndex: 0,
+                    rowItem: valueProjectionOutputCopyNode?.rowItems?.[0]
+                }
+            }, {
+                interactionKind: 'click'
             })
         ];
 
         hoverStates.forEach((hoverState) => {
             expect(hoverState?.label).toBe('Value Vector');
-            expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueCacheNode?.id);
-            expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueCacheSourceNode?.id);
+            expect(hoverState?.focusState?.activeNodeIds).toContain(valueCacheNode?.id);
+            expect(hoverState?.focusState?.activeNodeIds).toContain(valueCacheSourceNode?.id);
             expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVNode?.id);
             expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVCacheCopyNode?.id);
             expect(hoverState?.focusState?.activeConnectorIds).toContain(connectorVCacheNextNode?.id);
@@ -1825,6 +1886,14 @@ describe('MHSA detail transpose view', () => {
             });
             expect(hoverState?.focusState?.rowSelections).toContainEqual({
                 nodeId: valueProjectionOutputCopyNode?.id,
+                rowIndex: 0
+            });
+            expect(hoverState?.focusState?.rowSelections).toContainEqual({
+                nodeId: valueCacheNode?.id,
+                rowIndex: 0
+            });
+            expect(hoverState?.focusState?.rowSelections).toContainEqual({
+                nodeId: valueCacheSourceNode?.id,
                 rowIndex: 0
             });
             expect(hoverState?.focusState?.rowSelections).toContainEqual({

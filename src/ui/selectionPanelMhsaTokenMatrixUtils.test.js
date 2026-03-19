@@ -7,6 +7,10 @@ import {
     MHA_FINAL_Q_COLOR,
     MHA_FINAL_V_COLOR
 } from '../animations/LayerAnimationConstants.js';
+import {
+    buildAttentionVectorRangeOptions,
+    resolveAttentionVectorBaseColor
+} from '../utils/attentionVectorColorUtils.js';
 
 function createActivationSource() {
     const tokenLabels = ['Alpha', 'Beta', 'Gamma'];
@@ -152,7 +156,7 @@ describe('buildMhsaTokenMatrixPreviewData', () => {
         expect(upperPostCell.fillCss).not.toBe('rgba(0, 0, 0, 0.94)');
     });
 
-    it('keeps Q, K, and V detail gradients locked to their family hues', () => {
+    it('keeps Q, K, and V detail gradients aligned with the prism vector palette', () => {
         const previewData = buildMhsaTokenMatrixPreviewData({
             activationSource: createExtremeFamilyActivationSource(),
             layerIndex: 0,
@@ -167,18 +171,20 @@ describe('buildMhsaTokenMatrixPreviewData', () => {
         const headOutputRow = previewData?.attentionScoreStage?.headOutputRows?.[0] || null;
 
         const expectations = [
-            { gradientCss: queryProjection?.outputRows?.[0]?.gradientCss, baseHex: MHA_FINAL_Q_COLOR },
-            { gradientCss: keyProjection?.outputRows?.[0]?.gradientCss, baseHex: MHA_FINAL_K_COLOR },
-            { gradientCss: valueProjection?.outputRows?.[0]?.gradientCss, baseHex: MHA_FINAL_V_COLOR },
-            { gradientCss: valueOperandRow?.gradientCss, baseHex: MHA_FINAL_V_COLOR },
-            { gradientCss: headOutputRow?.gradientCss, baseHex: MHA_FINAL_V_COLOR }
+            { gradientCss: queryProjection?.outputRows?.[0]?.gradientCss, kind: 'q' },
+            { gradientCss: keyProjection?.outputRows?.[0]?.gradientCss, kind: 'k' },
+            { gradientCss: valueProjection?.outputRows?.[0]?.gradientCss, kind: 'v' },
+            { gradientCss: valueOperandRow?.gradientCss, kind: 'v' },
+            { gradientCss: headOutputRow?.gradientCss, kind: 'v' }
         ];
 
-        expectations.forEach(({ gradientCss, baseHex }) => {
+        expectations.forEach(({ gradientCss, kind }) => {
+            const baseHex = resolveAttentionVectorBaseColor(kind);
+            const maxHueDistance = ((buildAttentionVectorRangeOptions(kind)?.hueSpread || 0) * 0.5) + 0.02;
             const colors = extractGradientHexColors(gradientCss);
             expect(colors.length).toBeGreaterThan(0);
             colors.forEach((colorHex) => {
-                expect(getHueDistance(colorHex, baseHex)).toBeLessThan(0.02);
+                expect(getHueDistance(colorHex, baseHex)).toBeLessThan(maxHueDistance);
             });
         });
 

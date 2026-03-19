@@ -579,6 +579,38 @@ describe('createTransformerView2dDetailView', () => {
         expect(layer?.hidden).toBe(true);
     });
 
+    it('holds on the full GPT overview for at least 150ms before staged focus zoom begins', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'module'
+            },
+            focusLabel: 'Token embeddings',
+            transitionMode: 'staged-focus'
+        });
+
+        const initialScale = view.getViewportState().scale;
+
+        await vi.advanceTimersByTimeAsync(160);
+        expect(view.getViewportState().scale).toBeCloseTo(initialScale, 5);
+
+        await vi.advanceTimersByTimeAsync(48);
+        expect(view.getViewportState().scale).toBeGreaterThan(initialScale);
+    });
+
     it('uses a looser initial frame when opening a focused external target', () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
@@ -930,6 +962,7 @@ describe('createTransformerView2dDetailView', () => {
         const overlay = panelEl.querySelector('.detail-transformer-view2d-caption-overlay');
         const idleRenderArgs = renderSpy.mock.calls.at(-1)?.[0] || null;
         expect(idleRenderArgs?.dprCap).toBeTruthy();
+        expect(idleRenderArgs?.dpr).toBe(2);
         expect(overlay?.style.display).toBe('block');
 
         canvas.dispatchEvent(createWheelEvent({
@@ -941,6 +974,7 @@ describe('createTransformerView2dDetailView', () => {
 
         const interactionRenderArgs = renderSpy.mock.calls.at(-1)?.[0] || null;
         expect(interactionRenderArgs?.dprCap).toBe(idleRenderArgs?.dprCap);
+        expect(interactionRenderArgs?.dpr).toBe(idleRenderArgs?.dpr);
         expect(overlay?.style.display).toBe('block');
 
         await vi.advanceTimersByTimeAsync(220);

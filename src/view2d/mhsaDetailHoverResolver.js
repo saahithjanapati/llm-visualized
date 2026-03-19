@@ -243,6 +243,58 @@ function buildDecodeProjectionCurrentInputRowSelections(index = null, kind = '',
     return rowSelections;
 }
 
+function buildPrefillProjectionCacheMirrorRowSelections(index = null, kind = '', role = '', rowIndex = null, options = null) {
+    const safeKind = normalizeProjectionKind(kind);
+    const safeRole = String(role || '').trim().toLowerCase();
+    const safeRowIndex = Number.isFinite(rowIndex) ? Math.max(0, Math.floor(rowIndex)) : null;
+    const interactionKind = String(options?.interactionKind || 'hover').trim().toLowerCase();
+    if (
+        !index
+        || safeKind !== 'v'
+        || !Number.isFinite(safeRowIndex)
+        || (safeRole !== 'projection-output' && safeRole !== 'projection-output-copy')
+        || interactionKind !== 'click'
+        || index?.scene?.metadata?.kvCacheState?.kvCacheDecodeActive
+    ) {
+        return [];
+    }
+    const cacheNodeId = findProjectionNodeIdByKind(index, 'projection-cache', safeKind);
+    if (!cacheNodeId) return [];
+    return [{
+        nodeId: cacheNodeId,
+        rowIndex: safeRowIndex
+    }];
+}
+
+function buildDecodeProjectionCacheMirrorRowSelections(index = null, kind = '', rowIndex = null) {
+    const safeKind = normalizeProjectionKind(kind);
+    const safeRowIndex = Number.isFinite(rowIndex) ? Math.max(0, Math.floor(rowIndex)) : null;
+    if (
+        !index
+        || safeKind !== 'v'
+        || !Number.isFinite(safeRowIndex)
+        || !index?.scene?.metadata?.kvCacheState?.kvCacheDecodeActive
+    ) {
+        return [];
+    }
+    const cacheNodeId = findProjectionNodeIdByKind(index, 'projection-cache', safeKind);
+    const cacheSourceNodeId = findProjectionNodeIdByKind(index, 'projection-cache-source', safeKind);
+    return [
+        ...(cacheNodeId
+            ? [{
+                nodeId: cacheNodeId,
+                rowIndex: safeRowIndex
+            }]
+            : []),
+        ...(cacheSourceNodeId
+            ? [{
+                nodeId: cacheSourceNodeId,
+                rowIndex: safeRowIndex
+            }]
+            : [])
+    ];
+}
+
 function buildScoreAxisSelectionsWithoutTranspose(index = null, axisIndex = null, options = null) {
     const selections = buildScoreAxisSelections(index, axisIndex, options);
     const transposeNodeId = index?.singleNodeIds?.attentionKeyTranspose || '';
@@ -721,6 +773,7 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
                     includeProjectionSource: true,
                     rowIndex
                 }),
+                ...buildDecodeProjectionCacheMirrorRowSelections(index, safeKind, rowIndex),
                 {
                     nodeId: projectionOutputNodeId,
                     rowIndex
@@ -836,6 +889,7 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
     } else if (safeKind === 'v') {
         descriptors.push('valueProjectionPath');
         rowSelections.push(...buildValueRowSelections(index, rowIndex));
+        rowSelections.push(...buildPrefillProjectionCacheMirrorRowSelections(index, safeKind, role, rowIndex, options));
         appendAllUnique(extraNodeIds, index?.nodeIdsByRole?.get('attention-head-output') || []);
     }
 

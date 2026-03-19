@@ -7,6 +7,7 @@ import {
 import { buildTransformerSceneModel } from '../view2d/model/buildTransformerSceneModel.js';
 import { appState } from '../state/appState.js';
 import { CanvasSceneRenderer } from '../view2d/render/canvas/CanvasSceneRenderer.js';
+import { resolveRenderPixelRatio } from '../utils/constants.js';
 import {
     normalizeRaycastLabel,
     simplifyLayerNormParamHoverLabel
@@ -114,9 +115,13 @@ const VIEW2D_INTERACTION_KIND_NONE = '';
 const VIEW2D_INTERACTION_KIND_PAN = 'pan';
 const VIEW2D_INTERACTION_KIND_ZOOM = 'zoom';
 // Keep the backing resolution stable so the first wheel/pinch interaction
-// does not pay a canvas resize/reallocation hitch on entry.
-const VIEW2D_PREVIEW_DPR_CAP_IDLE = 1.25;
+// does not pay a canvas resize/reallocation hitch on entry. The overview
+// tower becomes visibly soft when this canvas is capped too low, so keep
+// the 2D transformer view at full high-quality DPR instead of the lighter
+// preview budget used by smaller helper canvases.
+const VIEW2D_PREVIEW_DPR_CAP_IDLE = 2;
 const VIEW2D_PREVIEW_DPR_CAP_INTERACTING = VIEW2D_PREVIEW_DPR_CAP_IDLE;
+const VIEW2D_PREVIEW_MIN_RENDER_DPR = 2;
 const VIEW2D_KEYBOARD_PAN_PX_PER_SEC = 620;
 const VIEW2D_KEYBOARD_ZOOM_RATE = 0.00165;
 const VIEW2D_KEYBOARD_INITIAL_STEP_MS = 16;
@@ -159,10 +164,11 @@ const VIEW2D_ENTRY_HEAD_DETAIL_COMPONENT_FOCUS_PADDING = Object.freeze({
 });
 const VIEW2D_SELECTION_FOCUS_PADDING = 36;
 const VIEW2D_ENTRY_SELECTION_FOCUS_PADDING = 180;
-const VIEW2D_STAGED_FOCUS_OVERVIEW_HOLD_MS = 80;
+const VIEW2D_STAGED_OVERVIEW_HOLD_MIN_MS = 150;
+const VIEW2D_STAGED_FOCUS_OVERVIEW_HOLD_MS = VIEW2D_STAGED_OVERVIEW_HOLD_MIN_MS;
 const VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS =
     TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS;
-const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_HOLD_MS = 100;
+const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_HOLD_MS = VIEW2D_STAGED_OVERVIEW_HOLD_MIN_MS;
 const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS =
     TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS;
 const VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO = 0.97;
@@ -223,6 +229,28 @@ function resolveView2dSelectedTokenContext({
         tokenId: resolvedTokenId,
         tokenText
     };
+}
+
+function resolveTransformerView2dRenderDpr({
+    width = 0,
+    height = 0,
+    interacting = false
+} = {}) {
+    const dprCap = interacting
+        ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
+        : VIEW2D_PREVIEW_DPR_CAP_IDLE;
+    const preferredDpr = resolveRenderPixelRatio({
+        viewportWidth: width,
+        viewportHeight: height,
+        dprCap
+    });
+    return Math.min(
+        dprCap,
+        Math.max(
+            preferredDpr,
+            Math.min(dprCap, VIEW2D_PREVIEW_MIN_RENDER_DPR)
+        )
+    );
 }
 
 function resolveActiveDetailScene(scene = null, {
@@ -3218,9 +3246,15 @@ export function createTransformerView2dDetailView(panelEl, {
         const hoverRenderFastPath = shouldUseOverviewHoverRenderFastPath();
         const viewportAnimationActive = !!(viewportController.animation || detailViewportController.animation);
         const useFastRenderPath = state.isInteracting || hoverRenderFastPath || viewportAnimationActive;
+        const renderDpr = resolveTransformerView2dRenderDpr({
+            width,
+            height,
+            interacting: useFastRenderPath
+        });
         const didRender = renderer.render({
             width,
             height,
+            dpr: renderDpr,
             dprCap: useFastRenderPath
                 ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
                 : VIEW2D_PREVIEW_DPR_CAP_IDLE,
@@ -3238,6 +3272,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 previousHoveredRow: state.hoverDimming?.previousHoveredRow || null,
                 hoverRowBlend: state.hoverDimming?.rowBlend ?? 1,
                 hoverDimStrength: state.hoverDimming?.value || 0,
+                viewportAnimationActive,
                 detailSceneFocus: getActiveSceneFocusState(),
                 disableInactiveFilter: hoverRenderFastPath,
                 overviewFocusTransition: state.headDetailDepthActive

@@ -3137,4 +3137,93 @@ describe('CanvasSceneRenderer', () => {
         expect(drawImageOperation).toBeFalsy();
         expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(true);
     });
+
+    it('rerenders the overview during animated viewport transitions instead of scaling the cached frame', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createMatrixNode({
+                    role: 'overview-card',
+                    semantic: {
+                        componentKind: 'test',
+                        stage: 'overview',
+                        role: 'overview-card'
+                    },
+                    label: {
+                        tex: 'X',
+                        text: 'X'
+                    },
+                    dimensions: {
+                        rows: 4,
+                        cols: 4
+                    },
+                    presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+                    shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+                    visual: {
+                        styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                        disableCardSurfaceEffects: true
+                    },
+                    metadata: {
+                        card: {
+                            width: 180,
+                            height: 120
+                        }
+                    }
+                }),
+                createTextNode({
+                    text: 'Residual stream',
+                    metadata: {
+                        minScreenHeightPx: 0
+                    }
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+        renderer.overviewRenderCache = {
+            ...renderer.overviewRenderCache,
+            surface: renderer.overviewRenderCache.surface || { width: 480, height: 320 },
+            ctx: renderer.overviewRenderCache.ctx || {},
+            scene,
+            dpr: 1,
+            pixelWidth: 480,
+            pixelHeight: 320,
+            worldScale: 1,
+            offsetX: 0,
+            offsetY: 0
+        };
+
+        ctx.operations.length = 0;
+
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                scale: 1.25,
+                offsetX: 12,
+                offsetY: 8
+            },
+            interactionState: {
+                viewportAnimationActive: true
+            }
+        })).toBe(true);
+
+        const drawImageOperation = ctx.operations.find((operation) => operation.type === 'drawImage') || null;
+        expect(drawImageOperation).toBeFalsy();
+        expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(true);
+    });
 });

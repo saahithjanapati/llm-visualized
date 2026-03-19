@@ -11,8 +11,10 @@ import {
     buildMonochromeOptions,
     mapAttentionPostScoreToColor,
     mapValueToColor,
+    mapValueToHueRange,
     mapValueToMonochrome
 } from '../utils/colors.js';
+import { buildAttentionVectorRangeOptions } from '../utils/attentionVectorColorUtils.js';
 import {
     ATTENTION_PRE_COLOR_CLAMP,
     ATTENTION_PREVIEW_COLOR_DARKEN_FACTOR,
@@ -47,9 +49,12 @@ function buildFamilyClampedGradientOptions(colorHex) {
     });
 }
 
-const QUERY_VECTOR_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_Q_COLOR);
-const KEY_VECTOR_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_K_COLOR);
-const VALUE_VECTOR_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_V_COLOR);
+const QUERY_WEIGHT_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_Q_COLOR);
+const KEY_WEIGHT_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_K_COLOR);
+const VALUE_WEIGHT_GRADIENT_OPTIONS = buildFamilyClampedGradientOptions(MHA_FINAL_V_COLOR);
+const QUERY_VECTOR_GRADIENT_OPTIONS = buildAttentionVectorRangeOptions('q');
+const KEY_VECTOR_GRADIENT_OPTIONS = buildAttentionVectorRangeOptions('k');
+const VALUE_VECTOR_GRADIENT_OPTIONS = buildAttentionVectorRangeOptions('v');
 const PROJECTION_CONFIGS = [
     {
         kind: 'q',
@@ -58,7 +63,8 @@ const PROJECTION_CONFIGS = [
         biasLabelTex: 'b_q',
         outputLabelTex: 'Q',
         colorHex: MHA_FINAL_Q_COLOR,
-        gradientOptions: QUERY_VECTOR_GRADIENT_OPTIONS
+        vectorGradientOptions: QUERY_VECTOR_GRADIENT_OPTIONS,
+        weightGradientOptions: QUERY_WEIGHT_GRADIENT_OPTIONS
     },
     {
         kind: 'k',
@@ -67,7 +73,8 @@ const PROJECTION_CONFIGS = [
         biasLabelTex: 'b_k',
         outputLabelTex: 'K',
         colorHex: MHA_FINAL_K_COLOR,
-        gradientOptions: KEY_VECTOR_GRADIENT_OPTIONS
+        vectorGradientOptions: KEY_VECTOR_GRADIENT_OPTIONS,
+        weightGradientOptions: KEY_WEIGHT_GRADIENT_OPTIONS
     },
     {
         kind: 'v',
@@ -76,7 +83,8 @@ const PROJECTION_CONFIGS = [
         biasLabelTex: 'b_v',
         outputLabelTex: 'V',
         colorHex: MHA_FINAL_V_COLOR,
-        gradientOptions: VALUE_VECTOR_GRADIENT_OPTIONS
+        vectorGradientOptions: VALUE_VECTOR_GRADIENT_OPTIONS,
+        weightGradientOptions: VALUE_WEIGHT_GRADIENT_OPTIONS
     }
 ];
 
@@ -147,13 +155,16 @@ function buildGradientCssFromSamples(values, direction = '90deg') {
 function buildHueGradientCssFromSamples(values, rangeOptions, direction = '90deg', darkenFactor = 1) {
     const safeValues = cleanNumberArray(values);
     if (!safeValues.length) return 'none';
+    const mapColor = rangeOptions?.type === 'hueRange'
+        ? mapValueToHueRange
+        : mapValueToMonochrome;
     if (safeValues.length === 1) {
-        return colorToCss(darkenColor(mapValueToMonochrome(safeValues[0], rangeOptions), darkenFactor));
+        return colorToCss(darkenColor(mapColor(safeValues[0], rangeOptions), darkenFactor));
     }
     const lastIndex = Math.max(1, safeValues.length - 1);
     const stops = safeValues.map((value, index) => {
         const percent = (index / lastIndex) * 100;
-        return `${colorToCss(darkenColor(mapValueToMonochrome(value, rangeOptions), darkenFactor))} ${percent.toFixed(4)}%`;
+        return `${colorToCss(darkenColor(mapColor(value, rangeOptions), darkenFactor))} ${percent.toFixed(4)}%`;
     });
     return `linear-gradient(${direction}, ${stops.join(', ')})`;
 }
@@ -166,9 +177,12 @@ function buildProjectionVectorGradientCss(values, scalarValue, rangeOptions, dir
     if (Array.isArray(values) && values.length) {
         return buildHueGradientCssFromSamples(values, rangeOptions, direction, darkenFactor);
     }
+    const mapColor = rangeOptions?.type === 'hueRange'
+        ? mapValueToHueRange
+        : mapValueToMonochrome;
     return colorToCss(
         darkenColor(
-            mapValueToMonochrome(Number.isFinite(scalarValue) ? scalarValue : 0, rangeOptions),
+            mapColor(Number.isFinite(scalarValue) ? scalarValue : 0, rangeOptions),
             darkenFactor
         )
     );
@@ -566,7 +580,7 @@ export function buildMhsaTokenMatrixPreviewData({
                 gradientCss: buildProjectionVectorGradientCss(
                     safeValues,
                     safeScalar,
-                    config.gradientOptions,
+                    config.vectorGradientOptions,
                     '90deg',
                     PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR
                 )
@@ -582,13 +596,13 @@ export function buildMhsaTokenMatrixPreviewData({
             colorRgb: rgb,
             weightRowCount: D_MODEL,
             weightColumnCount: D_HEAD,
-            weightGradientCss: buildWeightCardCss(config.gradientOptions),
+            weightGradientCss: buildWeightCardCss(config.weightGradientOptions),
             biasValue: safeBiasSample,
             biasGradientCss: buildAccentCss(rgb, safeBiasSample),
             biasVectorGradientCss: buildProjectionVectorGradientCss(
                 null,
                 safeBiasSample,
-                config.gradientOptions,
+                config.vectorGradientOptions,
                 '90deg',
                 PROJECTION_VECTOR_PREVIEW_DARKEN_FACTOR
             ),

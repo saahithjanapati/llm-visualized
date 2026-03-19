@@ -7,16 +7,10 @@ import {
     VECTOR_LENGTH_PRISM,
 } from '../../utils/constants.js';
 import { MHSA_PASS_THROUGH_BRIGHTEN_RATIO, MHSA_PASS_THROUGH_DIM_RATIO, MHSA_MATRIX_MAX_EMISSIVE_INTENSITY } from '../../utils/constants.js';
-import { buildHueRangeOptions, mapValueToHueRange } from '../../utils/colors.js';
+import { mapValueToHueRange } from '../../utils/colors.js';
+import { buildAttentionVectorRangeOptions } from '../../utils/attentionVectorColorUtils.js';
 import { buildActivationData, applyActivationDataToVector } from '../../utils/activationMetadata.js';
 import {
-    MHA_VALUE_SPECTRUM_COLOR,
-    MHA_VALUE_HUE_SPREAD,
-    MHA_VALUE_LIGHTNESS_MIN,
-    MHA_VALUE_LIGHTNESS_MAX,
-    MHA_VALUE_RANGE_MIN,
-    MHA_VALUE_RANGE_MAX,
-    MHA_VALUE_CLAMP_MAX,
     MHA_VALUE_KEY_COLOR_COUNT
 } from '../LayerAnimationConstants.js';
 import { getSideCopyEntry, setSideCopyEntry } from './laneIndex.js';
@@ -24,12 +18,6 @@ import { getSideCopyEntry, setSideCopyEntry } from './laneIndex.js';
 const _trailScratch = new THREE.Vector3();
 const easeInOutQuad = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 const QKV_KEY_COLOR_COUNT = MHA_VALUE_KEY_COLOR_COUNT;
-const QKV_HUE_SPREAD = MHA_VALUE_HUE_SPREAD;
-const QKV_MIN_LIGHTNESS = MHA_VALUE_LIGHTNESS_MIN;
-const QKV_MAX_LIGHTNESS = MHA_VALUE_LIGHTNESS_MAX;
-const QKV_VALUE_MIN = MHA_VALUE_RANGE_MIN;
-const QKV_VALUE_MAX = MHA_VALUE_RANGE_MAX;
-const QKV_VALUE_CLAMP_MAX = MHA_VALUE_CLAMP_MAX;
 
 const isBatchedVector = (vec) => !!(vec && vec.isBatchedVectorRef);
 
@@ -74,15 +62,7 @@ export const applyQkvProcessedVisuals = (vectorRef, ctx, vectorCategory, outLeng
     const data = Number.isFinite(scalar)
         ? [scalar]
         : (vectorRef.rawData ? vectorRef.rawData.slice(0, outLength) : []);
-    const rangeBase = vectorCategory === 'V' ? MHA_VALUE_SPECTRUM_COLOR : finalVectorColor;
-    const rangeOptions = buildHueRangeOptions(rangeBase, {
-        hueSpread: QKV_HUE_SPREAD,
-        minLightness: QKV_MIN_LIGHTNESS,
-        maxLightness: QKV_MAX_LIGHTNESS,
-        valueMin: QKV_VALUE_MIN,
-        valueMax: QKV_VALUE_MAX,
-        valueClampMax: QKV_VALUE_CLAMP_MAX,
-    });
+    const rangeOptions = buildAttentionVectorRangeOptions(kind);
     const numKeyColors = Number.isFinite(scalar) ? 1 : QKV_KEY_COLOR_COUNT;
     vectorRef.applyProcessedVisuals(
         data,
