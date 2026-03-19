@@ -30,6 +30,28 @@ describe('selectionPanelTransformerView2dTransitionUtils', () => {
         }])).toBe(false);
     });
 
+    it('keeps weight-matrix detail targets at fit scene', () => {
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mhsa',
+            layerIndex: 1,
+            headIndex: 3,
+            stage: 'projection-q',
+            role: 'projection-weight'
+        }])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mlp',
+            layerIndex: 1,
+            stage: 'mlp-up',
+            role: 'mlp-up-weight'
+        }])).toBe(true);
+        expect(shouldKeepTransformerView2dHeadDetailFitView([{
+            componentKind: 'mlp',
+            layerIndex: 1,
+            stage: 'mlp-down',
+            role: 'mlp-down-weight'
+        }])).toBe(true);
+    });
+
     it('keeps the scene fit when no component target is provided', () => {
         expect(shouldKeepTransformerView2dHeadDetailFitView([])).toBe(true);
         expect(shouldKeepTransformerView2dHeadDetailFitView(null)).toBe(true);

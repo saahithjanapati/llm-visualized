@@ -1787,6 +1787,12 @@ export function createTransformerView2dDetailView(panelEl, {
         const { width, height } = measureCanvasSize();
         updateReadouts();
         render();
+        if (shouldBypassStagedOverviewFocusForSceneEntry()) {
+            return openHeadDetail(resolvedTarget, {
+                animate: false,
+                nextDepthActive: true
+            });
+        }
         state.stagedHeadDetailTransition = {
             headDetailTarget: resolvedTarget,
             phase: 'overview-to-focus',
@@ -1956,6 +1962,11 @@ export function createTransformerView2dDetailView(panelEl, {
         const { width, height } = measureCanvasSize();
         updateReadouts();
         render();
+        if (shouldBypassStagedOverviewFocusForSceneEntry()) {
+            return openStagedSceneDetailTarget(detailTargets, {
+                animate: false
+            });
+        }
         state.stagedDetailTransition = {
             detailTargets,
             phase: 'overview-to-focus',
@@ -2079,6 +2090,35 @@ export function createTransformerView2dDetailView(panelEl, {
             width: bounds.width + (marginX * 2),
             height: bounds.height + (marginY * 2)
         }, centerX, centerY);
+    }
+
+    function hasActiveStagedViewportTransition() {
+        return !!(
+            state.stagedFocusTransition
+            || state.stagedHeadDetailTransition
+            || state.stagedDetailTransition
+        );
+    }
+
+    function shouldBypassStagedOverviewFocusForSceneEntry(
+        paddingOverride = VIEW2D_STAGED_DETAIL_SELECTION_FOCUS_PADDING
+    ) {
+        if (!state.visible || !state.layout?.registry) return false;
+        const bounds = resolveSelectionFocusBounds();
+        if (!bounds || !isViewportNearFocusBounds(bounds, viewportController)) {
+            return false;
+        }
+        const { width, height, viewportInsets } = syncViewportControllers();
+        const targetTransform = resolveViewportFitTransform(bounds, { width, height }, {
+            padding: paddingOverride,
+            minScale: viewportController.minScale,
+            maxScale: viewportController.maxScale,
+            viewportInsets
+        });
+        const targetScale = Number(targetTransform?.scale) || 0;
+        if (!(targetScale > 0)) return false;
+        const currentScale = Number(viewportController.getState().scale) || 0;
+        return currentScale >= (targetScale * 0.995);
     }
 
     function stopHoverDimmingAnimation() {
@@ -4093,9 +4133,13 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function onPointerDown(event) {
         if (!state.visible || (Number.isFinite(event?.button) && event.button !== 0)) return;
+        focusCanvasSurface();
+        if (hasActiveStagedViewportTransition()) {
+            event.preventDefault();
+            return;
+        }
         clearStagedHeadDetailTransition();
         clearStagedDetailTransition();
-        focusCanvasSurface();
         if (event?.pointerType === 'touch') {
             trackTouchPointer(event);
             if (beginTouchPinch()) {
@@ -4337,7 +4381,7 @@ export function createTransformerView2dDetailView(panelEl, {
             headDetailDepthActive: state.headDetailDepthActive,
             hasActiveDetailTarget: hasActiveDetailTarget(),
             hasDetailSceneIndex: !!state.detailSceneIndex
-        })) {
+        }) || hasActiveStagedViewportTransition()) {
             event?.preventDefault?.();
             return;
         }

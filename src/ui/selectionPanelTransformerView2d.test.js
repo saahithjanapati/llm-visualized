@@ -308,6 +308,19 @@ function resolveCompactRowScreenPoint(nodeEntry = null, rowIndex = 0, viewportSt
     };
 }
 
+function resolveBoundsScreenPoint(bounds = null, viewportState = null) {
+    if (!bounds) return null;
+    const scale = Number(viewportState?.scale) || 1;
+    const panX = Number(viewportState?.panX) || 0;
+    const panY = Number(viewportState?.panY) || 0;
+    const worldX = (Number(bounds.x) || 0) + ((Number(bounds.width) || 0) * 0.5);
+    const worldY = (Number(bounds.y) || 0) + ((Number(bounds.height) || 0) * 0.5);
+    return {
+        clientX: (worldX * scale) + panX,
+        clientY: (worldY * scale) + panY
+    };
+}
+
 describe('createTransformerView2dDetailView', () => {
     let rafTime = 0;
     let createTransformerView2dDetailView = null;
@@ -845,7 +858,62 @@ describe('createTransformerView2dDetailView', () => {
         expect(view.getViewportState().scale).toBeLessThan(legacyTightFocusTransform.scale);
     });
 
-    it('stages scene-backed MLP targets from overview focus into the detail scene', async () => {
+    it('stages scene-backed MLP projection targets from overview focus into the detail scene', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const fitBtn = panelEl.querySelector('[data-transformer-view2d-action="fit-scene"]');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-output'
+            }],
+            detailFocusLabel: 'MLP Up Projection',
+            transitionMode: 'staged-detail'
+        });
+
+        const { layer, stage } = getStageReadouts(panelEl);
+        expect(stage?.textContent).toBe(TRANSFORMER_VIEW2D_OVERVIEW_LABEL);
+        expect(layer?.hidden).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(420);
+
+        expect(stage?.textContent).toBe(TRANSFORMER_VIEW2D_OVERVIEW_LABEL);
+        expect(layer?.hidden).toBe(true);
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(1200);
+        expect(stage?.textContent).toBe('Multilayer Perceptron');
+        expect(layer?.textContent).toBe('Layer 2');
+        expect(layer?.hidden).toBe(false);
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+        const focusedDetailScale = view.getViewportState().scale;
+
+        fitBtn?.click();
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(view.getViewportState().scale).toBeLessThan(focusedDetailScale);
+    });
+
+    it('keeps staged MLP weight-matrix detail entries at fit scene after the detail scene opens', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
 
@@ -877,27 +945,16 @@ describe('createTransformerView2dDetailView', () => {
             transitionMode: 'staged-detail'
         });
 
-        const { layer, stage } = getStageReadouts(panelEl);
-        expect(stage?.textContent).toBe(TRANSFORMER_VIEW2D_OVERVIEW_LABEL);
-        expect(layer?.hidden).toBe(true);
+        await vi.advanceTimersByTimeAsync(1400);
 
-        await vi.advanceTimersByTimeAsync(420);
-
-        expect(stage?.textContent).toBe(TRANSFORMER_VIEW2D_OVERVIEW_LABEL);
-        expect(layer?.hidden).toBe(true);
-        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
-
-        await vi.advanceTimersByTimeAsync(1200);
-        expect(stage?.textContent).toBe('Multilayer Perceptron');
-        expect(layer?.textContent).toBe('Layer 2');
-        expect(layer?.hidden).toBe(false);
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
-        const focusedDetailScale = view.getViewportState().scale;
+        expect(fitBtn?.dataset.fitVisible).toBe('false');
 
+        const fitSceneViewportState = view.getViewportState();
         fitBtn?.click();
         await vi.advanceTimersByTimeAsync(500);
 
-        expect(view.getViewportState().scale).toBeLessThan(focusedDetailScale);
+        expect(view.getViewportState().scale).toBeCloseTo(fitSceneViewportState.scale, 5);
     });
 
     it('smoothly refits within the unobscured width when the docked sidebar opens from a fit state', async () => {
@@ -1346,6 +1403,147 @@ describe('createTransformerView2dDetailView', () => {
         await vi.advanceTimersByTimeAsync(240);
 
         expect(view.getViewportState().scale).toBeCloseTo(openedScale, 6);
+    });
+
+    it('opens already-zoomed-in canvas MLP clicks directly into detail', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const mlpEntry = {
+            role: 'module-card',
+            semantic: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            }
+        };
+        const overviewScene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const overviewLayout = buildSceneLayout(overviewScene, {
+            isSmallScreen: false
+        });
+        const mlpBounds = resolveSemanticTargetBounds(overviewLayout.registry, {
+            componentKind: 'mlp',
+            layerIndex: 1,
+            stage: 'mlp',
+            role: 'module-card'
+        });
+
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtPoint').mockReturnValue({
+            entry: mlpEntry,
+            node: mlpEntry
+        });
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: mlpEntry,
+            node: mlpEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+
+        const zoomPoint = resolveBoundsScreenPoint(mlpBounds, view.getViewportState());
+        const stagedFocusTransform = resolveViewportFitTransform(mlpBounds, {
+            width: 960,
+            height: 600
+        }, {
+            padding: 240,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        });
+        expect(zoomPoint).toBeTruthy();
+        expect(stagedFocusTransform?.scale).toBeGreaterThan(0);
+
+        for (
+            let index = 0;
+            index < 12 && view.getViewportState().scale <= (stagedFocusTransform?.scale || 0);
+            index += 1
+        ) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: zoomPoint.clientX,
+                clientY: zoomPoint.clientY,
+                deltaY: -480
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        expect(view.getViewportState().scale).toBeGreaterThan(stagedFocusTransform?.scale || 0);
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', zoomPoint));
+        canvas.dispatchEvent(createPointerEvent('pointerup', zoomPoint));
+        await vi.advanceTimersByTimeAsync(32);
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+    });
+
+    it('does not restart overview-to-detail entry when a dblclick lands during the transition', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const headEntry = {
+            role: 'head',
+            semantic: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            }
+        };
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtPoint').mockReturnValue({
+            entry: headEntry,
+            node: headEntry
+        });
+        vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint').mockReturnValue({
+            entry: headEntry,
+            node: headEntry
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C']
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown'));
+        canvas.dispatchEvent(createPointerEvent('pointerup'));
+        await vi.advanceTimersByTimeAsync(200);
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown'));
+        canvas.dispatchEvent(createPointerEvent('pointerup'));
+        canvas.dispatchEvent(new Event('dblclick', {
+            bubbles: true,
+            cancelable: true
+        }));
+
+        await vi.advanceTimersByTimeAsync(
+            TRANSFORMER_VIEW2D_STAGED_FOCUS_OVERVIEW_TO_TARGET_DURATION_MS - 200 + 32
+        );
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
     });
 
     it('opens canvas vocabulary-embedding clicks as sidebar selections', async () => {
