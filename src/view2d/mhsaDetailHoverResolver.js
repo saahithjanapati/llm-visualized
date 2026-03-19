@@ -1184,6 +1184,12 @@ function buildProjectionCacheConcatResultRowResult(index = null, node = null, ki
                         rowIndex: sourceRowIndex
                     }
                 ]),
+            ...(concatResultNodeId && concatResultNodeId !== node.id
+                ? [{
+                    nodeId: concatResultNodeId,
+                    rowIndex: displayRowIndex
+                }]
+                : []),
             ...cachedKeyScoreAxisSelections.rowSelections,
             ...(safeKind === 'v' && terminalNodeId && terminalNodeId !== node.id
                 ? [{

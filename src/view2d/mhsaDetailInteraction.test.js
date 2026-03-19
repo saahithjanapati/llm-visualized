@@ -2127,6 +2127,7 @@ describe('MHSA detail transpose view', () => {
             valueProjectionOutputCopyNode,
             valueCacheNode,
             valueCacheSourceNode,
+            valueCacheConcatResultNode,
             valuePostNode,
             connectorVNode,
             connectorVCacheSourceNode,
@@ -2176,9 +2177,23 @@ describe('MHSA detail transpose view', () => {
             rowIndex: 1
         });
         expect(cachedRowHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueCacheConcatResultNode?.id,
+            rowIndex: 1
+        });
+        expect(cachedRowHoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: valuePostNode?.id,
             rowIndex: 1
         });
+        expect(
+            cachedRowHoverState?.focusState?.rowSelections?.some((selection) => (
+                selection.nodeId === valueProjectionOutputNode?.id && selection.rowIndex === 0
+            ))
+        ).toBe(false);
+        expect(
+            cachedRowHoverState?.focusState?.rowSelections?.some((selection) => (
+                selection.nodeId === valueProjectionOutputCopyNode?.id && selection.rowIndex === 0
+            ))
+        ).toBe(false);
 
         expect(liveRowHoverState?.label).toBe('Value Vector');
         expect(liveRowHoverState?.info?.cachedKv).not.toBe(true);
@@ -2202,6 +2217,10 @@ describe('MHSA detail transpose view', () => {
         expect(liveRowHoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: valueProjectionOutputCopyNode?.id,
             rowIndex: 0
+        });
+        expect(liveRowHoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueCacheConcatResultNode?.id,
+            rowIndex: 3
         });
         expect(liveRowHoverState?.focusState?.rowSelections).toContainEqual({
             nodeId: valuePostNode?.id,
