@@ -3049,6 +3049,110 @@ describe('CanvasSceneRenderer', () => {
         expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(false);
     });
 
+    it('reuses the cached overview frame during residual row-hover dimming and redraws only the affected node', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const compactRowNode = createMatrixNode({
+            id: 'hovered-row-node',
+            role: 'overview-row-strip',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'overview-row-strip'
+            },
+            dimensions: { rows: 2, cols: 64 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_Q
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 12,
+                    rowGap: 4,
+                    paddingX: 0,
+                    paddingY: 0
+                }
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [
+                compactRowNode,
+                createTextNode({
+                    text: 'Residual stream',
+                    metadata: {
+                        minScreenHeightPx: 0
+                    }
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+        renderer.overviewRenderCache = {
+            ...renderer.overviewRenderCache,
+            surface: renderer.overviewRenderCache.surface || { width: 480, height: 320 },
+            ctx: renderer.overviewRenderCache.ctx || {},
+            scene,
+            dpr: 1,
+            pixelWidth: 480,
+            pixelHeight: 320,
+            worldScale: 1,
+            offsetX: 0,
+            offsetY: 0
+        };
+
+        ctx.operations.length = 0;
+
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                hoveredRow: {
+                    nodeId: compactRowNode.id,
+                    rowIndex: 1
+                },
+                hoverDimStrength: 1,
+                hoverRowBlend: 1
+            }
+        })).toBe(true);
+
+        const drawImageIndex = ctx.operations.findIndex((operation) => operation.type === 'drawImage');
+        expect(drawImageIndex).toBeGreaterThanOrEqual(0);
+        expect(ctx.operations.some((operation) => (
+            operation.type === 'fillText'
+            && operation.text === 'Residual stream'
+        ))).toBe(false);
+        expect(ctx.operations.slice(drawImageIndex + 1).some((operation) => (
+            operation.type === 'fill'
+            || operation.type === 'fillRect'
+            || operation.type === 'stroke'
+            || operation.type === 'strokeRect'
+        ))).toBe(true);
+    });
+
     it('rerenders the overview during zoom interactions instead of scaling the cached frame', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx, 480, 320);
