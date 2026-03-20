@@ -2738,4 +2738,60 @@ describe('createTransformerView2dDetailView', () => {
         expect(view.hasSelectionLock()).toBe(true);
         expect(view.isSelectionSidebarVisible()).toBe(true);
     });
+
+    it('keeps touch pointer capture across pinch handoff so multi-touch gestures stay tracked', () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        canvas.setPointerCapture = vi.fn();
+        canvas.releasePointerCapture = vi.fn();
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C']
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerId: 1,
+            pointerType: 'touch',
+            clientX: 140,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerId: 2,
+            pointerType: 'touch',
+            clientX: 240,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            pointerId: 2,
+            pointerType: 'touch',
+            clientX: 286,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerId: 2,
+            pointerType: 'touch',
+            clientX: 286,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerId: 1,
+            pointerType: 'touch',
+            clientX: 140,
+            clientY: 180
+        }));
+
+        expect(canvas.setPointerCapture.mock.calls).toContainEqual([1]);
+        expect(canvas.setPointerCapture.mock.calls).toContainEqual([2]);
+        expect(canvas.releasePointerCapture.mock.calls).toContainEqual([1]);
+        expect(canvas.releasePointerCapture.mock.calls).toContainEqual([2]);
+    });
 });

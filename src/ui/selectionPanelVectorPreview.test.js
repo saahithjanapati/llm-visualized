@@ -10,6 +10,7 @@ import {
     MLP_UP_BIAS_TOOLTIP_LABEL
 } from '../utils/mlpLabels.js';
 import { getLayerNormParamData } from '../data/layerNormParams.js';
+import { HIDE_INSTANCE_Y_OFFSET } from '../utils/constants.js';
 
 let buildVectorClonePreview;
 let buildLayerNormParamVectorPreview;
@@ -715,6 +716,72 @@ describe('buildVectorClonePreview', () => {
         expect(getHueDistance(endColor, 0x276ebb)).toBeLessThan(0.14);
 
         preview.dispose?.();
+    });
+
+    it('keeps the Q palette when a live-backed query vector falls back from scene-copy to data colors', () => {
+        const sourceMesh = createSceneBackedVectorMesh({
+            prismCount: 1,
+            vectorColors: [0xFFFFFF]
+        });
+        const hiddenMatrix = new THREE.Matrix4().compose(
+            new THREE.Vector3(0, HIDE_INSTANCE_Y_OFFSET, 0),
+            new THREE.Quaternion(),
+            new THREE.Vector3(0.001, 0.001, 0.001)
+        );
+        sourceMesh.setMatrixAt(0, hiddenMatrix);
+        sourceMesh.instanceMatrix.needsUpdate = true;
+
+        const values = new Array(64).fill(0);
+        const activationData = {
+            label: 'Query Vector',
+            stage: 'qkv.q',
+            layerIndex: 4,
+            headIndex: 2,
+            tokenIndex: 1,
+            values
+        };
+        const vectorRef = {
+            instanceCount: 1,
+            rawData: values.slice(),
+            mesh: sourceMesh,
+            group: new THREE.Object3D(),
+            userData: {
+                activationData
+            }
+        };
+        vectorRef.group.userData = {
+            isVector: true,
+            label: 'Query Vector'
+        };
+
+        const selection = {
+            label: 'Query Vector',
+            kind: 'vector',
+            info: {
+                vectorRef,
+                activationData,
+                layerIndex: 4,
+                headIndex: 2,
+                tokenIndex: 1,
+                values
+            }
+        };
+
+        const preview = buildVectorClonePreview(selection, selection.label);
+        expect(preview).toBeTruthy();
+
+        const previewMesh = findPreviewMesh(preview?.object);
+        expect(previewMesh?.isInstancedMesh).toBe(true);
+        expect(previewMesh?.count).toBe(1);
+
+        const startColor = getGradientColor(previewMesh, 0, 'colorStart');
+        const endColor = getGradientColor(previewMesh, 0, 'colorEnd');
+        expect(getHueDistance(startColor, 0x276ebb)).toBeLessThan(0.14);
+        expect(getHueDistance(endColor, 0x276ebb)).toBeLessThan(0.14);
+
+        preview.dispose?.();
+        sourceMesh.geometry.dispose();
+        sourceMesh.material.dispose();
     });
 
     it('renders key vectors as a single K-colored head prism in the detail-view preview', () => {
