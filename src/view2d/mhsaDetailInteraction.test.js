@@ -1069,6 +1069,32 @@ describe('MHSA detail transpose view', () => {
         expect(Math.abs(softmaxCenterY - rowCenterY)).toBeLessThanOrEqual(8);
     });
 
+    it('keeps the softmax parentheses vertically aligned in KV-cache decode mode', () => {
+        const {
+            layout,
+            softmaxOpenNode,
+            softmaxCloseNode
+        } = buildSceneFixtures(4, {
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
+            }
+        });
+
+        const softmaxOpenEntry = layout?.registry?.getNodeEntry(softmaxOpenNode?.id || '');
+        const softmaxCloseEntry = layout?.registry?.getNodeEntry(softmaxCloseNode?.id || '');
+        const softmaxOpenCenterY = (softmaxOpenEntry?.contentBounds?.y || 0)
+            + ((softmaxOpenEntry?.contentBounds?.height || 0) * 0.5);
+        const softmaxCloseCenterY = (softmaxCloseEntry?.contentBounds?.y || 0)
+            + ((softmaxCloseEntry?.contentBounds?.height || 0) * 0.5);
+
+        expect(softmaxOpenEntry).toBeTruthy();
+        expect(softmaxCloseEntry).toBeTruthy();
+        expect(Math.abs(softmaxOpenCenterY - softmaxCloseCenterY)).toBeLessThanOrEqual(1);
+    });
+
     it('routes the K to K^T connector below the transpose caption instead of through its centerline', () => {
         const {
             layout,

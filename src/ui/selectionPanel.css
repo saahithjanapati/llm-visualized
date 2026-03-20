@@ -1077,7 +1077,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 .mhsa-token-matrix-preview__softmax-prefix {
     position: absolute;
     right: calc(100% + clamp(6px, 1vw, 12px));
-    top: clamp(10px, 0.8vw, 14px);
+    top: 0;
     overflow: visible;
 }
 .mhsa-token-matrix-preview__softmax-label {
@@ -4840,7 +4840,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     }
     .mhsa-token-matrix-preview__softmax-prefix {
         right: calc(100% + 6px);
-        top: 8px;
+        top: 0;
     }
     .mhsa-token-matrix-preview__softmax-label .katex {
         font-size: 15px;
