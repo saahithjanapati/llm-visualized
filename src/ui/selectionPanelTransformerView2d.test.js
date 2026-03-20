@@ -325,6 +325,7 @@ describe('createTransformerView2dDetailView', () => {
     let rafTime = 0;
     let createTransformerView2dDetailView = null;
     let detailHoverStateOverride = null;
+    let appState = null;
 
     beforeEach(async () => {
         vi.useFakeTimers();
@@ -369,9 +370,18 @@ describe('createTransformerView2dDetailView', () => {
         });
 
         ({ createTransformerView2dDetailView } = await import('./selectionPanelTransformerView2d.js'));
+        ({ appState } = await import('../state/appState.js'));
+        appState.kvCacheModeEnabled = false;
+        appState.kvCachePrefillActive = false;
+        appState.kvCachePassIndex = 0;
     });
 
     afterEach(() => {
+        if (appState) {
+            appState.kvCacheModeEnabled = false;
+            appState.kvCachePrefillActive = false;
+            appState.kvCachePassIndex = 0;
+        }
         document.body.innerHTML = '';
         vi.useRealTimers();
         vi.restoreAllMocks();
@@ -651,6 +661,169 @@ describe('createTransformerView2dDetailView', () => {
         await vi.advanceTimersByTimeAsync(500);
 
         expect(view.getViewportState().scale).toBeCloseTo(fitSceneViewportState.scale, 5);
+    });
+
+    it('uses the minimal decode Value Vector entry focus when opening a 3D selection in 2D', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+        const renderSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'render');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+
+        appState.kvCacheModeEnabled = true;
+        appState.kvCachePrefillActive = false;
+        appState.kvCachePassIndex = 1;
+
+        const expectedDetailScene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            headDetailTarget: {
+                layerIndex: 1,
+                headIndex: 2
+            },
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
+            }
+        })?.metadata?.mhsaHeadDetailScene;
+        const expectedNodes = flattenSceneNodes(expectedDetailScene);
+        const expectedProjectionSourceNode = expectedNodes.find((node) => node?.role === 'projection-source-xln');
+        const expectedValueInputNode = expectedNodes.find((node) => (
+            node?.role === 'x-ln-copy'
+            && String(node?.semantic?.branchKey || '').toLowerCase() === 'v'
+        ));
+        const expectedValueProjectionNode = expectedNodes.find((node) => (
+            node?.role === 'projection-output'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        ));
+        const expectedValueProjectionCopyNode = expectedNodes.find((node) => (
+            node?.role === 'projection-output-copy'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        ));
+        const expectedValueCacheNode = expectedNodes.find((node) => (
+            node?.role === 'projection-cache'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        ));
+        const expectedValueCacheSourceNode = expectedNodes.find((node) => (
+            node?.role === 'projection-cache-source'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        ));
+        const expectedValueCacheConcatNode = expectedNodes.find((node) => (
+            node?.role === 'projection-cache-concat-result'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        ));
+        const expectedValueCacheNextNode = expectedNodes.find((node) => (
+            node?.role === 'projection-cache-next'
+            && String(node?.metadata?.kind || '').toLowerCase() === 'v'
+        ));
+        const expectedValuePostNode = expectedNodes.find((node) => node?.role === 'attention-value-post');
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 2 Attention Head 3',
+            detailSemanticTargets: [{
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'projection-v',
+                role: 'projection-output'
+            }, {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'head-output',
+                role: 'attention-value-post'
+            }],
+            detailInteractionTargets: [{
+                kind: 'row',
+                semanticTarget: {
+                    componentKind: 'mhsa',
+                    layerIndex: 1,
+                    headIndex: 2,
+                    stage: 'projection-v',
+                    role: 'projection-output'
+                },
+                tokenIndex: 2
+            }, {
+                kind: 'row',
+                semanticTarget: {
+                    componentKind: 'mhsa',
+                    layerIndex: 1,
+                    headIndex: 2,
+                    stage: 'head-output',
+                    role: 'attention-value-post'
+                },
+                tokenIndex: 2
+            }],
+            detailFocusLabel: 'Value Vector',
+            transitionMode: 'direct'
+        });
+        await vi.advanceTimersByTimeAsync(32);
+
+        const detailSceneFocus = renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.detailSceneFocus;
+
+        expect(detailSceneFocus?.rowSelections).toContainEqual({
+            nodeId: expectedProjectionSourceNode?.id,
+            rowIndex: 0
+        });
+        expect(detailSceneFocus?.rowSelections).toContainEqual({
+            nodeId: expectedValueInputNode?.id,
+            rowIndex: 0
+        });
+        expect(detailSceneFocus?.rowSelections).toContainEqual({
+            nodeId: expectedValueProjectionNode?.id,
+            rowIndex: 0
+        });
+        expect(detailSceneFocus?.rowSelections).toContainEqual({
+            nodeId: expectedValueProjectionCopyNode?.id,
+            rowIndex: 0
+        });
+        expect(detailSceneFocus?.rowSelections).toContainEqual({
+            nodeId: expectedValueCacheConcatNode?.id,
+            rowIndex: 2
+        });
+        expect(detailSceneFocus?.rowSelections).toContainEqual({
+            nodeId: expectedValueCacheNextNode?.id,
+            rowIndex: 2
+        });
+        expect(detailSceneFocus?.rowSelections).toContainEqual({
+            nodeId: expectedValuePostNode?.id,
+            rowIndex: 2
+        });
+        expect(detailSceneFocus?.activeNodeIds).toContain(expectedValueProjectionNode?.id);
+        expect(detailSceneFocus?.activeNodeIds).toContain(expectedValueProjectionCopyNode?.id);
+        expect(detailSceneFocus?.activeNodeIds).toContain(expectedValueCacheConcatNode?.id);
+        expect(detailSceneFocus?.activeNodeIds).toContain(expectedValueCacheNextNode?.id);
+        expect(detailSceneFocus?.activeNodeIds).toContain(expectedValuePostNode?.id);
+        expect(detailSceneFocus?.activeNodeIds).not.toContain(expectedValueCacheNode?.id);
+        expect(detailSceneFocus?.activeNodeIds).not.toContain(expectedValueCacheSourceNode?.id);
+        expect(
+            detailSceneFocus?.rowSelections?.some((selection) => selection.nodeId === expectedValueCacheNode?.id)
+        ).toBe(false);
+        expect(
+            detailSceneFocus?.rowSelections?.some((selection) => selection.nodeId === expectedValueCacheSourceNode?.id)
+        ).toBe(false);
     });
 
     it('shows the matching overview module immediately when exiting a direct deep-detail view', async () => {

@@ -74,18 +74,18 @@ function createGridRows(fillCss = 'rgba(255, 255, 255, 0.28)', tokenLabels = TOK
     }));
 }
 
-function createPreviewData() {
-    const rows = createBaseRows();
-    const queryOutputRows = createProjectionOutputRows('Q');
-    const keyOutputRows = createProjectionOutputRows('K');
-    const valueOutputRows = createProjectionOutputRows('V');
-    const attentionGridRows = createGridRows('rgba(255, 255, 255, 0.28)', TOKEN_LABELS, {
+function createPreviewData(tokenLabels = TOKEN_LABELS) {
+    const rows = createBaseRows(tokenLabels);
+    const queryOutputRows = createProjectionOutputRows('Q', tokenLabels);
+    const keyOutputRows = createProjectionOutputRows('K', tokenLabels);
+    const valueOutputRows = createProjectionOutputRows('V', tokenLabels);
+    const attentionGridRows = createGridRows('rgba(255, 255, 255, 0.28)', tokenLabels, {
         stageKey: 'pre'
     });
-    const maskGridRows = createGridRows('rgba(0, 0, 0, 0.94)', TOKEN_LABELS, {
+    const maskGridRows = createGridRows('rgba(0, 0, 0, 0.94)', tokenLabels, {
         stageKey: 'mask'
     });
-    const postGridRows = createGridRows('rgba(160, 220, 255, 0.34)', TOKEN_LABELS, {
+    const postGridRows = createGridRows('rgba(160, 220, 255, 0.34)', tokenLabels, {
         stageKey: 'post'
     });
 
@@ -154,20 +154,38 @@ function createPreviewData() {
     };
 }
 
-function buildMhsaDetailFixtures() {
+function buildMhsaDetailFixtures({
+    tokenLabels = TOKEN_LABELS,
+    kvCacheState = null
+} = {}) {
     const scene = buildMhsaSceneModel({
-        previewData: createPreviewData(),
+        previewData: createPreviewData(tokenLabels),
         layerIndex: 2,
-        headIndex: 1
+        headIndex: 1,
+        ...(kvCacheState ? { kvCacheState } : {})
     });
     const index = createMhsaDetailSceneIndex(scene);
     const nodes = flattenSceneNodes(scene);
+    const findProjectionNode = (role, kind) => nodes.find((node) => (
+        node.role === role
+        && String(node.metadata?.kind || '').toLowerCase() === String(kind || '').toLowerCase()
+    )) || null;
+    const findProjectionInputNode = (kind) => nodes.find((node) => (
+        node.role === 'x-ln-copy'
+        && String(node.semantic?.branchKey || '').toLowerCase() === String(kind || '').toLowerCase()
+    )) || null;
     return {
         index,
-        queryProjectionOutputNode: nodes.find((node) => (
-            node.role === 'projection-output'
-            && String(node.metadata?.kind || '').toLowerCase() === 'q'
-        )) || null,
+        projectionSourceNode: nodes.find((node) => node.role === 'projection-source-xln') || null,
+        valueInputNode: findProjectionInputNode('v'),
+        queryProjectionOutputNode: findProjectionNode('projection-output', 'q'),
+        valueProjectionOutputNode: findProjectionNode('projection-output', 'v'),
+        valueProjectionOutputCopyNode: findProjectionNode('projection-output-copy', 'v'),
+        valueCacheNode: findProjectionNode('projection-cache', 'v'),
+        valueCacheSourceNode: findProjectionNode('projection-cache-source', 'v'),
+        valueCacheConcatResultNode: findProjectionNode('projection-cache-concat-result', 'v'),
+        valueCacheNextNode: findProjectionNode('projection-cache-next', 'v'),
+        valuePostNode: nodes.find((node) => node.role === 'attention-value-post') || null,
         preScoreNode: nodes.find((node) => node.role === 'attention-pre-score') || null
     };
 }
@@ -355,6 +373,100 @@ describe('transformerView2dDetailInteractionTargets', () => {
             nodeId: queryProjectionOutputNode?.id,
             rowIndex: 1
         });
+    });
+
+    it('keeps decode Value Vector selection-open focus off the cache and concat-copy mirrors', () => {
+        const {
+            index,
+            projectionSourceNode,
+            valueInputNode,
+            valueProjectionOutputNode,
+            valueProjectionOutputCopyNode,
+            valueCacheNode,
+            valueCacheSourceNode,
+            valueCacheConcatResultNode,
+            valueCacheNextNode,
+            valuePostNode
+        } = buildMhsaDetailFixtures({
+            tokenLabels: ['Token A', 'Token B', 'Token C', 'Token D'],
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
+            }
+        });
+
+        const hoverState = resolveTransformerView2dDetailInteractionHoverState(index, [
+            {
+                kind: 'row',
+                semanticTarget: {
+                    componentKind: 'mhsa',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    stage: 'projection-v',
+                    role: 'projection-output'
+                },
+                tokenIndex: 3
+            },
+            {
+                kind: 'row',
+                semanticTarget: {
+                    componentKind: 'mhsa',
+                    layerIndex: 2,
+                    headIndex: 1,
+                    stage: 'head-output',
+                    role: 'attention-value-post'
+                },
+                tokenIndex: 3
+            }
+        ], {
+            interactionKind: 'selection-open'
+        });
+
+        expect(hoverState?.label).toBe('Value Vector');
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: projectionSourceNode?.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueInputNode?.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueProjectionOutputNode?.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueProjectionOutputCopyNode?.id,
+            rowIndex: 0
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueCacheConcatResultNode?.id,
+            rowIndex: 3
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valueCacheNextNode?.id,
+            rowIndex: 3
+        });
+        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+            nodeId: valuePostNode?.id,
+            rowIndex: 3
+        });
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueProjectionOutputNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueProjectionOutputCopyNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueCacheConcatResultNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valueCacheNextNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).toContain(valuePostNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueCacheNode?.id);
+        expect(hoverState?.focusState?.activeNodeIds).not.toContain(valueCacheSourceNode?.id);
+        expect(
+            hoverState?.focusState?.rowSelections?.some((selection) => selection.nodeId === valueCacheNode?.id)
+        ).toBe(false);
+        expect(
+            hoverState?.focusState?.rowSelections?.some((selection) => selection.nodeId === valueCacheSourceNode?.id)
+        ).toBe(false);
+        expect(hoverState?.focusState?.activeConnectorIds).toContainEqual(expect.any(String));
     });
 
     it('resolves a score-cell target into the same cell-focused hover state as a detail-scene click', () => {
