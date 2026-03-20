@@ -106,8 +106,6 @@ const ATTENTION_SOFTMAX_PERSISTENT_FONT_PX_SMALL = 15;
 const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX = 17;
 const ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX_SMALL = 16;
 const ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE = 1.34;
-const ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE = 42;
-const ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE_SMALL = 38;
 const ATTENTION_RESULT_STAGE_GAP = 36;
 const ATTENTION_RESULT_STAGE_GAP_SMALL = 28;
 const ATTENTION_RESULT_GROUP_GAP = 8;
@@ -134,6 +132,8 @@ const ATTENTION_MATRIX_CAPTION_LABEL_MIN_SCREEN_FONT_PX = 14;
 const ATTENTION_MATRIX_CAPTION_DIMENSIONS_MIN_SCREEN_FONT_PX = 11;
 const ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE = 0.82;
 const ATTENTION_MASK_CAPTION_LABEL_SCALE = 0.82;
+const ATTENTION_DECODE_GRID_CAPTION_UNIFORM_LABEL_SCALE = 1.12;
+const ATTENTION_DECODE_SINGLE_ROW_GRID_CAPTION_UNIFORM_LABEL_SCALE = 2.4;
 const ATTENTION_GRID_PADDING = 4;
 const ATTENTION_GRID_CARD_CORNER_RADIUS = 12;
 const ATTENTION_GRID_CELL_CORNER_RADIUS_SCALE = 0.9;
@@ -387,6 +387,8 @@ function createCaptionMetadata({
     labelScale = null,
     dimensionsScale = null,
     preferStandardSizing = false,
+    uniformLabelScale = null,
+    uniformDimensionsScale = null,
     labelMinScreenFontPx = null,
     dimensionsMinScreenFontPx = null,
     labelMaxScreenFontPx = null,
@@ -426,6 +428,12 @@ function createCaptionMetadata({
     if (preferStandardSizing === true) {
         caption.preferStandardSizing = true;
     }
+    if (Number.isFinite(uniformLabelScale) && uniformLabelScale > 0) {
+        caption.uniformLabelScale = Number(uniformLabelScale);
+    }
+    if (Number.isFinite(uniformDimensionsScale) && uniformDimensionsScale > 0) {
+        caption.uniformDimensionsScale = Number(uniformDimensionsScale);
+    }
     if (Number.isFinite(labelMinScreenFontPx) && labelMinScreenFontPx > 0) {
         caption.labelMinScreenFontPx = Number(labelMinScreenFontPx);
     }
@@ -452,6 +460,8 @@ function createAttentionMatrixCaptionMetadata(rows = 1, cols = 1, {
     minScreenHeightPx = 28,
     labelScale = null,
     dimensionsScale = null,
+    uniformLabelScale = null,
+    uniformDimensionsScale = null,
     labelMinScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_LABEL_SCREEN_FONT_PX,
     dimensionsMinScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_DIMENSIONS_SCREEN_FONT_PX,
     labelMaxScreenFontPx = MHSA_BOTTOM_VECTOR_CAPTION_LABEL_MAX_SCREEN_FONT_PX,
@@ -469,6 +479,8 @@ function createAttentionMatrixCaptionMetadata(rows = 1, cols = 1, {
         labelScale,
         dimensionsScale,
         preferStandardSizing: true,
+        uniformLabelScale,
+        uniformDimensionsScale,
         labelMinScreenFontPx,
         dimensionsMinScreenFontPx,
         labelMaxScreenFontPx,
@@ -792,12 +804,11 @@ function resolveAttentionMatrixBlockHeight(rowCount = 1, isSmallScreen = false, 
         + resolveAttentionCaptionBlockHeight(isSmallScreen);
 }
 
-function resolveAttentionSoftmaxPrefixOffset(rowCount = 1, isSmallScreen = false, layoutMetrics = null) {
-    const flowHeight = resolveAttentionFlowRowHeight(rowCount, isSmallScreen, layoutMetrics);
-    const prefixVisualHeightEstimate = isSmallScreen
-        ? ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE_SMALL
-        : ATTENTION_SOFTMAX_PREFIX_VISUAL_HEIGHT_ESTIMATE;
-    return Math.max(1, Math.round((flowHeight - prefixVisualHeightEstimate) * 0.5));
+function resolveDecodeAttentionGridCaptionUniformLabelScale(rowCount = 1, kvCacheDecodeActive = false) {
+    if (!kvCacheDecodeActive) return null;
+    return rowCount <= 1
+        ? ATTENTION_DECODE_SINGLE_ROW_GRID_CAPTION_UNIFORM_LABEL_SCALE
+        : ATTENTION_DECODE_GRID_CAPTION_UNIFORM_LABEL_SCALE;
 }
 
 function buildGradientRowItems(rows = [], baseSemantic = {}, role = 'row') {
@@ -2499,7 +2510,11 @@ function buildAttentionStageNode({
         metadata: {
             ...createPersistentAttentionGridMetadata(),
             ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount, {
-                labelScale: ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE
+                labelScale: ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE,
+                uniformLabelScale: resolveDecodeAttentionGridCaptionUniformLabelScale(
+                    scoreStage.outputRowCount,
+                    kvCacheDecodeActive
+                )
             })
         }
     });
@@ -2520,7 +2535,11 @@ function buildAttentionStageNode({
         metadata: {
             ...createPersistentAttentionGridMetadata(),
             ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount, {
-                labelScale: ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE
+                labelScale: ATTENTION_PRE_SCORE_CAPTION_LABEL_SCALE,
+                uniformLabelScale: resolveDecodeAttentionGridCaptionUniformLabelScale(
+                    scoreStage.outputRowCount,
+                    kvCacheDecodeActive
+                )
             })
         }
     });
@@ -2541,7 +2560,11 @@ function buildAttentionStageNode({
         metadata: {
             ...createPersistentAttentionGridMetadata(),
             ...createAttentionMatrixCaptionMetadata(scoreStage.outputRowCount, scoreStage.outputColumnCount, {
-                labelScale: ATTENTION_MASK_CAPTION_LABEL_SCALE
+                labelScale: ATTENTION_MASK_CAPTION_LABEL_SCALE,
+                uniformLabelScale: resolveDecodeAttentionGridCaptionUniformLabelScale(
+                    scoreStage.outputRowCount,
+                    kvCacheDecodeActive
+                )
             })
         }
     });
@@ -2561,10 +2584,39 @@ function buildAttentionStageNode({
         },
         metadata: {
             ...createPersistentAttentionGridMetadata(),
-            ...createAttentionMatrixCaptionMetadata(scoreStage.postRowCount, scoreStage.postColumnCount)
+            ...createAttentionMatrixCaptionMetadata(scoreStage.postRowCount, scoreStage.postColumnCount, {
+                uniformLabelScale: resolveDecodeAttentionGridCaptionUniformLabelScale(
+                    scoreStage.postRowCount,
+                    kvCacheDecodeActive
+                )
+            })
         }
     });
 
+    const softmaxOpenNode = createMhsaOperatorNode({
+        role: 'attention-softmax-open',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-open', operatorKey: 'open' }),
+        text: '(',
+        visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+        metadata: {
+            fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
+        }
+    });
+    const softmaxCloseNode = createMhsaOperatorNode({
+        role: 'attention-softmax-close',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-close', operatorKey: 'close' }),
+        text: ')',
+        visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
+        metadata: {
+            fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
+        }
+    });
+    const softmaxEqualsNode = createMhsaOperatorNode({
+        role: 'attention-softmax-equals',
+        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-equals', operatorKey: 'equals' }),
+        text: '=',
+        visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
+    });
     const softmaxPrefixNode = createGroupNode({
         role: 'attention-softmax-prefix',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-prefix' }),
@@ -2590,16 +2642,17 @@ function buildAttentionStageNode({
                         : ATTENTION_SOFTMAX_ZOOMED_OUT_FONT_PX
                 }
             }),
-            createMhsaOperatorNode({
-                role: 'attention-softmax-open',
-                semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-open', operatorKey: 'open' }),
-                text: '(',
-                visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
-                metadata: {
-                    fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
-                }
-            })
+            softmaxOpenNode
         ],
+        layout: {
+            anchorAlign: {
+                axis: 'y',
+                selfNodeId: softmaxOpenNode.id,
+                targetNodeId: softmaxCloseNode.id,
+                selfAnchor: VIEW2D_ANCHOR_SIDES.CENTER,
+                targetAnchor: VIEW2D_ANCHOR_SIDES.CENTER
+            }
+        },
         metadata: {
             gapOverride: isSmallScreen ? ATTENTION_SOFTMAX_PREFIX_GAP_SMALL : ATTENTION_SOFTMAX_PREFIX_GAP
         }
@@ -2670,7 +2723,12 @@ function buildAttentionStageNode({
                             },
                             metadata: {
                                 ...createPersistentAttentionGridMetadata(),
-                                ...createAttentionMatrixCaptionMetadata(scoreStage.postRowCount, scoreStage.postColumnCount)
+                                ...createAttentionMatrixCaptionMetadata(scoreStage.postRowCount, scoreStage.postColumnCount, {
+                                    uniformLabelScale: resolveDecodeAttentionGridCaptionUniformLabelScale(
+                                        scoreStage.postRowCount,
+                                        kvCacheDecodeActive
+                                    )
+                                })
                             }
                         }),
                         createMhsaOperatorNode({
@@ -2736,21 +2794,8 @@ function buildAttentionStageNode({
             direction: VIEW2D_LAYOUT_DIRECTIONS.HORIZONTAL,
             gapKey: 'inline',
             children: [
-                createMhsaOperatorNode({
-                    role: 'attention-softmax-close',
-                    semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-close', operatorKey: 'close' }),
-                    text: ')',
-                    visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR },
-                    metadata: {
-                        fontScale: ATTENTION_SOFTMAX_GROUPING_OPERATOR_SCALE
-                    }
-                }),
-                createMhsaOperatorNode({
-                    role: 'attention-softmax-equals',
-                    semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-equals', operatorKey: 'equals' }),
-                    text: '=',
-                    visual: { styleKey: VIEW2D_STYLE_KEYS.OPERATOR }
-                })
+                softmaxCloseNode,
+                softmaxEqualsNode
             ],
             metadata: {
                 gapOverride: isSmallScreen
@@ -2793,34 +2838,6 @@ function buildAttentionStageNode({
     const softmaxRowOffset = isSmallScreen
         ? ATTENTION_SOFTMAX_ROW_OFFSET_SMALL
         : ATTENTION_SOFTMAX_ROW_OFFSET;
-    const softmaxPrefixOffset = resolveAttentionSoftmaxPrefixOffset(
-        scoreStage.outputRowCount,
-        isSmallScreen,
-        layoutMetrics
-    );
-
-    const softmaxPrefixColumnNode = createGroupNode({
-        role: 'attention-softmax-prefix-column',
-        semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-prefix-column' }),
-        direction: VIEW2D_LAYOUT_DIRECTIONS.VERTICAL,
-        gapKey: 'default',
-        align: 'end',
-        children: [
-            createHiddenSpacer({
-                semantic: buildSemantic(attentionSemantic, {
-                    role: 'attention-softmax-prefix-offset'
-                }),
-                role: 'attention-softmax-prefix-offset',
-                width: 1,
-                height: softmaxPrefixOffset
-            }),
-            softmaxPrefixNode
-        ],
-        metadata: {
-            gapOverride: 0
-        }
-    });
-
     const softmaxBodyNode = createGroupNode({
         role: 'attention-softmax-body',
         semantic: buildSemantic(attentionSemantic, { role: 'attention-softmax-body' }),
@@ -2828,7 +2845,7 @@ function buildAttentionStageNode({
         gapKey: 'inline',
         align: 'start',
         children: [
-            softmaxPrefixColumnNode,
+            softmaxPrefixNode,
             softmaxCoreFlowNode
         ],
         layout: {

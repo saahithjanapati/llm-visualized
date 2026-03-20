@@ -2182,6 +2182,139 @@ describe('transformerView2dResidualCaptionOverlay', () => {
         }
     });
 
+    it('keeps decode-stage attention score labels slightly larger while preserving zoom scaling', () => {
+        const fixtures = buildMhsaFixtures({
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
+            }
+        });
+        const {
+            scene,
+            layout,
+            queryNode,
+            preScoreNode,
+            maskedInputNode,
+            maskNode,
+            postNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const preScoreEntry = layout.registry.getNodeEntry(preScoreNode.id);
+            const targetX = 40;
+            const targetY = 48;
+            const stageNodes = [
+                preScoreNode,
+                maskedInputNode,
+                maskNode,
+                postNode
+            ];
+            const projectBounds = (scale) => (bounds) => ({
+                x: (bounds.x * scale) + (targetX - ((Number(preScoreEntry?.contentBounds?.x) || 0) * scale)),
+                y: (bounds.y * scale) + (targetY - ((Number(preScoreEntry?.contentBounds?.y) || 0) * scale)),
+                width: bounds.width * scale,
+                height: bounds.height * scale
+            });
+            const measureLabelSizes = (scale) => {
+                overlay.sync({
+                    scene,
+                    layout,
+                    canvas,
+                    projectBounds: projectBounds(scale),
+                    visible: true,
+                    enabled: true
+                });
+                return {
+                    queryLabelSize: Number.parseFloat(
+                        queryCaptionItem(queryNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+                    ),
+                    stageLabelSizes: stageNodes.map((node) => Number.parseFloat(
+                        queryCaptionItem(node.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+                    ))
+                };
+            };
+
+            const zoomedOut = measureLabelSizes(0.45);
+            const zoomedIn = measureLabelSizes(0.95);
+
+            zoomedOut.stageLabelSizes.forEach((labelSize, index) => {
+                expect(labelSize).toBeGreaterThan(zoomedOut.queryLabelSize);
+                expect(labelSize).toBeLessThanOrEqual(MHSA_STANDARD_LABEL_MAX_SCREEN_FONT_PX);
+                expect(zoomedIn.stageLabelSizes[index]).toBeGreaterThan(labelSize);
+            });
+        } finally {
+            cleanup();
+        }
+    });
+
+    it('gives single-row decode attention score labels an extra boost', () => {
+        const fixtures = buildMhsaFixtures({
+            tokenLabels: ['Decode Token'],
+            kvCacheState: {
+                kvCacheModeEnabled: true,
+                kvCachePrefillActive: false,
+                kvCacheDecodeActive: true,
+                kvCachePassIndex: 1
+            }
+        });
+        const {
+            scene,
+            layout,
+            queryNode,
+            preScoreNode,
+            maskedInputNode,
+            maskNode,
+            postNode,
+            canvas,
+            overlay,
+            cleanup
+        } = fixtures;
+
+        try {
+            const preScoreEntry = layout.registry.getNodeEntry(preScoreNode.id);
+            const targetX = 40;
+            const targetY = 48;
+            const projectBounds = (bounds) => ({
+                x: (bounds.x * 0.95) + (targetX - ((Number(preScoreEntry?.contentBounds?.x) || 0) * 0.95)),
+                y: (bounds.y * 0.95) + (targetY - ((Number(preScoreEntry?.contentBounds?.y) || 0) * 0.95)),
+                width: bounds.width * 0.95,
+                height: bounds.height * 0.95
+            });
+
+            overlay.sync({
+                scene,
+                layout,
+                canvas,
+                projectBounds,
+                visible: true,
+                enabled: true
+            });
+
+            const queryLabelSize = Number.parseFloat(
+                queryCaptionItem(queryNode.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+            );
+            [
+                preScoreNode,
+                maskedInputNode,
+                maskNode,
+                postNode
+            ].forEach((node) => {
+                const labelSize = Number.parseFloat(
+                    queryCaptionItem(node.id)?.style.getPropertyValue('--detail-transformer-view2d-caption-label-size') || '0'
+                );
+                expect(labelSize).toBeGreaterThan(queryLabelSize + 1);
+                expect(labelSize).toBeGreaterThanOrEqual(15);
+            });
+        } finally {
+            cleanup();
+        }
+    });
+
     it('keeps output-projection H_i captions visible even when zoomed far out', () => {
         const fixtures = buildOutputProjectionFixtures({
             canvasWidth: 1280,
