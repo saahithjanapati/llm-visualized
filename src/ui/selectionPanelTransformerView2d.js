@@ -3168,7 +3168,10 @@ export function createTransformerView2dDetailView(panelEl, {
         if (state.detailSceneIndex && state.pendingDetailInteractionTargets.length) {
             const initialDetailHoverState = resolveTransformerView2dDetailInteractionHoverState(
                 state.detailSceneIndex,
-                state.pendingDetailInteractionTargets
+                state.pendingDetailInteractionTargets,
+                {
+                    interactionKind: 'selection-open'
+                }
             );
             if (initialDetailHoverState?.focusState) {
                 lockPinnedDetailSceneFocus(initialDetailHoverState, {

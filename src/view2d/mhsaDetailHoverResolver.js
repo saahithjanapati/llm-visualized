@@ -485,6 +485,95 @@ function resolveDecodeProjectionLiveDisplayRowIndex(index = null, kind = '') {
     return Math.max(0, rowItems.length - 1);
 }
 
+function resolveNodeLastDisplayRowIndex(node = null) {
+    const rowCount = Number.isFinite(node?.dimensions?.rows)
+        ? Math.max(0, Math.floor(node.dimensions.rows))
+        : 0;
+    if (rowCount > 0) {
+        return rowCount - 1;
+    }
+    const rowItems = Array.isArray(node?.rowItems) ? node.rowItems : [];
+    if (!rowItems.length) return null;
+    return Math.max(0, rowItems.length - 1);
+}
+
+function buildDecodeSelectionOpenValueProjectionRowResult(index = null, node = null, rowHit = null, options = null) {
+    if (!index || !rowHit) return null;
+    const sourceRowIndex = Number.isFinite(rowHit?.rowIndex) ? Math.max(0, Math.floor(rowHit.rowIndex)) : 0;
+    const projectionSourceNodeId = index?.singleNodeIds?.projectionSourceXln || '';
+    const projectionInputNodeId = index?.projectionInputIdsByKind?.v || '';
+    const projectionOutputNodeId = index?.projectionOutputIdsByKind?.v || node?.id || '';
+    const projectionOutputCopyNodeId = findProjectionNodeIdByKind(index, 'projection-output-copy', 'v');
+    const concatResultNodeId = findProjectionNodeIdByKind(index, 'projection-cache-concat-result', 'v');
+    const nextPreviewNodeId = findProjectionNodeIdByKind(index, 'projection-cache-next', 'v');
+    const valuePostNodeId = index?.singleNodeIds?.attentionValuePost || '';
+    const valuePostNode = valuePostNodeId
+        ? (index?.nodesById?.get(valuePostNodeId) || null)
+        : null;
+    const valuePostLastRowIndex = resolveNodeLastDisplayRowIndex(valuePostNode);
+    const liveDisplayRowIndex = Number.isFinite(valuePostLastRowIndex)
+        ? valuePostLastRowIndex
+        : resolveDecodeProjectionLiveDisplayRowIndex(index, 'v');
+    const rowSelections = [
+        ...buildDecodeProjectionCurrentInputRowSelections(index, 'v', {
+            includeProjectionSource: true,
+            rowIndex: sourceRowIndex
+        }),
+        ...(projectionOutputNodeId
+            ? [{
+                nodeId: projectionOutputNodeId,
+                rowIndex: sourceRowIndex
+            }]
+            : []),
+        ...(projectionOutputCopyNodeId
+            ? [{
+                nodeId: projectionOutputCopyNodeId,
+                rowIndex: sourceRowIndex
+            }]
+            : []),
+        ...(concatResultNodeId && Number.isFinite(liveDisplayRowIndex)
+            ? [{
+                nodeId: concatResultNodeId,
+                rowIndex: liveDisplayRowIndex
+            }]
+            : []),
+        ...(nextPreviewNodeId && Number.isFinite(liveDisplayRowIndex)
+            ? [{
+                nodeId: nextPreviewNodeId,
+                rowIndex: liveDisplayRowIndex
+            }]
+            : []),
+        ...(valuePostNodeId && Number.isFinite(liveDisplayRowIndex)
+            ? [{
+                nodeId: valuePostNodeId,
+                rowIndex: liveDisplayRowIndex
+            }]
+            : [])
+    ];
+
+    return buildFocusResult({
+        label: 'Value Vector',
+        info: buildProjectionVectorHoverInfo(node, rowHit.rowItem, 'v'),
+        activeNodeIds: [
+            projectionSourceNodeId,
+            projectionInputNodeId,
+            projectionOutputNodeId,
+            projectionOutputCopyNodeId,
+            concatResultNodeId,
+            nextPreviewNodeId,
+            valuePostNodeId
+        ].filter(Boolean),
+        activeConnectorIds: [
+            findNodeIdByRole(index, 'connector-v'),
+            findNodeIdByRole(index, 'connector-v-cache-copy'),
+            findNodeIdByRole(index, 'connector-v-cache-next')
+        ].filter(Boolean),
+        dimNodeIds: buildValueBranchExtraDimNodeIds(index),
+        rowSelections,
+        includeFocusState: options?.includeFocusState !== false
+    });
+}
+
 function appendLayerNormRowSelectionByRole(target = [], index = null, role = '', rowIndex = null) {
     if (!Array.isArray(target) || !Number.isFinite(rowIndex)) return;
     const nodeId = findSingleNodeIdByRole(index, role);
@@ -729,6 +818,10 @@ function buildProjectionRowResult(index = null, node = null, kind = '', rowHit =
         && !!concatResultNodeId
         && !!nextPreviewNodeId
     );
+
+    if (interactionKind === 'selection-open' && isDecodeCurrentValueProjectionRow) {
+        return buildDecodeSelectionOpenValueProjectionRowResult(index, node, rowHit, options);
+    }
 
     if (isDecodeCurrentProjectionRow) {
         const liveDisplayRowIndex = resolveDecodeProjectionLiveDisplayRowIndex(index, safeKind);
