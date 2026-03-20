@@ -603,6 +603,56 @@ describe('createTransformerView2dDetailView', () => {
         expect(stage?.textContent).toBe('Attention Head 3');
     });
 
+    it('keeps direct MHSA query-vector detail entries at fit scene', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const fitBtn = panelEl.querySelector('[data-transformer-view2d-action="fit-scene"]');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'head'
+            },
+            focusLabel: 'Layer 2 Attention Head 3',
+            detailSemanticTargets: [{
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'projection-q',
+                role: 'projection-output'
+            }, {
+                componentKind: 'mhsa',
+                layerIndex: 1,
+                headIndex: 2,
+                stage: 'attention',
+                role: 'attention-query-source'
+            }],
+            detailFocusLabel: 'Query Vector',
+            transitionMode: 'direct'
+        });
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+        expect(fitBtn?.dataset.fitVisible).toBe('false');
+
+        const fitSceneViewportState = view.getViewportState();
+        fitBtn?.click();
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(view.getViewportState().scale).toBeCloseTo(fitSceneViewportState.scale, 5);
+    });
+
     it('shows the matching overview module immediately when exiting a direct deep-detail view', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
@@ -858,7 +908,7 @@ describe('createTransformerView2dDetailView', () => {
         expect(view.getViewportState().scale).toBeLessThan(legacyTightFocusTransform.scale);
     });
 
-    it('stages scene-backed MLP projection targets from overview focus into the detail scene', async () => {
+    it('keeps staged MLP projection detail entries at fit scene after the detail scene opens', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
 
@@ -905,12 +955,13 @@ describe('createTransformerView2dDetailView', () => {
         expect(layer?.textContent).toBe('Layer 2');
         expect(layer?.hidden).toBe(false);
         expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
-        const focusedDetailScale = view.getViewportState().scale;
+        expect(fitBtn?.dataset.fitVisible).toBe('false');
 
+        const fitSceneViewportState = view.getViewportState();
         fitBtn?.click();
         await vi.advanceTimersByTimeAsync(500);
 
-        expect(view.getViewportState().scale).toBeLessThan(focusedDetailScale);
+        expect(view.getViewportState().scale).toBeCloseTo(fitSceneViewportState.scale, 5);
     });
 
     it('keeps staged MLP weight-matrix detail entries at fit scene after the detail scene opens', async () => {
@@ -2686,5 +2737,61 @@ describe('createTransformerView2dDetailView', () => {
         );
         expect(view.hasSelectionLock()).toBe(true);
         expect(view.isSelectionSidebarVisible()).toBe(true);
+    });
+
+    it('keeps touch pointer capture across pinch handoff so multi-touch gestures stay tracked', () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        canvas.setPointerCapture = vi.fn();
+        canvas.releasePointerCapture = vi.fn();
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C']
+        });
+
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerId: 1,
+            pointerType: 'touch',
+            clientX: 140,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerdown', {
+            pointerId: 2,
+            pointerType: 'touch',
+            clientX: 240,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            pointerId: 2,
+            pointerType: 'touch',
+            clientX: 286,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerId: 2,
+            pointerType: 'touch',
+            clientX: 286,
+            clientY: 180
+        }));
+        canvas.dispatchEvent(createPointerEvent('pointerup', {
+            pointerId: 1,
+            pointerType: 'touch',
+            clientX: 140,
+            clientY: 180
+        }));
+
+        expect(canvas.setPointerCapture.mock.calls).toContainEqual([1]);
+        expect(canvas.setPointerCapture.mock.calls).toContainEqual([2]);
+        expect(canvas.releasePointerCapture.mock.calls).toContainEqual([1]);
+        expect(canvas.releasePointerCapture.mock.calls).toContainEqual([2]);
     });
 });

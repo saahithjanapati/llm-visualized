@@ -2590,17 +2590,12 @@ function buildAttentionWeightedSumPreviewColorOptions() {
     });
 }
 
-function buildAttentionHeadVectorPreview(selectionInfo, label = '') {
+function applyAttentionHeadPreviewVisuals(vec, selectionInfo, label = '') {
     const kind = inferAttentionHeadVectorPreviewKind(label, selectionInfo);
-    if (!kind) return null;
+    if (!kind || !vec) return null;
     const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
     const previewData = resolveAttentionHeadVectorPreviewData(selectionInfo);
     if (!previewData?.length) return null;
-    const vec = createPreviewVector({
-        colorHex: resolveVectorPreviewColor(label, selectionInfo),
-        data: null,
-        instanceCount: Math.max(1, Math.ceil(outputLength / PRISM_DIMENSIONS_PER_UNIT))
-    });
     const processedData = previewData.slice(0, outputLength);
     const numKeyColors = processedData.length <= 1
         ? 1
@@ -2624,6 +2619,26 @@ function buildAttentionHeadVectorPreview(selectionInfo, label = '') {
         },
         processedData
     );
+    return {
+        kind,
+        outputLength,
+        processedData
+    };
+}
+
+function buildAttentionHeadVectorPreview(selectionInfo, label = '') {
+    const kind = inferAttentionHeadVectorPreviewKind(label, selectionInfo);
+    if (!kind) return null;
+    const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
+    const vec = createPreviewVector({
+        colorHex: resolveVectorPreviewColor(label, selectionInfo),
+        data: null,
+        instanceCount: Math.max(1, Math.ceil(outputLength / PRISM_DIMENSIONS_PER_UNIT))
+    });
+    if (!applyAttentionHeadPreviewVisuals(vec, selectionInfo, label)) {
+        vec.dispose();
+        return null;
+    }
     return {
         object: vec.group,
         view: {
@@ -3297,18 +3312,14 @@ export function buildVectorClonePreview(selectionInfo, label = '') {
     if (!copiedAppearance) {
         const data = extractPreviewVectorData(selectionInfo);
         if (isQkvHeadVectorSelection(label, selectionInfo)) {
-            const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
-            const processedData = (Array.isArray(data) && data.length > 0)
-                ? data.slice(0, outputLength)
-                : [0];
-            const numKeyColors = Math.min(30, Math.max(2, processedData.length));
-            vec.applyProcessedVisuals(
-                processedData,
-                outputLength,
-                { numKeyColors, generationOptions: null },
-                { setHiddenToBlack: false, hideByScaleOnly: true },
-                processedData
-            );
+            const previewState = applyAttentionHeadPreviewVisuals(vec, selectionInfo, label);
+            if (!previewState) {
+                const outputLength = Math.max(1, Math.floor(resolveVectorLength(label, selectionInfo) || D_HEAD));
+                const processedData = (Array.isArray(data) && data.length > 0)
+                    ? data.slice(0, outputLength)
+                    : [0];
+                applyDataToPreviewVector(vec, processedData);
+            }
             const colorSourceMesh = (vectorRef?.mesh?.isInstancedMesh ? vectorRef.mesh : null)
                 || (vectorMesh?.isInstancedMesh ? vectorMesh : null);
             if (colorSourceMesh) {

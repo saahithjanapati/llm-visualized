@@ -3978,6 +3978,27 @@ export function createTransformerView2dDetailView(panelEl, {
         } catch (_) { /* no-op */ }
     }
 
+    function captureCanvasPointer(pointerId = null) {
+        if (!Number.isFinite(pointerId) || typeof canvas?.setPointerCapture !== 'function') return;
+        try {
+            canvas.setPointerCapture(pointerId);
+        } catch (_) { /* no-op */ }
+    }
+
+    function captureTrackedTouchPointers() {
+        if (!state.touchGesture?.pointers) return;
+        state.touchGesture.pointers.forEach((_point, pointerId) => {
+            captureCanvasPointer(pointerId);
+        });
+    }
+
+    function releaseTrackedTouchPointers() {
+        if (!state.touchGesture?.pointers) return;
+        state.touchGesture.pointers.forEach((_point, pointerId) => {
+            releaseCanvasPointerCapture(pointerId);
+        });
+    }
+
     function beginPointerPan({
         pointerId = null,
         pointerType = '',
@@ -4001,11 +4022,7 @@ export function createTransformerView2dDetailView(panelEl, {
             moved: false,
             suppressClick: suppressClick === true
         };
-        if (Number.isFinite(state.pointer.pointerId) && typeof canvas?.setPointerCapture === 'function') {
-            try {
-                canvas.setPointerCapture(state.pointer.pointerId);
-            } catch (_) { /* no-op */ }
-        }
+        captureCanvasPointer(state.pointer.pointerId);
         stopAnimation();
         markInteraction(true, VIEW2D_INTERACTION_KIND_PAN);
         canvas.classList.add('is-panning');
@@ -4034,12 +4051,15 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     function untrackTouchPointer(pointerId) {
-        if (!state.touchGesture?.pointers || !Number.isFinite(pointerId)) return;
+        if (!Number.isFinite(pointerId)) return;
+        releaseCanvasPointerCapture(pointerId);
+        if (!state.touchGesture?.pointers) return;
         state.touchGesture.pointers.delete(pointerId);
     }
 
     function resetTouchGesture() {
         if (!state.touchGesture) return;
+        releaseTrackedTouchPointers();
         state.touchGesture.pointers.clear();
         state.touchGesture.pinchActive = false;
         state.touchGesture.startDistance = 0;
@@ -4074,6 +4094,7 @@ export function createTransformerView2dDetailView(panelEl, {
         const currentScale = Number.isFinite(viewport.scale) && viewport.scale > 0 ? viewport.scale : 1;
         cancelScheduledHoverUpdate();
         clearPointer(null, { scheduleSettle: false });
+        captureTrackedTouchPointers();
         state.touchGesture.pinchActive = true;
         state.touchGesture.startDistance = metrics.distance;
         state.touchGesture.startScale = currentScale;

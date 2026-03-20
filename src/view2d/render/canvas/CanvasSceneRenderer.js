@@ -3359,6 +3359,85 @@ export class CanvasSceneRenderer {
         });
     }
 
+    drawCachedOverviewRowHoverState({
+        ctx = null,
+        resolution = null,
+        config = null,
+        worldScale = 1,
+        detailScale = 1,
+        offsetX = 0,
+        offsetY = 0,
+        visibleDrawableNodes = [],
+        visibleConnectors = [],
+        interactionState = null,
+        interactionFastPath = false,
+        fixedTextSizing = null,
+        headDetailTarget = null,
+        headDetailDepthActive = false
+    } = {}) {
+        if (!ctx) return false;
+
+        const hoverNodeIds = new Set();
+        const registerHoverNodeId = (hoverState = null) => {
+            const nodeId = typeof hoverState?.nodeId === 'string' ? hoverState.nodeId : '';
+            if (nodeId.length) {
+                hoverNodeIds.add(nodeId);
+            }
+        };
+        registerHoverNodeId(interactionState?.hoveredRow);
+        registerHoverNodeId(interactionState?.previousHoveredRow);
+        if (!hoverNodeIds.size) return false;
+
+        const hoveredNodes = visibleDrawableNodes.filter(({ node, entry }) => (
+            !!entry
+            && node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && hoverNodeIds.has(node.id)
+        ));
+        if (!hoveredNodes.length) return false;
+
+        const didDrawBaseCache = this.drawTransformedOverviewRenderCache({
+            resolution,
+            worldScale,
+            offsetX,
+            offsetY,
+            background: config?.tokens?.palette?.sceneBackground || 'rgba(0, 0, 0, 0)'
+        });
+        if (!didDrawBaseCache) return false;
+
+        const hoveredConnectors = visibleConnectors.filter(({ entry }) => {
+            const sourceNodeId = typeof entry?.source?.nodeId === 'string' ? entry.source.nodeId : '';
+            const targetNodeId = typeof entry?.target?.nodeId === 'string' ? entry.target.nodeId : '';
+            return hoverNodeIds.has(sourceNodeId) || hoverNodeIds.has(targetNodeId);
+        });
+
+        ctx.save();
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(worldScale, worldScale);
+
+        hoveredNodes.forEach(({ node, entry }) => {
+            drawMatrixNode(ctx, node, entry, config, worldScale, detailScale, {
+                skipSurfaceEffects: interactionFastPath,
+                fastPath: interactionFastPath,
+                headDetailTarget,
+                headDetailDepthActive,
+                interactionState,
+                focusAlpha: 1,
+                fixedTextSizing,
+                disableInactiveFilter: interactionState?.disableInactiveFilter === true
+            });
+        });
+
+        hoveredConnectors.forEach(({ entry, stroke }) => {
+            drawConnector(ctx, entry, config, stroke, worldScale, {
+                focusAlpha: 1,
+                emphasize: false
+            });
+        });
+
+        ctx.restore();
+        return true;
+    }
+
     render({
         width = null,
         height = null,
@@ -3695,6 +3774,19 @@ export class CanvasSceneRenderer {
                 })
                 && typeof ctx.drawImage === 'function'
             );
+            const canUseOverviewRowHoverCache = !!(
+                !headDetailDepthActive
+                && !overviewCurrentFocusState
+                && !overviewPreviousFocusState
+                && !sceneFocusState
+                && (interactionState?.hoveredRow || interactionState?.previousHoveredRow)
+                && interactionState?.interactionKind !== 'zoom'
+                && interactionState?.viewportAnimationActive !== true
+                && this.hasReusableOverviewRenderCache({
+                    resolution
+                })
+                && typeof ctx.drawImage === 'function'
+            );
             if (canUseOverviewInteractionCache) {
                 const didDrawInteractionCache = this.drawTransformedOverviewRenderCache({
                     resolution,
@@ -3704,6 +3796,31 @@ export class CanvasSceneRenderer {
                     background: config.tokens.palette.sceneBackground || 'rgba(0, 0, 0, 0)'
                 });
                 if (didDrawInteractionCache) {
+                    if (debug) {
+                        drawDebugOverlay(ctx, resolution, renderState);
+                    }
+                    return true;
+                }
+            }
+            if (canUseOverviewRowHoverCache) {
+                const fixedTextSizing = resolveMhsaDetailFixedTextSizing(this.scene, resolution.width);
+                const didDrawRowHoverCache = this.drawCachedOverviewRowHoverState({
+                    ctx,
+                    resolution,
+                    config,
+                    worldScale,
+                    detailScale,
+                    offsetX,
+                    offsetY,
+                    visibleDrawableNodes,
+                    visibleConnectors,
+                    interactionState: normalizedInteractionState,
+                    interactionFastPath,
+                    fixedTextSizing,
+                    headDetailTarget: activeHeadDetailTarget,
+                    headDetailDepthActive: !!headDetailDepthActive
+                });
+                if (didDrawRowHoverCache) {
                     if (debug) {
                         drawDebugOverlay(ctx, resolution, renderState);
                     }
