@@ -2168,37 +2168,19 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     margin-top: 0;
     gap: 10px;
 }
-.detail-gelu-formula {
-    padding-bottom: 0;
-}
-.detail-gelu-equation-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-}
-.detail-gelu-equation-label {
-    color: #9aa3af;
-    font-size: var(--detail-font-section-label);
-    line-height: 1.25;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-}
 .detail-gelu-equation-note {
-    margin: 0;
+    margin: 8px 0 0;
     color: #b2bcc9;
     font-size: var(--detail-font-caption);
     line-height: 1.42;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
-.detail-gelu-formula,
 .detail-gelu-approx-formula {
     line-height: 1.22;
     white-space: normal;
     overflow-wrap: anywhere;
+    padding-bottom: 0;
 }
-.detail-gelu-formula .katex-display,
 .detail-gelu-approx-formula .katex-display {
     margin: 0;
 }
@@ -2254,20 +2236,20 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-variant-numeric: tabular-nums;
 }
-.detail-gelu-notes-card ul {
-    margin: 0;
-    padding-left: 18px;
+.detail-gelu-note {
+    margin: 10px 0 0;
     color: #cfd3dc;
     font-size: var(--detail-font-body);
     line-height: 1.45;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
 }
-.detail-gelu-notes-card li + li {
-    margin-top: 6px;
-}
 .detail-gelu-inline-equation {
-    font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    display: inline-block;
+    vertical-align: baseline;
     color: #f4d8ab;
+}
+.detail-gelu-inline-equation .katex {
+    font-size: 1em;
 }
 
 .detail-softmax-view {
@@ -3270,11 +3252,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
 #detailPanel.is-gelu-view-open > .detail-preview,
 #detailPanel.is-gelu-view-open > .vector-legend,
 #detailPanel.is-gelu-view-open > .detail-description,
-#detailPanel.is-gelu-view-open > .detail-copy-context,
 #detailPanel.is-gelu-view-open > .detail-equations,
 #detailPanel.is-gelu-view-open > .detail-attention,
 #detailPanel.is-gelu-view-open > .detail-meta,
-#detailPanel.is-gelu-view-open > .detail-data {
+#detailPanel.is-gelu-view-open > .detail-data,
+#detailPanel.is-gelu-view-open > .detail-prompt-context {
     display: none !important;
 }
 

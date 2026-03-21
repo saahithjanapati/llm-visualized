@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { beforeEach, describe, expect, it } from 'vitest';
+
 import { getLogitTokenChipColorHex, resolveLogitTokenChipColorKey } from './logitColor.js';
-import { addTopLogitBars, resolveChosenLogitDisplayColorKey } from './topLogitBars.js';
+import {
+    addTopLogitBars,
+    buildTopLogitHoverLabel,
+    resolveChosenLogitDisplayColorKey
+} from './topLogitBars.js';
 import {
     buildPromptTokenChipEntries,
     resolvePromptTokenChipColorState,
@@ -156,5 +161,22 @@ describe('resolveChosenLogitDisplayColorKey', () => {
         expect(actualColor.r).toBeCloseTo(expectedColor.r, 5);
         expect(actualColor.g).toBeCloseTo(expectedColor.g, 5);
         expect(actualColor.b).toBeCloseTo(expectedColor.b, 5);
+    });
+});
+
+describe('buildTopLogitHoverLabel', () => {
+    it('formats regular logit bars into separate tooltip rows', () => {
+        expect(buildTopLogitHoverLabel({
+            token: 'Beta',
+            token_id: 9001,
+            prob: 0.08
+        })).toBe('Logit token: "Beta"\nID: 9001\nProbability: 8%');
+    });
+
+    it('keeps id and probability rows when token text is unavailable', () => {
+        expect(buildTopLogitHoverLabel({
+            token_id: 42,
+            prob: 0.125
+        })).toBe('Logit token\nID: 42\nProbability: 12.5%');
     });
 });

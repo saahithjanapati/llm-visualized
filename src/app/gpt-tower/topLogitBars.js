@@ -563,6 +563,30 @@ function formatHoverProbabilityPercentage(prob) {
     return `${percentage.toFixed(2).replace(/\.?0+$/, '')}%`;
 }
 
+export function buildTopLogitHoverLabel(entry = null) {
+    const prob = resolveChosenLogitProbability(entry);
+    const tokenTextRaw = resolveLogitEntryText(entry);
+    const tokenText = tokenTextRaw
+        ? formatTokenLabel(tokenTextRaw.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
+        : '';
+    const tokenId = resolveChosenLogitTokenId(entry);
+    const isIncompleteToken = tokenId !== null && isIncompleteUtf8TokenId(tokenId);
+    const labelLines = [];
+
+    if (tokenText && !isIncompleteToken) {
+        labelLines.push(`Logit token: "${tokenText}"`);
+    } else {
+        labelLines.push('Logit token');
+    }
+    if (tokenId !== null) labelLines.push(`ID: ${tokenId}`);
+    if (isIncompleteToken) {
+        labelLines.push('Incomplete UTF-8 byte fragment');
+    }
+    if (Number.isFinite(prob)) labelLines.push(`Probability: ${formatHoverProbabilityPercentage(prob)}`);
+
+    return labelLines.join('\n');
+}
+
 export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vocabCenter, scene, engine }) {
     if (!activationSource || !Array.isArray(laneZs) || !laneZs.length) return;
     if (typeof activationSource.getLogitsForToken !== 'function') return;
@@ -698,20 +722,7 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                         fallbackColor: barColor
                     });
                 }
-                const tokenTextRaw = resolveLogitEntryText(entry);
-                const tokenText = tokenTextRaw
-                    ? formatTokenLabel(tokenTextRaw.replace(/\n/g, '\\n').replace(/\t/g, '\\t'))
-                    : '';
-                const tokenId = resolveChosenLogitTokenId(entry);
-                const isIncompleteToken = tokenId !== null && isIncompleteUtf8TokenId(tokenId);
-                const labelLines = ['Logit'];
-                if (tokenText && !isIncompleteToken) labelLines.push(`Token "${tokenText}"`);
-                if (tokenId !== null) labelLines.push(`ID ${tokenId}`);
-                if (isIncompleteToken) {
-                    labelLines.push('Incomplete UTF-8 byte fragment');
-                }
-                if (Number.isFinite(prob)) labelLines.push(formatHoverProbabilityPercentage(prob));
-                const label = labelLines.join('\n');
+                const label = buildTopLogitHoverLabel(entry);
                 const instanceIndex = instances.length;
                 instanceLabels[instanceIndex] = label;
                 instanceEntries[instanceIndex] = entry;

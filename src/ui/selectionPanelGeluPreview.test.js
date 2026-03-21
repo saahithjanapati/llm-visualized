@@ -56,19 +56,19 @@ describe('createGeluDetailView', () => {
         vi.restoreAllMocks();
     });
 
-    it('adds the Gaussian CDF relationship alongside the GPT-2 approximation', () => {
+    it('uses the standardized GELU cards without a separate exact-relationship block', () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createGeluDetailView(panelEl);
 
         view.setVisible(true);
 
         const text = panelEl.textContent || '';
-        expect(text).toContain('Exact relationship');
-        expect(text).toContain('Common GPT-2 approximation');
-        expect(text).toContain('CDF of a standard Gaussian');
-        expect(text).toContain('standard normal distribution');
-        expect(panelEl.querySelector('[data-gelu-formula]')).not.toBeNull();
+        expect(text).not.toContain('Exact relationship');
+        expect(text).toContain('What It Does');
+        expect(text).toContain('Why GPT-2 Uses It');
+        expect(text).toContain('Interactive curve');
         expect(panelEl.querySelector('[data-gelu-approx-formula]')).not.toBeNull();
+        expect(panelEl.querySelector('[data-gelu-inline="canonical"]')).not.toBeNull();
     });
 
     it('shrinks the approximation formula when the detail panel is narrow', () => {
@@ -95,6 +95,26 @@ describe('createGeluDetailView', () => {
         const fittedFontSize = Number.parseFloat(approxFormulaEl.style.fontSize);
         expect(fittedFontSize).toBeGreaterThanOrEqual(8.25);
         expect(fittedFontSize).toBeLessThan(16);
+    });
+
+    it('renders inline GELU math with KaTeX instead of plain fallback text', () => {
+        window.katex = {
+            renderToString: vi.fn((tex, options = {}) => (
+                `<span data-display-mode="${options.displayMode ? 'true' : 'false'}">${tex}</span>`
+            ))
+        };
+
+        const panelEl = document.getElementById('detailPanel');
+        const view = createGeluDetailView(panelEl);
+
+        view.setVisible(true);
+
+        expect(window.katex.renderToString).toHaveBeenCalledWith(
+            '\\operatorname{GELU}(x)',
+            expect.objectContaining({ displayMode: false, throwOnError: false })
+        );
+        const inlineFormula = panelEl.querySelector('[data-gelu-inline="geluOfX"]');
+        expect(inlineFormula?.innerHTML).toContain('data-display-mode="false"');
     });
 
     it('treats the post-GELU activation vector as eligible for the GELU detail action', () => {

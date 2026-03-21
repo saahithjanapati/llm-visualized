@@ -56,6 +56,7 @@ import {
 import {
     GELU_PANEL_ACTION_OPEN,
     createGeluDetailView,
+    getGeluCopyContextContent,
     isGeluDetailSelection,
     isMlpMatrixSelectionLabel,
     setDescriptionGeluAction
@@ -4940,6 +4941,28 @@ export class SelectionPanel {
             : null;
         const promptContextSummary = this._buildSelectionPromptContextSummary(selection, vectorTokenMetadata);
 
+        if (this._geluDetailOpen) {
+            const geluContent = getGeluCopyContextContent();
+            return buildSelectionChatPrompt({
+                selection,
+                normalizedLabel,
+                title,
+                subtitle,
+                subtitleSecondary,
+                subtitleTertiary,
+                panelContentsBlurb: geluContent.panelContentsBlurb,
+                descriptionText: geluContent.descriptionText,
+                equationText: geluContent.equationText,
+                promptContextSummary,
+                attentionScoreSummary,
+                vectorTokenMetadata,
+                activationSource: this.activationSource,
+                kvState: this._resolveCopyContextKvState(selection),
+                surfaceState: this._resolveCopyContextSurfaceState(),
+                liveSceneState: this._resolveCopyContextLiveSceneState()
+            });
+        }
+
         if (this._softmaxDetailOpen) {
             const softmaxContent = getSoftmaxCopyContextContent();
             return buildSelectionChatPrompt({
@@ -9264,13 +9287,13 @@ export class SelectionPanel {
         this._geluSourceSelection = resolvedSelection;
         this._geluDetailOpen = true;
         this.panel.classList.add('is-gelu-view-open');
-        this._setTitleText('GELU Activation');
+        this._setTitleText('GELU');
         if (this.subtitle) {
             this.subtitle.classList.remove('detail-subtitle--qkv-token-context');
-            this.subtitle.textContent = 'Gaussian Error Linear Unit used in GPT-2 MLP blocks';
+            this.subtitle.textContent = 'Smooth activation used inside GPT-2 MLP blocks';
         }
         this._setSubtitleSecondaryText('');
-        this._setSubtitleTertiaryText('');
+        this._setSubtitleTertiaryText('What it changes in the feed-forward path.');
         this._geluDetailView?.setVisible(true);
         this._geluDetailView?.resizeAndRender();
         this._stopLoop();

@@ -126,6 +126,7 @@ function buildResolvedGeneratedToken({
     tokenId = null,
     tokenIndex = null,
     logitEntry = null,
+    resolution = null,
     seedFallbackIndex = 0
 } = {}) {
     const resolvedTokenId = Number.isFinite(tokenId) ? Math.floor(tokenId) : null;
@@ -152,6 +153,7 @@ function buildResolvedGeneratedToken({
         tokenLabel,
         tokenId: resolvedTokenId,
         tokenIndex: Number.isFinite(tokenIndex) ? Math.floor(tokenIndex) : null,
+        resolution: typeof resolution === 'string' && resolution.length ? resolution : null,
         seed: resolveLogitTokenSeed(seedSource, seedFallbackIndex),
         selectionLabel: `Chosen token: ${tokenLabel}`,
         logitEntry: (logitEntry && typeof logitEntry === 'object') ? logitEntry : null
@@ -182,8 +184,40 @@ export function resolveGeneratedLogitToken(activationSource, laneTokenIndices = 
         tokenId: chosenToken.tokenId,
         tokenIndex: chosenToken.tokenIndex,
         logitEntry: chosenToken.logitEntry,
+        resolution: chosenToken.resolution,
         seedFallbackIndex: chosenIdx
     });
+}
+
+export function resolvePromptStripGeneratedToken(
+    activationSource,
+    laneTokenIndices = [],
+    {
+        currentLaneCount = null,
+        maxLaneCount = null,
+        passComplete = false
+    } = {}
+) {
+    const generatedToken = resolveGeneratedLogitToken(activationSource, laneTokenIndices);
+    if (!generatedToken) return null;
+
+    const isHiddenTerminalToken = generatedToken.resolution === 'hidden-terminal-token';
+    const atFinalVisiblePass = Number.isFinite(currentLaneCount)
+        && Number.isFinite(maxLaneCount)
+        && Math.floor(currentLaneCount) >= Math.floor(maxLaneCount);
+
+    if (isHiddenTerminalToken && atFinalVisiblePass) {
+        return {
+            ...generatedToken,
+            generatedState: passComplete ? 'settled' : 'pending'
+        };
+    }
+
+    if (!passComplete) return null;
+    return {
+        ...generatedToken,
+        generatedState: 'pending'
+    };
 }
 
 function createAdvanceOverlay() {
@@ -845,7 +879,10 @@ export function initGenerationController({
     const syncPromptTokenStrip = (
         passState,
         attentionState = null,
-        { showGeneratedLogitChip = false } = {}
+        {
+            laneCount = currentLaneCount,
+            passCompleteState = passComplete
+        } = {}
     ) => {
         if (!promptTokenStrip || typeof promptTokenStrip.update !== 'function') return;
         const sourceState = attentionState || passState;
@@ -860,9 +897,11 @@ export function initGenerationController({
                 Number.isFinite(tokenIndex) ? activationSource.getTokenId(tokenIndex) : null
             ))
             : null;
-        const generatedToken = showGeneratedLogitChip
-            ? resolveGeneratedLogitToken(activationSource, tokenIndices || [])
-            : null;
+        const generatedToken = resolvePromptStripGeneratedToken(activationSource, tokenIndices || [], {
+            currentLaneCount: laneCount,
+            maxLaneCount,
+            passComplete: passCompleteState
+        });
         promptTokenStrip.update({
             tokenLabels: labels,
             tokenIndices,
@@ -1018,7 +1057,10 @@ export function initGenerationController({
         syncSelectionPanel(state, attentionState);
         latestPassState = state;
         latestAttentionState = attentionState;
-        syncPromptTokenStrip(state, attentionState, { showGeneratedLogitChip: false });
+        syncPromptTokenStrip(state, attentionState, {
+            laneCount: nextLaneCount,
+            passCompleteState: false
+        });
 
         currentLaneCount = nextLaneCount;
         if (routeHistory !== 'ignore') {
@@ -1256,7 +1298,10 @@ export function initGenerationController({
                     resetPipeline: true,
                     routeHistory: historyMode
                 });
-                syncPromptTokenStrip(latestPassState, latestAttentionState, { showGeneratedLogitChip: false });
+                syncPromptTokenStrip(latestPassState, latestAttentionState, {
+                    laneCount: generationBaseLaneCount,
+                    passCompleteState: false
+                });
             } catch (err) {
                 console.error('Restart generation failed:', err);
             } finally {
@@ -1345,7 +1390,10 @@ export function initGenerationController({
                 autoAdvancePaused = atLastPass ? true : autoAdvancePaused;
                 countdownActive = atLastPass ? false : !autoAdvancePaused;
                 lastTick = now;
-                syncPromptTokenStrip(latestPassState, latestAttentionState, { showGeneratedLogitChip: true });
+                syncPromptTokenStrip(latestPassState, latestAttentionState, {
+                    laneCount: currentLaneCount,
+                    passCompleteState: true
+                });
                 updateOverlay();
             }
         } else if (countdownActive) {

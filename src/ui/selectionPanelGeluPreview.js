@@ -11,6 +11,10 @@ const GELU_RELATION_EQUATION_TEX = '\\operatorname{GELU}(x) = x\\,\\Phi(x)';
 const GELU_APPROXIMATION_EQUATION_TEX = '\\operatorname{GELU}(x) \\approx \\frac{x}{2}\\left(1 + \\tanh\\left(\\sqrt{\\frac{2}{\\pi}}\\left(x + 0.044715x^3\\right)\\right)\\right)';
 const GELU_RELATION_FALLBACK_TEXT = 'GELU(x) = x * Phi(x)';
 const GELU_APPROXIMATION_FALLBACK_TEXT = 'GELU(x) ~= 0.5x * (1 + tanh(sqrt(2/pi) * (x + 0.044715x^3)))';
+const GELU_OVERVIEW_TEXT = 'GELU is the smooth nonlinearity inside each GPT-2 MLP block. It turns the linear up-projection into a feature-selective gate before the state is compressed again.';
+const GELU_WHAT_IT_DOES_TEXT = 'Near zero, GELU changes smoothly instead of flipping on or off. Negative values are softly damped, while large positive values pass through almost linearly.';
+const GELU_WHY_GPT2_USES_IT_TEXT = 'That smooth bend lets the MLP keep strong positive features, suppress weaker ones, and build richer token-local features than a purely linear map.';
+const GELU_COPY_PANEL_BLURB = 'This selection preview panel includes a short overview of GELU, the tanh approximation GPT-2 uses, an interactive curve with a live readout, and brief notes about what GELU changes in the MLP.';
 const GELU_DETAIL_EQUATION_MIN_FONT_PX = 8.25;
 const GELU_DETAIL_EQUATION_FIT_BUFFER_PX = 6;
 const GELU_GRAPH_MARGIN = Object.freeze({
@@ -18,6 +22,28 @@ const GELU_GRAPH_MARGIN = Object.freeze({
     right: 18,
     top: 18,
     bottom: 30
+});
+const GELU_INLINE_FORMULAS = Object.freeze({
+    canonical: {
+        tex: GELU_RELATION_EQUATION_TEX,
+        fallbackText: GELU_RELATION_FALLBACK_TEXT
+    },
+    phi: {
+        tex: '\\Phi(x)',
+        fallbackText: 'Phi(x)'
+    },
+    standardNormal: {
+        tex: '\\mathcal{N}(0, 1)',
+        fallbackText: 'N(0, 1)'
+    },
+    x: {
+        tex: 'x',
+        fallbackText: 'x'
+    },
+    geluOfX: {
+        tex: '\\operatorname{GELU}(x)',
+        fallbackText: 'GELU(x)'
+    }
 });
 
 export const GELU_PANEL_ACTION_OPEN = 'open-gelu-preview';
@@ -32,6 +58,18 @@ function clamp(value, min, max) {
 function formatGeluValue(value) {
     if (!Number.isFinite(value)) return '--';
     return value.toFixed(4);
+}
+
+export function getGeluCopyContextContent() {
+    return {
+        panelContentsBlurb: GELU_COPY_PANEL_BLURB,
+        descriptionText: [
+            GELU_OVERVIEW_TEXT,
+            `What it does: ${GELU_WHAT_IT_DOES_TEXT}`,
+            `Why GPT-2 uses it: ${GELU_WHY_GPT2_USES_IT_TEXT}`
+        ].join('\n\n'),
+        equationText: `$$${GELU_APPROXIMATION_EQUATION_TEX}$$`
+    };
 }
 
 export function evaluateGelu(x) {
@@ -114,13 +152,13 @@ function toDomainX(pixelX, width, margin) {
     return GELU_DOMAIN_MIN + t * (GELU_DOMAIN_MAX - GELU_DOMAIN_MIN);
 }
 
-function renderFormulaMarkup(tex = '') {
+function renderFormulaMarkup(tex = '', { displayMode = true } = {}) {
     const safeTex = typeof tex === 'string' ? tex.trim() : '';
     if (!safeTex) return '';
     const katex = (typeof window !== 'undefined') ? window.katex : null;
     if (katex && typeof katex.renderToString === 'function') {
         try {
-            return katex.renderToString(safeTex, { throwOnError: false, displayMode: true });
+            return katex.renderToString(safeTex, { throwOnError: false, displayMode });
         } catch (_) {
             // Fall back to plain text below.
         }
@@ -128,14 +166,30 @@ function renderFormulaMarkup(tex = '') {
     return safeTex;
 }
 
-function renderFormulaBody(formulaEl, tex, fallbackText) {
-    if (!formulaEl) return;
-    const markup = renderFormulaMarkup(tex);
+function renderFormulaBody(formulaEl, tex, fallbackText, { displayMode = true } = {}) {
+    if (!formulaEl) return false;
+    const markup = renderFormulaMarkup(tex, { displayMode });
     if (markup === tex) {
         formulaEl.textContent = fallbackText || tex;
-        return;
+        return false;
     }
     formulaEl.innerHTML = markup;
+    return true;
+}
+
+function renderInlineFormulaTokens(rootEl) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('[data-gelu-inline]').forEach((inlineEl) => {
+        const formulaKey = inlineEl.dataset.geluInline;
+        const formulaSpec = GELU_INLINE_FORMULAS[formulaKey];
+        if (!formulaSpec) return;
+        renderFormulaBody(
+            inlineEl,
+            formulaSpec.tex,
+            formulaSpec.fallbackText,
+            { displayMode: false }
+        );
+    });
 }
 
 function fitFormulaBodyToWidth(formulaEl) {
@@ -187,48 +241,53 @@ export function createGeluDetailView(panelEl) {
 
     const root = document.createElement('section');
     root.className = 'detail-gelu-view';
+    root.hidden = true;
     root.setAttribute('aria-hidden', 'true');
     root.innerHTML = `
         <div class="detail-description detail-gelu-copy">
-            <p>GELU (Gaussian Error Linear Unit) is the MLP activation used by GPT-2.</p>
-            <p>Its exact form is <span class="detail-gelu-inline-equation">GELU(x) = x Phi(x)</span>, where <span class="detail-gelu-inline-equation">Phi(x)</span> is the CDF of a standard Gaussian, so it behaves like a smooth probability gate instead of a hard cutoff.</p>
+            <p>${GELU_OVERVIEW_TEXT}</p>
         </div>
         <div class="detail-equations detail-gelu-equation-shell is-visible" aria-hidden="false">
-            <div class="detail-gelu-equation-group">
-                <div class="detail-gelu-equation-label">Exact relationship</div>
-                <div class="detail-equations-body detail-gelu-formula" data-gelu-formula></div>
-            </div>
-            <p class="detail-gelu-equation-note">Here, <span class="detail-gelu-inline-equation">Phi(x)</span> is the CDF of the standard normal distribution <span class="detail-gelu-inline-equation">N(0, 1)</span>.</p>
-            <div class="detail-gelu-equation-group">
-                <div class="detail-gelu-equation-label">Common GPT-2 approximation</div>
-                <div class="detail-equations-body detail-gelu-approx-formula" data-gelu-approx-formula></div>
-            </div>
+            <div class="detail-equations-body detail-gelu-approx-formula" data-gelu-approx-formula></div>
+            <p class="detail-gelu-equation-note">
+                GPT-2 evaluates the tanh approximation shown above. It closely tracks
+                <span class="detail-gelu-inline-equation" data-gelu-inline="canonical"></span>,
+                where <span class="detail-gelu-inline-equation" data-gelu-inline="phi"></span> is the CDF of
+                <span class="detail-gelu-inline-equation" data-gelu-inline="standardNormal"></span>.
+            </p>
+        </div>
+        <div class="detail-data detail-gelu-note-card">
+            <div class="detail-data-title">What It Does</div>
+            <p class="detail-gelu-note">
+                ${GELU_WHAT_IT_DOES_TEXT}
+            </p>
         </div>
         <div class="detail-data detail-gelu-graph-card">
             <div class="detail-gelu-card-header">
                 <div class="detail-data-title">Interactive curve</div>
-                <div class="detail-gelu-graph-hint">Move horizontally across the graph to inspect the tanh approximation of GELU(x).</div>
+                <div class="detail-gelu-graph-hint">Move horizontally across the graph to inspect the GPT-2 tanh approximation.</div>
             </div>
             <canvas class="detail-gelu-graph-canvas" aria-label="Interactive GELU graph"></canvas>
         </div>
         <div class="detail-meta detail-gelu-readout" aria-label="GELU readout">
             <div class="detail-row detail-gelu-readout-card">
-                <span class="detail-label detail-gelu-readout-label">Input x</span>
+                <span class="detail-label detail-gelu-readout-label">
+                    Input <span class="detail-gelu-inline-equation" data-gelu-inline="x"></span>
+                </span>
                 <span class="detail-value detail-gelu-readout-value" data-gelu-readout="x">--</span>
             </div>
             <div class="detail-row detail-gelu-readout-card">
-                <span class="detail-label detail-gelu-readout-label">Output GELU(x)</span>
+                <span class="detail-label detail-gelu-readout-label">
+                    Output <span class="detail-gelu-inline-equation" data-gelu-inline="geluOfX"></span>
+                </span>
                 <span class="detail-value detail-gelu-readout-value" data-gelu-readout="y">--</span>
             </div>
         </div>
-        <div class="detail-data detail-gelu-notes-card">
-            <div class="detail-data-title">Why it matters</div>
-            <ul>
-                <li>The exact form is <span class="detail-gelu-inline-equation">GELU(x) = x Phi(x)</span>, so activation strength is tied to the Gaussian CDF.</li>
-                <li>Near zero, outputs change smoothly instead of switching sharply.</li>
-                <li>Negative values are softly damped rather than hard-clipped.</li>
-                <li>Positive values pass through almost linearly at larger magnitudes.</li>
-            </ul>
+        <div class="detail-data detail-gelu-note-card">
+            <div class="detail-data-title">Why GPT-2 Uses It</div>
+            <p class="detail-gelu-note">
+                ${GELU_WHY_GPT2_USES_IT_TEXT}
+            </p>
         </div>
     `;
 
@@ -240,7 +299,6 @@ export function createGeluDetailView(panelEl) {
     }
 
     const canvas = root.querySelector('.detail-gelu-graph-canvas');
-    const formulaEl = root.querySelector('[data-gelu-formula]');
     const approxFormulaEl = root.querySelector('[data-gelu-approx-formula]');
     const readoutX = root.querySelector('[data-gelu-readout="x"]');
     const readoutY = root.querySelector('[data-gelu-readout="y"]');
@@ -255,16 +313,16 @@ export function createGeluDetailView(panelEl) {
     const yTicks = buildAxisTicks(GELU_RANGE_MIN, GELU_RANGE_MAX, 1);
 
     function renderFormula() {
-        renderFormulaBody(formulaEl, GELU_RELATION_EQUATION_TEX, GELU_RELATION_FALLBACK_TEXT);
         renderFormulaBody(
             approxFormulaEl,
             GELU_APPROXIMATION_EQUATION_TEX,
-            GELU_APPROXIMATION_FALLBACK_TEXT
+            GELU_APPROXIMATION_FALLBACK_TEXT,
+            { displayMode: true }
         );
+        renderInlineFormulaTokens(root);
     }
 
     function fitFormulaBodies() {
-        fitFormulaBodyToWidth(formulaEl);
         fitFormulaBodyToWidth(approxFormulaEl);
     }
 
@@ -444,6 +502,7 @@ export function createGeluDetailView(panelEl) {
         root,
         setVisible(visible) {
             state.visible = !!visible;
+            root.hidden = !state.visible;
             root.classList.toggle('is-visible', state.visible);
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
             if (!state.visible) {

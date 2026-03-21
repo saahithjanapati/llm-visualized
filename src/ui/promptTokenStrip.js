@@ -424,6 +424,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
                 entry.tokenIndex,
                 entry.tokenId,
                 entry.tokenLabel,
+                entry.generatedState || '',
                 entry.selectionLabel || '',
                 entry.seed
             ].join('|'))
@@ -441,7 +442,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             const tokenEl = document.createElement('button');
             tokenEl.type = 'button';
             tokenEl.className = 'prompt-token-strip__token';
-            if (entry.entryType === 'generated') {
+            if (entry.entryType === 'generated' && entry.generatedState !== 'settled') {
                 tokenEl.classList.add('prompt-token-strip__token--generated');
             }
             applyTokenChipColors(tokenEl, entry, index, { lookup: colorState.lookup });
