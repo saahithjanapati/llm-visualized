@@ -81,6 +81,7 @@ export function buildPromptTokenChipEntries({
             tokenIndex: toFiniteInteger(generatedToken?.tokenIndex),
             tokenId: toFiniteInteger(generatedToken?.tokenId),
             tokenLabel: generatedLabel,
+            generatedState: generatedToken?.generatedState === 'settled' ? 'settled' : 'pending',
             selectionLabel: (typeof generatedToken?.selectionLabel === 'string' && generatedToken.selectionLabel.length)
                 ? generatedToken.selectionLabel
                 : null,

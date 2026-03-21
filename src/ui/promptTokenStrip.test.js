@@ -132,4 +132,35 @@ describe('promptTokenStrip mirrored hover state', () => {
 
         strip.dispose();
     });
+
+    it('rerenders a final generated token without the dashed outline once it settles', () => {
+        const strip = initPromptTokenStripRef();
+        strip.update({
+            tokenLabels: ['Hello'],
+            tokenIndices: [0],
+            tokenIds: [11],
+            generatedToken: {
+                tokenLabel: '<|endoftext|>',
+                tokenId: 50256,
+                generatedState: 'pending'
+            }
+        });
+
+        expect(strip.getTokenElement(1)?.classList.contains('prompt-token-strip__token--generated')).toBe(true);
+
+        strip.update({
+            tokenLabels: ['Hello'],
+            tokenIndices: [0],
+            tokenIds: [11],
+            generatedToken: {
+                tokenLabel: '<|endoftext|>',
+                tokenId: 50256,
+                generatedState: 'settled'
+            }
+        });
+
+        expect(strip.getTokenElement(1)?.classList.contains('prompt-token-strip__token--generated')).toBe(false);
+
+        strip.dispose();
+    });
 });
