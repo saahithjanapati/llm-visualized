@@ -206,13 +206,7 @@ export function resolvePromptStripGeneratedToken(
         && Number.isFinite(maxLaneCount)
         && Math.floor(currentLaneCount) >= Math.floor(maxLaneCount);
 
-    if (isHiddenTerminalToken && atFinalVisiblePass) {
-        return {
-            ...generatedToken,
-            generatedState: passComplete ? 'settled' : 'pending'
-        };
-    }
-
+    if (isHiddenTerminalToken && !atFinalVisiblePass) return null;
     if (!passComplete) return null;
     return {
         ...generatedToken,
@@ -861,6 +855,35 @@ export function initGenerationController({
         updateNextTokenButton();
     };
 
+    const getCompletionTimestamp = (fallbackNow = null) => {
+        if (Number.isFinite(fallbackNow)) return fallbackNow;
+        if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+            return performance.now();
+        }
+        return Date.now();
+    };
+
+    const markPassCompleteIfReady = (now = null) => {
+        if (passComplete || forwardPassJumpPending) return false;
+        const isComplete = typeof pipeline?.isForwardPassComplete === 'function'
+            ? pipeline.isForwardPassComplete()
+            : false;
+        if (!isComplete) return false;
+
+        passComplete = true;
+        remainingMs = countdownMs;
+        const atLastPass = currentLaneCount >= maxLaneCount;
+        autoAdvancePaused = atLastPass ? true : autoAdvancePaused;
+        countdownActive = atLastPass ? false : !autoAdvancePaused;
+        lastTick = getCompletionTimestamp(now);
+        syncPromptTokenStrip(latestPassState, latestAttentionState, {
+            laneCount: currentLaneCount,
+            passCompleteState: true
+        });
+        updateOverlay();
+        return true;
+    };
+
     const syncSelectionPanel = (passState, attentionState = null) => {
         if (!selectionPanel) return;
         const keepTransformerView2dOpen = selectionPanel.isTransformerView2dOpen?.() === true;
@@ -1154,6 +1177,13 @@ export function initGenerationController({
         resetPipeline: kvModeEnabled
     });
 
+    const handlePipelineProgress = () => {
+        markPassCompleteIfReady();
+    };
+    if (typeof pipeline?.addEventListener === 'function') {
+        pipeline.addEventListener('progress', handlePipelineProgress);
+    }
+
     const hasNextForwardPass = () => currentLaneCount < maxLaneCount;
     const hasLastForwardPass = hasNextForwardPass;
     const markNoFurtherPasses = () => {
@@ -1380,22 +1410,7 @@ export function initGenerationController({
     const tick = (now) => {
         if (!pipeline) return;
         if (!passComplete) {
-            const isComplete = typeof pipeline.isForwardPassComplete === 'function'
-                ? pipeline.isForwardPassComplete()
-                : false;
-            if (isComplete) {
-                passComplete = true;
-                remainingMs = countdownMs;
-                const atLastPass = currentLaneCount >= maxLaneCount;
-                autoAdvancePaused = atLastPass ? true : autoAdvancePaused;
-                countdownActive = atLastPass ? false : !autoAdvancePaused;
-                lastTick = now;
-                syncPromptTokenStrip(latestPassState, latestAttentionState, {
-                    laneCount: currentLaneCount,
-                    passCompleteState: true
-                });
-                updateOverlay();
-            }
+            markPassCompleteIfReady(now);
         } else if (countdownActive) {
             const paused = appState.userPaused || appState.modalPaused;
             if (!paused) {
@@ -1427,6 +1442,9 @@ export function initGenerationController({
         isNextForwardPassPending: () => forwardPassJumpPending,
         syncFromUrl,
         dispose: () => {
+            if (typeof pipeline?.removeEventListener === 'function') {
+                pipeline.removeEventListener('progress', handlePipelineProgress);
+            }
             if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
                 window.removeEventListener(KV_CACHE_MODE_CHANGED_EVENT, handleKvCacheModeChanged);
                 if (window.__llmVisualizedGenerationRoutePopstateListener === handleRoutePopState) {

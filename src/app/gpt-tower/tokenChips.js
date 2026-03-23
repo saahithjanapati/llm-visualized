@@ -535,6 +535,7 @@ export function addEmbeddingAndTokenChips({
     let chipEntryTimeoutId = null;
     let positionChipStartIntervalId = null;
     let topLogitRevealTimeoutId = null;
+    let topLogitRevealWatchId = null;
 
     const disposeObject = (obj) => {
         if (!obj) return;
@@ -1558,6 +1559,12 @@ export function addEmbeddingAndTokenChips({
                     topLogitRevealTimeoutId = null;
                 }
             };
+            const clearTopLogitRevealWatch = () => {
+                if (topLogitRevealWatchId) {
+                    clearTimeout(topLogitRevealWatchId);
+                    topLogitRevealWatchId = null;
+                }
+            };
             const markTopLogitRevealComplete = () => {
                 if (typeof pipeline?.setTopLogitRevealComplete === 'function') {
                     pipeline.setTopLogitRevealComplete(topLogitRevealGateId);
@@ -1567,6 +1574,7 @@ export function addEmbeddingAndTokenChips({
                 if (topLogitRevealStarted || !topLogitBars) return false;
                 topLogitRevealStarted = true;
                 clearTopLogitRevealTimeout();
+                clearTopLogitRevealWatch();
                 if (topLogitProgressHandler && pipeline && typeof pipeline.removeEventListener === 'function') {
                     pipeline.removeEventListener('progress', topLogitProgressHandler);
                     topLogitProgressHandler = null;
@@ -1647,6 +1655,19 @@ export function addEmbeddingAndTokenChips({
                 topLogitProgressHandler = onProgress;
                 pipeline.addEventListener('progress', onProgress);
                 onProgress();
+                const watchForRevealStart = () => {
+                    if (disposed || topLogitRevealStarted) {
+                        clearTopLogitRevealWatch();
+                        return;
+                    }
+                    maybeReveal();
+                    if (disposed || topLogitRevealStarted) {
+                        clearTopLogitRevealWatch();
+                        return;
+                    }
+                    topLogitRevealWatchId = setTimeout(watchForRevealStart, 80);
+                };
+                topLogitRevealWatchId = setTimeout(watchForRevealStart, 80);
             } else if (topLogitBars) {
                 revealTopLogitBars(topLogitBars, { immediate: true, onComplete: markTopLogitRevealComplete });
             }
@@ -1674,6 +1695,10 @@ export function addEmbeddingAndTokenChips({
         if (topLogitRevealTimeoutId) {
             clearTimeout(topLogitRevealTimeoutId);
             topLogitRevealTimeoutId = null;
+        }
+        if (topLogitRevealWatchId) {
+            clearTimeout(topLogitRevealWatchId);
+            topLogitRevealWatchId = null;
         }
         if (positionChipStartIntervalId) {
             clearInterval(positionChipStartIntervalId);

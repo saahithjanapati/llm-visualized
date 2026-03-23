@@ -442,7 +442,7 @@ export function initPromptTokenStrip({ onTokenClick = null } = {}) {
             const tokenEl = document.createElement('button');
             tokenEl.type = 'button';
             tokenEl.className = 'prompt-token-strip__token';
-            if (entry.entryType === 'generated' && entry.generatedState !== 'settled') {
+            if (entry.entryType === 'generated') {
                 tokenEl.classList.add('prompt-token-strip__token--generated');
             }
             applyTokenChipColors(tokenEl, entry, index, { lookup: colorState.lookup });

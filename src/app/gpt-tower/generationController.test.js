@@ -61,7 +61,7 @@ describe('resolvePromptStripGeneratedToken', () => {
         });
     });
 
-    it('shows the hidden terminal token during the final visible pass and settles it on completion', () => {
+    it('shows the hidden terminal token only after the final visible pass completes and keeps it pending', () => {
         const activationSource = {
             getTokenCount() {
                 return 3;
@@ -96,12 +96,7 @@ describe('resolvePromptStripGeneratedToken', () => {
             currentLaneCount: 3,
             maxLaneCount: 3,
             passComplete: false
-        })).toMatchObject({
-            tokenIndex: null,
-            tokenId: 50256,
-            tokenLabel: '<|endoftext|>',
-            generatedState: 'pending'
-        });
+        })).toBeNull();
 
         expect(resolvePromptStripGeneratedTokenRef(activationSource, [0, 1, 2], {
             currentLaneCount: 3,
@@ -111,7 +106,7 @@ describe('resolvePromptStripGeneratedToken', () => {
             tokenIndex: null,
             tokenId: 50256,
             tokenLabel: '<|endoftext|>',
-            generatedState: 'settled'
+            generatedState: 'pending'
         });
     });
 });
