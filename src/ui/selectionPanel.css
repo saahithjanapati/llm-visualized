@@ -3911,6 +3911,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
     animation-fill-mode: both;
 }
+.attention-cell.pre-softmax-reveal-muted {
+    animation-name: attentionPreSoftmaxRevealMuted;
+    animation-timing-function: cubic-bezier(0.18, 0.96, 0.28, 1.08);
+    animation-fill-mode: both;
+}
 .attention-cell.is-empty {
     background: rgba(255,255,255,0.04);
     opacity: 0.35;
@@ -4048,6 +4053,20 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         transform: translateY(var(--attention-cell-row-offset, 0px)) scale(1.06);
     }
     100% {
+        transform: translateY(var(--attention-cell-row-offset, 0px)) scale(1);
+    }
+}
+@keyframes attentionPreSoftmaxRevealMuted {
+    0% {
+        opacity: 0;
+        transform: translateY(calc(var(--attention-cell-row-offset, 0px) - 10px)) scale(0.74);
+    }
+    62% {
+        opacity: 0.52;
+        transform: translateY(calc(var(--attention-cell-row-offset, 0px) + 1px)) scale(1.04);
+    }
+    100% {
+        opacity: var(--attention-cell-rest-opacity, 0.38);
         transform: translateY(var(--attention-cell-row-offset, 0px)) scale(1);
     }
 }

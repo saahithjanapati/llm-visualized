@@ -86,6 +86,8 @@ import {
     computeAttentionCellSize,
     countVisibleAttentionCellsInRow,
     getAttentionRevealOrder,
+    resolveMutedAttentionCellRevealDelay,
+    shouldAnimateAttentionCellReveal,
     shouldRevealAttentionCell
 } from './selectionPanelAttentionRevealUtils.js';
 import {
@@ -218,6 +220,7 @@ import {
     ATTENTION_POST_REVEAL_SWEEP_MS,
     ATTENTION_PRE_COLOR_CLAMP,
     ATTENTION_PRE_REVEAL_DURATION_MS,
+    ATTENTION_PRE_MUTED_REVEAL_DELAY_MS,
     ATTENTION_PRE_REVEAL_STAGGER_MAX_MS,
     ATTENTION_PRE_REVEAL_STAGGER_MIN_MS,
     ATTENTION_PRE_REVEAL_SWEEP_MS,
@@ -10727,12 +10730,31 @@ export class SelectionPanel {
                             this._clearAttentionCellRevealAnimation(cell);
                         }
                     } else {
-                        if (wasEmpty) {
+                        const isMuted = cell.classList.contains('is-causal-upper-muted');
+                        const shouldAnimateReveal = shouldAnimateAttentionCellReveal({
+                            mode,
+                            wasEmpty,
+                            isMuted
+                        });
+                        if (shouldAnimateReveal) {
                             const revealOrder = getAttentionRevealOrder(row, col, count, ATTENTION_PREVIEW_TRIANGLE);
                             this._applyAttentionCellRevealAnimation(
                                 cell,
                                 useFocusedPreReveal ? 'pre-softmax-reveal-focus' : 'pre-softmax-reveal',
                                 revealOrder * preAnimStagger,
+                                preAnimDuration
+                            );
+                        } else if (wasEmpty && isMuted) {
+                            this._applyAttentionCellRevealAnimation(
+                                cell,
+                                'pre-softmax-reveal-muted',
+                                resolveMutedAttentionCellRevealDelay(
+                                    row,
+                                    col,
+                                    count,
+                                    preAnimStagger,
+                                    ATTENTION_PRE_MUTED_REVEAL_DELAY_MS
+                                ),
                                 preAnimDuration
                             );
                         } else {

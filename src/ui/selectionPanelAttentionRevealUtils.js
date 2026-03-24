@@ -34,6 +34,33 @@ export function shouldRevealAttentionCell(progress, row, col, mode = 'pre', deco
     return false;
 }
 
+export function shouldAnimateAttentionCellReveal({
+    mode = 'pre',
+    wasEmpty = false,
+    isMuted = false
+} = {}) {
+    if (!wasEmpty) return false;
+    if (mode === 'post') return true;
+    return !isMuted;
+}
+
+export function resolveMutedAttentionCellRevealDelay(
+    row,
+    col,
+    count,
+    staggerMs = 0,
+    extraDelayMs = 0
+) {
+    const safeCount = Math.max(1, Math.floor(count || 1));
+    const safeRow = clamp(Math.floor(row || 0), 0, safeCount - 1);
+    const safeCol = clamp(Math.floor(col || 0), 0, safeCount - 1);
+    const safeStagger = Number.isFinite(staggerMs) ? Math.max(0, Math.round(staggerMs)) : 0;
+    const safeExtraDelay = Number.isFinite(extraDelayMs) ? Math.max(0, Math.round(extraDelayMs)) : 0;
+    const completedPrefixCount = Math.max(1, Math.min(safeCount, safeRow + 1));
+    const mutedOrder = Math.max(0, safeCol - completedPrefixCount);
+    return (completedPrefixCount * safeStagger) + safeExtraDelay + (mutedOrder * safeStagger);
+}
+
 export function countVisibleAttentionCellsInRow(row, count, triangle = 'lower') {
     const safeCount = Math.max(1, Math.floor(count || 1));
     const safeRow = clamp(Math.floor(row || 0), 0, safeCount - 1);
