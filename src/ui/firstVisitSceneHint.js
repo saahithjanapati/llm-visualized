@@ -1,7 +1,7 @@
 import { getPreference, setPreference } from '../utils/preferences.js';
 
 const FIRST_VISIT_SCENE_HINT_ID = 'firstVisitSceneHint';
-const FIRST_VISIT_SCENE_HINT_TEXT = 'Be sure to click around! 🙂';
+const FIRST_VISIT_SCENE_HINT_TEXT = 'Click components to inspect them. Be sure to click around! 🙂';
 const FIRST_VISIT_SCENE_HINT_PREFERENCE_KEY = 'firstVisitSceneHintShown';
 const FIRST_VISIT_SCENE_HINT_AUTO_HIDE_MS = 5000;
 

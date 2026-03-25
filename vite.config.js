@@ -72,7 +72,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(projectRoot, 'index.html'),
-        info: resolve(projectRoot, 'info/index.html')
+        info: resolve(projectRoot, 'info/index.html'),
+        essay: resolve(projectRoot, 'essay/index.html')
       },
       output: {
         manualChunks(id) {

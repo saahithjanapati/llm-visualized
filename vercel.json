@@ -51,6 +51,24 @@
       ]
     },
     {
+      "source": "/essay",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/essay/",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
+      "source": "/essay/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
+      ]
+    },
+    {
       "source": "/full",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=86400, stale-while-revalidate=60" }
