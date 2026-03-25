@@ -36,7 +36,8 @@ body {
     background:
         radial-gradient(ellipse 60% 50% at 50% 0%, rgba(20, 60, 110, 0.45) 0%, transparent 65%),
         linear-gradient(180deg, var(--bg) 0%, #02060d 100%);
-    font-family: "Cormorant Garamond", Georgia, serif;
+    font-optical-sizing: auto;
+    font-family: "Source Serif 4", Georgia, serif;
 }
 
 ::selection {
@@ -110,7 +111,7 @@ h1 {
     margin-bottom: 22px;
     color: var(--ink-bright);
     font-size: clamp(3rem, 7.5vw, 5rem);
-    font-weight: 600;
+    font-weight: 500;
     line-height: 0.95;
     letter-spacing: -0.02em;
 }
@@ -125,6 +126,7 @@ h1 em {
     max-width: 32rem;
     color: var(--ink-dim);
     font-size: 1.05rem;
+    font-weight: 350;
     line-height: 1.55;
     font-style: italic;
 }
@@ -133,8 +135,8 @@ h1 em {
     margin-bottom: 1.5em;
     color: var(--ink);
     font-size: 1.2rem;
+    font-weight: 350;
     line-height: 1.82;
-    font-weight: 400;
 }
 
 .body-text p:first-of-type::first-letter {
@@ -144,7 +146,7 @@ h1 em {
     line-height: 0.75;
     margin-top: 10px;
     margin-right: 10px;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 .section-break {
@@ -195,7 +197,7 @@ blockquote p {
     font-size: 1.45rem;
     line-height: 1.55;
     font-style: italic;
-    font-weight: 500;
+    font-weight: 400;
 }
 
 .closing {
@@ -204,6 +206,7 @@ blockquote p {
     border-top: 1px solid var(--rule);
     color: var(--ink-bright);
     font-size: 1.32rem;
+    font-weight: 350;
     line-height: 1.65;
     font-style: italic;
 }

@@ -57,11 +57,59 @@ function stripUnusedBuildAssets() {
   };
 }
 
+function redirectDirectoryIndexPages() {
+  function buildMiddleware(root) {
+    return function directoryIndexRedirect(req, res, next) {
+      const requestUrl = String(req.url || '');
+      if (!requestUrl.length) {
+        next();
+        return;
+      }
+      const method = String(req.method || 'GET').toUpperCase();
+      if (method !== 'GET' && method !== 'HEAD') {
+        next();
+        return;
+      }
+
+      const url = new URL(requestUrl, 'https://llm-visualized.local');
+      const pathname = url.pathname;
+      if (!pathname || pathname === '/' || pathname.endsWith('/')) {
+        next();
+        return;
+      }
+      if (pathname.includes('.')) {
+        next();
+        return;
+      }
+
+      const indexPath = resolve(root, `.${pathname}`, 'index.html');
+      if (!existsSync(indexPath)) {
+        next();
+        return;
+      }
+
+      res.statusCode = 302;
+      res.setHeader('Location', `${pathname}/${url.search}`);
+      res.end();
+    };
+  }
+
+  return {
+    name: 'redirect-directory-index-pages',
+    configureServer(server) {
+      server.middlewares.use(buildMiddleware(server.config.root));
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(buildMiddleware(server.config.root));
+    }
+  };
+}
+
 export default defineConfig({
   root: '.',
   publicDir: 'public',
   assetsInclude: ['**/*.exr', '**/*.glb'],
-  plugins: [basicSsl(), stripUnusedBuildAssets()],
+  plugins: [basicSsl(), stripUnusedBuildAssets(), redirectDirectoryIndexPages()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,
