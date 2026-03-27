@@ -36,7 +36,7 @@ This repo is a Three.js visualization of GPT-2 internals, centered on a 12-layer
 
 ## Build Notes
 - `vite.config.js` uses `manualChunks` to keep app-owned runtime code split (`index`, `scene-runtime`) and isolate large vendor domains (`vendor-three-core`, `vendor-three-examples`).
-- The selection panel now lazy-loads from the main app entry instead of being forced into a dedicated manual chunk, so it no longer appears in the initial modulepreload set.
+- The selection panel now loads with the main app entry so first-open detail interactions do not wait on a first-use fetch, while the dedicated 2D detail view module still prewarms lazily from within `selectionPanel.js`.
 
 ## Activation Capture Semantics
 - `scripts/extract_gpt2_data.py` captures compact activations with stride sampling, not pooled 64-d buckets. The helper `sample_tensor()` selects coordinates `0, stride, 2 * stride, ...` along the last dimension.

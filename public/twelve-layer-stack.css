@@ -430,7 +430,7 @@ body.touch-ui * {
 }
 .skip-options-title {
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 1.2px;
 }
@@ -2785,8 +2785,8 @@ body.detail-panel-resizing * {
     box-sizing: border-box;
 }
 
-/* Shared hover-label styles must load with the tower. The 3D scene creates
-   these token chips before the lazy selection panel bundle is imported. */
+/* Shared hover-label styles must load with the tower because the 3D scene
+   creates these token chips independently of the detail panel lifecycle. */
 .detail-subtitle-token-chip {
     --token-color-border: rgba(255,255,255,0.92);
     --token-color-fill: rgba(255,255,255,0.2);
@@ -2923,7 +2923,7 @@ body.detail-panel-resizing * {
     white-space: nowrap;
 }
 
-/* Detail side panel styles lazy-load with the selection panel bundle. */
+/* Keep the base detail panel hidden until the selection panel initializes. */
 #detailPanel {
     display: none;
 }
