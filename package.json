@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@tweenjs/tween.js": "^25.0.0",
-    "@vitejs/plugin-basic-ssl": "^2.0.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "jsdom": "^28.1.0",
     "parcel": "^2.14.4",
     "vite": "^7.1.3",
