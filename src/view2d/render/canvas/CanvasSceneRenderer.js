@@ -835,6 +835,39 @@ function resolveTrackIndex(relativeOffset = 0, itemSize = 0, itemGap = 0, itemCo
     };
 }
 
+const OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX = 4;
+const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_WIDTH_PX = 16;
+const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_HEIGHT_PX = 16;
+
+function isOverviewResidualVectorStripNode(node = null) {
+    return !!(
+        node?.kind === VIEW2D_NODE_KINDS.MATRIX
+        && node?.role === 'module-card'
+        && node?.semantic?.componentKind === 'residual'
+        && node?.presentation === VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS
+        && node?.metadata?.compactRows?.variant === VIEW2D_VECTOR_STRIP_VARIANT
+    );
+}
+
+function expandScreenBounds(bounds = null, {
+    minWidthPx = 0,
+    minHeightPx = 0,
+    paddingPx = 0
+} = {}) {
+    if (!bounds) return null;
+    const safePaddingPx = Number.isFinite(paddingPx) ? Math.max(0, Number(paddingPx)) : 0;
+    const width = Math.max(0, Number(bounds.width) || 0);
+    const height = Math.max(0, Number(bounds.height) || 0);
+    const extraWidth = Math.max(0, Number.isFinite(minWidthPx) ? Number(minWidthPx) - width : 0);
+    const extraHeight = Math.max(0, Number.isFinite(minHeightPx) ? Number(minHeightPx) - height : 0);
+    return {
+        x: (Number(bounds.x) || 0) - safePaddingPx - (extraWidth * 0.5),
+        y: (Number(bounds.y) || 0) - safePaddingPx - (extraHeight * 0.5),
+        width: width + (safePaddingPx * 2) + extraWidth,
+        height: height + (safePaddingPx * 2) + extraHeight
+    };
+}
+
 function resolveMatrixRowHit(node = null, entry = null, x = 0, y = 0, detailScale = 1) {
     if (!node || node.kind !== VIEW2D_NODE_KINDS.MATRIX) return null;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
@@ -887,6 +920,94 @@ function resolveMatrixRowHit(node = null, entry = null, x = 0, y = 0, detailScal
         rowItem: rowItems[approxRowIndex],
         bounds: approxBounds
     };
+}
+
+function resolveApproximateOverviewResidualRowHitAtScreenPoint(drawableNodes = [], renderState = null, x = 0, y = 0) {
+    const worldScale = Number(renderState?.worldScale);
+    if (!(worldScale > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    let bestCandidate = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    drawableNodes.forEach(({ node, entry }) => {
+        if (!isOverviewResidualVectorStripNode(node) || !entry?.contentBounds || !entry?.layoutData) {
+            return;
+        }
+        const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
+        if (!rowItems.length) return;
+
+        const screenEntryBounds = projectWorldBoundsToScreen(entry.bounds || entry.contentBounds, renderState);
+        const screenContentBounds = projectWorldBoundsToScreen(entry.contentBounds || entry.bounds, renderState);
+        if (!screenEntryBounds || !screenContentBounds) return;
+
+        const expandedEntryBounds = expandScreenBounds(screenEntryBounds, {
+            minWidthPx: OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_WIDTH_PX,
+            minHeightPx: OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_HEIGHT_PX,
+            paddingPx: OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX
+        });
+        if (!containsPoint(expandedEntryBounds, x, y)) return;
+
+        const layoutData = entry.layoutData;
+        const innerPaddingXWorld = Math.max(0, Number(layoutData.innerPaddingX) || 0);
+        const innerPaddingYWorld = Math.max(0, Number(layoutData.innerPaddingY) || 0);
+        const compactWidthWorld = Math.max(
+            1,
+            Math.min(
+                Number(layoutData.compactWidth) || 0,
+                Math.max(1, (Number(entry.contentBounds?.width) || 0) - (innerPaddingXWorld * 2))
+            )
+        );
+        const rowAreaBounds = expandScreenBounds({
+            x: screenContentBounds.x + (innerPaddingXWorld * worldScale),
+            y: screenContentBounds.y + (innerPaddingYWorld * worldScale),
+            width: compactWidthWorld * worldScale,
+            height: Math.max(
+                1,
+                (screenContentBounds.height - (innerPaddingYWorld * worldScale * 2))
+            )
+        }, {
+            minWidthPx: OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_WIDTH_PX,
+            minHeightPx: OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_HEIGHT_PX,
+            paddingPx: OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX
+        });
+        if (!containsPoint(rowAreaBounds, x, y)) return;
+
+        const rowHeightPx = Math.max(0.0001, (Number(layoutData.rowHeight) || 0) * worldScale);
+        const rowGapPx = Math.max(0, (Number(layoutData.rowGap) || 0) * worldScale);
+        const stridePx = Math.max(0.0001, rowHeightPx + rowGapPx);
+        const rowCenterBaseY = screenContentBounds.y + (innerPaddingYWorld * worldScale) + (rowHeightPx * 0.5);
+        const rowCenterX = screenContentBounds.x + (innerPaddingXWorld * worldScale) + ((compactWidthWorld * worldScale) * 0.5);
+
+        let bestRowIndex = 0;
+        let bestRowDistance = Number.POSITIVE_INFINITY;
+        rowItems.forEach((_rowItem, rowIndex) => {
+            const rowCenterY = rowCenterBaseY + (rowIndex * stridePx);
+            const rowDistance = Math.abs(y - rowCenterY);
+            if (rowDistance < bestRowDistance) {
+                bestRowDistance = rowDistance;
+                bestRowIndex = rowIndex;
+            }
+        });
+
+        const score = bestRowDistance + (Math.abs(x - rowCenterX) * 0.05);
+        if (score >= bestScore) return;
+        const bounds = resolveRowHitBounds(node, entry, bestRowIndex);
+        if (!bounds) return;
+
+        bestScore = score;
+        bestCandidate = {
+            entry,
+            node,
+            rowHit: {
+                rowIndex: bestRowIndex,
+                rowItem: rowItems[bestRowIndex],
+                bounds
+            },
+            cellHit: null,
+            columnHit: null
+        };
+    });
+
+    return bestCandidate;
 }
 
 function resolveMatrixCellHit(node = null, entry = null, x = 0, y = 0) {
@@ -3529,7 +3650,29 @@ export class CanvasSceneRenderer {
         if (!(worldScale > 0)) return null;
         const sceneX = (x - (Number(renderState?.offsetX) || 0)) / worldScale;
         const sceneY = (y - (Number(renderState?.offsetY) || 0)) / worldScale;
-        return this.resolveInteractiveHitAtPoint(sceneX, sceneY);
+        const directHit = this.resolveInteractiveHitAtPoint(sceneX, sceneY);
+        if (directHit?.rowHit || directHit?.cellHit || directHit?.columnHit) {
+            return directHit;
+        }
+        if (directHit && !isOverviewResidualVectorStripNode(directHit.node)) {
+            return directHit;
+        }
+        const fallbackRowHit = resolveApproximateOverviewResidualRowHitAtScreenPoint(
+            this.visibleDrawableNodes?.length ? this.visibleDrawableNodes : this.drawableNodes,
+            renderState,
+            x,
+            y
+        );
+        if (!fallbackRowHit) {
+            return directHit;
+        }
+        if (directHit && fallbackRowHit?.node?.id === directHit?.node?.id) {
+            return {
+                ...directHit,
+                rowHit: fallbackRowHit.rowHit || directHit.rowHit || null
+            };
+        }
+        return fallbackRowHit;
     }
 
     drawOverviewScene({
