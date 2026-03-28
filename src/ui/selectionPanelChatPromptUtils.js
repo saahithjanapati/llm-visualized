@@ -1,4 +1,4 @@
-import visualizationDescriptionMarkdown from '../../vizualization_description.md?raw';
+import visualizationDescriptionMarkdown from '../content/visualization-description.md?raw';
 import {
     ATTENTION_SCORE_DECIMALS,
     ATTENTION_VALUE_PLACEHOLDER

@@ -1,4 +1,4 @@
-import precomputedComponentsSliceUrl from '../../../precomputed_components_slice.glb?url';
+import precomputedComponentsSliceUrl from '../../assets/runtime/precomputed/precomputed_components_slice.glb?url';
 import { LOCAL_CAPTURE_ASSET_VERSION_BY_FILE } from './captureAssetManifest.generated.js';
 
 export const DEFAULT_CAPTURE_FILE = 'capture.json';

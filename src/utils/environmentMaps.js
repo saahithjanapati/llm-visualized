@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 
-import roglandClearNightUrl from '../../rogland_clear_night_64.exr?url';
-import autumnFieldUrl from '../../autumn_field_puresky_64.exr?url';
-import qwantaniMoonNoonUrl from '../../qwantani_moon_noon_puresky_64.exr?url';
+import roglandClearNightUrl from '../assets/runtime/environments/rogland_clear_night_64.exr?url';
+import autumnFieldUrl from '../assets/runtime/environments/autumn_field_puresky_64.exr?url';
+import qwantaniMoonNoonUrl from '../assets/runtime/environments/qwantani_moon_noon_puresky_64.exr?url';
 
 export const DEFAULT_ENVIRONMENT_KEY = 'rogland-clear-night';
 

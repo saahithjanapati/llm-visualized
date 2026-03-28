@@ -1,5 +1,8 @@
 .vercel
 .DS_Store
+.cursor/
+.vscode/
 node_modules
 dist/
+test-results/
 src/assets/captures/

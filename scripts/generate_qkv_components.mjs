@@ -1,7 +1,12 @@
 import fs from 'fs';
 import * as THREE from 'three';
 import { Buffer } from 'buffer';
+import { dirname, resolve } from 'node:path';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { fileURLToPath } from 'node:url';
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const qkvOutputPath = resolve(scriptDir, '../src/assets/runtime/precomputed/precomputed_components_qkv.glb');
 
 // ---------------------------------------------------------------------------
 // Minimal FileReader polyfill so GLTFExporter works in Node.js.
@@ -123,8 +128,9 @@ exporter.parse(
         } else {
             buffer = Buffer.from(JSON.stringify(result), 'utf8');
         }
-        fs.writeFileSync('precomputed_components_qkv.glb', buffer);
-        console.log('✔  precomputed_components_qkv.glb generated');
+        fs.mkdirSync(dirname(qkvOutputPath), { recursive: true });
+        fs.writeFileSync(qkvOutputPath, buffer);
+        console.log(`✔  ${qkvOutputPath} generated`);
     },
     (error) => {
         console.error('GLTF export failed:', error);

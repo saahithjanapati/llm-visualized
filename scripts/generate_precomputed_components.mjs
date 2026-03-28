@@ -1,7 +1,12 @@
 import fs from 'fs';
 import * as THREE from 'three';
 import { Buffer } from 'buffer';
+import { dirname, resolve } from 'node:path';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { fileURLToPath } from 'node:url';
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const legacyPrecomputedOutputPath = resolve(scriptDir, '../src/assets/runtime/precomputed/precomputed_components.glb');
 
 // ---------------------------------------------------------------------------
 // Minimal FileReader polyfill so GLTFExporter works in Node.js.
@@ -159,8 +164,9 @@ exporter.parse(
             // Fallback – stringify JSON (should not happen when binary: true)
             buffer = Buffer.from(JSON.stringify(result), 'utf8');
         }
-        fs.writeFileSync('precomputed_components.glb', buffer);
-        console.log('✔  precomputed_components.glb generated');
+        fs.mkdirSync(dirname(legacyPrecomputedOutputPath), { recursive: true });
+        fs.writeFileSync(legacyPrecomputedOutputPath, buffer);
+        console.log(`✔  ${legacyPrecomputedOutputPath} generated`);
     },
     (error) => {
         console.error('GLTF export failed:', error);

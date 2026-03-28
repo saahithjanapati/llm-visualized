@@ -1,7 +1,12 @@
 import fs from 'fs';
 import * as THREE from 'three';
 import { Buffer } from 'buffer';
+import { dirname, resolve } from 'node:path';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { fileURLToPath } from 'node:url';
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const singleLaneOutputPath = resolve(scriptDir, '../src/assets/runtime/precomputed/precomputed_components_slice.glb');
 
 // ---------------------------------------------------------------------------
 // Minimal FileReader polyfill so GLTFExporter works in Node.js.
@@ -263,8 +268,9 @@ exporter.parse(
         // This GLB contains one precomputed slice of each heavy component. Demo
         // pages that support dynamic lane counts load it and instance the slice
         // across lanes at runtime.
-        fs.writeFileSync('precomputed_components_slice.glb', buffer);
-        console.log('✔  precomputed_components_slice.glb generated');
+        fs.mkdirSync(dirname(singleLaneOutputPath), { recursive: true });
+        fs.writeFileSync(singleLaneOutputPath, buffer);
+        console.log(`✔  ${singleLaneOutputPath} generated`);
     },
     (error) => {
         console.error('GLTF export failed:', error);
