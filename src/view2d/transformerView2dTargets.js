@@ -1051,6 +1051,28 @@ export function buildSemanticNodeHoverPayload(hit = null) {
     }
 
     if (
+        semantic.componentKind === 'residual'
+        && role === 'module-card'
+    ) {
+        const activationStage = resolveResidualHoverActivationStage(semantic);
+        if (!activationStage) {
+            return null;
+        }
+        const label = isPostLayerNormResidualStage(activationStage)
+            ? resolvePostLayerNormResidualLabel({ stage: activationStage })
+            : 'Residual Stream Vector';
+        return {
+            label,
+            info: buildSemanticHoverInfo({
+                label,
+                layerIndex: semantic.layerIndex,
+                activationStage,
+                suppressTokenChip: true
+            })
+        };
+    }
+
+    if (
         semantic.componentKind === 'output-projection'
         && (
             role === 'projection-weight'
@@ -1111,6 +1133,15 @@ function resolveOverviewComponentHoverMatchTarget(hit = null) {
             componentKind: 'layer-norm',
             ...(Number.isFinite(semantic.layerIndex) ? { layerIndex: semantic.layerIndex } : {}),
             stage: semantic.stage
+        });
+    }
+
+    if (isResidualOverviewStreamNode(entry)) {
+        return canonicalizeResidualOverviewSemanticTarget({
+            componentKind: 'residual',
+            ...(Number.isFinite(semantic.layerIndex) ? { layerIndex: semantic.layerIndex } : {}),
+            stage: semantic.stage,
+            role: semantic.role || entry.role || ''
         });
     }
 

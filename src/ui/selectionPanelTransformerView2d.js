@@ -132,6 +132,9 @@ const VIEW2D_DETAIL_VIEWPORT_PADDING = 28;
 const VIEW2D_MIN_EFFECTIVE_VIEWPORT_WIDTH_PX = 160;
 const VIEW2D_DETAIL_VIEWPORT_MIN_SCALE = TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT;
 const VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE = 0.06;
+const VIEW2D_SELECTION_VIEWPORT_MIN_SCALE_FIT_RATIO = 0.6;
+const VIEW2D_SELECTION_VIEWPORT_MIN_SCALE_FALLBACK = 0.06;
+const VIEW2D_SCENE_DETAIL_VIEWPORT_MIN_SCALE_FIT_RATIO = 0.84;
 const VIEW2D_DETAIL_VIEWPORT_MAX_SCALE = 10;
 const VIEW2D_HEAD_DETAIL_VIEWPORT_PADDING = Object.freeze({
     top: 44,
@@ -624,6 +627,7 @@ export function createTransformerView2dDetailView(panelEl, {
         detailSemanticTargets: [],
         detailFocusLabel: '',
         pendingDetailInteractionTargets: [],
+        selectionFocusScale: null,
         headDetailFocusScale: null,
         headDetailSceneFitScale: null,
         headDetailDepthActive: false,
@@ -1044,7 +1048,7 @@ export function createTransformerView2dDetailView(panelEl, {
         return true;
     }
 
-    function syncViewportControllerConstraints(viewportWidth = 0, viewportInsets = null) {
+    function syncViewportControllerConstraints(viewportWidth = 0, viewportHeight = 0, viewportInsets = null) {
         const horizontalInset = Math.max(
             0,
             Math.floor(
@@ -1060,8 +1064,21 @@ export function createTransformerView2dDetailView(panelEl, {
             isSmallScreen: state.isSmallScreen,
             viewportWidth: effectiveViewportWidth
         });
-        viewportController.minScale = nextOverviewMinScale;
-        viewportController.maxScale = Math.max(nextOverviewMinScale, VIEW2D_DETAIL_VIEWPORT_MAX_SCALE);
+        const nextSelectionMinScale = resolveSelectionViewportMinScale({
+            width: viewportWidth,
+            height: viewportHeight,
+            viewportInsets,
+            overviewMinScale: nextOverviewMinScale
+        });
+        viewportController.minScale = nextSelectionMinScale;
+        viewportController.maxScale = Math.max(nextSelectionMinScale, VIEW2D_DETAIL_VIEWPORT_MAX_SCALE);
+        const nextSceneDetailMinScale = resolveSceneDetailViewportMinScale({
+            width: viewportWidth,
+            height: viewportHeight,
+            viewportInsets
+        });
+        detailViewportController.minScale = nextSceneDetailMinScale;
+        detailViewportController.maxScale = Math.max(nextSceneDetailMinScale, VIEW2D_DETAIL_VIEWPORT_MAX_SCALE);
         return nextOverviewMinScale;
     }
 
@@ -1306,6 +1323,7 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     function resetHeadDetailState(nextDepthActive = false) {
+        state.selectionFocusScale = null;
         state.headDetailFocusScale = null;
         state.headDetailSceneFitScale = null;
         state.headDetailDepthActive = !!nextDepthActive;
@@ -1472,6 +1490,63 @@ export function createTransformerView2dDetailView(panelEl, {
         };
     }
 
+    function resolveViewportScaleFloorFromFit({
+        bounds = null,
+        width = 0,
+        height = 0,
+        viewportInsets = null,
+        padding = 24,
+        baseMinScale = VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+        fitScaleRatio = 1
+    } = {}) {
+        const safeBaseMinScale = Number.isFinite(baseMinScale)
+            ? Math.max(0.0001, Number(baseMinScale))
+            : VIEW2D_DETAIL_VIEWPORT_MIN_SCALE;
+        if (!bounds) return safeBaseMinScale;
+        const fitTransform = resolveViewportFitTransform(bounds, { width, height }, {
+            padding,
+            minScale: safeBaseMinScale,
+            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+            viewportInsets
+        });
+        const fitScale = Number(fitTransform?.scale) || 0;
+        if (!(fitScale > 0)) return safeBaseMinScale;
+        const safeFitScaleRatio = Number.isFinite(fitScaleRatio)
+            ? Math.max(0, Math.min(1, Number(fitScaleRatio)))
+            : 1;
+        return Math.max(safeBaseMinScale, fitScale * safeFitScaleRatio);
+    }
+
+    function resolveSelectionViewportMinScale({
+        overviewMinScale = VIEW2D_DETAIL_VIEWPORT_MIN_SCALE
+    } = {}) {
+        if (isTransformerView2dGraphOverview()) {
+            return overviewMinScale;
+        }
+        const trackedSelectionFocusScale = Number(state.selectionFocusScale) || 0;
+        const baseMinScale = Math.max(overviewMinScale, VIEW2D_SELECTION_VIEWPORT_MIN_SCALE_FALLBACK);
+        if (!(trackedSelectionFocusScale > 0)) {
+            return overviewMinScale;
+        }
+        return Math.max(baseMinScale, trackedSelectionFocusScale * VIEW2D_SELECTION_VIEWPORT_MIN_SCALE_FIT_RATIO);
+    }
+
+    function resolveSceneDetailViewportMinScale({
+        width = 0,
+        height = 0,
+        viewportInsets = null
+    } = {}) {
+        return resolveViewportScaleFloorFromFit({
+            bounds: resolveHeadDetailSceneBounds(),
+            width,
+            height,
+            viewportInsets,
+            padding: VIEW2D_HEAD_DETAIL_VIEWPORT_PADDING,
+            baseMinScale: VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE,
+            fitScaleRatio: VIEW2D_SCENE_DETAIL_VIEWPORT_MIN_SCALE_FIT_RATIO
+        });
+    }
+
     function containsPoint(bounds = null, x = 0, y = 0) {
         if (!bounds) return false;
         const minX = Number.isFinite(bounds.x) ? bounds.x : 0;
@@ -1525,13 +1600,13 @@ export function createTransformerView2dDetailView(panelEl, {
     } = {}) {
         const bounds = resolveFocusBoundsForSemanticTarget(semanticTarget);
         if (!bounds) return false;
-        const { width, viewportInsets } = syncViewportControllers();
-        syncViewportControllerConstraints(width, viewportInsets);
+        const { width, height, viewportInsets } = syncViewportControllers();
+        syncViewportControllerConstraints(width, height, viewportInsets);
         viewportController.setSceneBounds(state.layout?.sceneBounds || null);
         viewportController.fitToBounds(bounds, {
             padding,
-            minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
-            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+            minScale: viewportController.minScale,
+            maxScale: viewportController.maxScale,
             source: 'detail-transformer-view2d-overview-return-seed'
         });
         return true;
@@ -1550,8 +1625,8 @@ export function createTransformerView2dDetailView(panelEl, {
         const viewportPadding = VIEW2D_HEAD_DETAIL_VIEWPORT_PADDING;
         const fitTransform = resolveViewportFitTransform(bounds, { width, height }, {
             padding: viewportPadding,
-            minScale: VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE,
-            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+            minScale: detailViewportController.minScale,
+            maxScale: detailViewportController.maxScale,
             viewportInsets
         });
         state.headDetailSceneFitScale = Number.isFinite(fitTransform?.scale) ? fitTransform.scale : null;
@@ -2388,6 +2463,32 @@ export function createTransformerView2dDetailView(panelEl, {
         return hadPinnedFocus;
     }
 
+    function updateOverviewHoverFocusState(focusState = null, signature = '') {
+        const previousOverviewFocusSignature = state.overviewSceneHoverSignature || '';
+        const previousOverviewFocusState = state.overviewSceneFocus || null;
+        state.overviewSceneFocus = focusState || null;
+        state.overviewSceneHoverSignature = typeof signature === 'string' ? signature : '';
+        if (
+            previousOverviewFocusState
+            && previousOverviewFocusSignature
+            && previousOverviewFocusSignature !== state.overviewSceneHoverSignature
+        ) {
+            state.hoverDimming.previousOverviewFocus = previousOverviewFocusState;
+            state.hoverDimming.overviewBlend = 0;
+            state.hoverDimming.overviewBlendTarget = 1;
+        } else if (!state.overviewSceneFocus) {
+            resetHoverOverviewBlend();
+        } else {
+            state.hoverDimming.previousOverviewFocus = null;
+            state.hoverDimming.overviewBlend = 1;
+            state.hoverDimming.overviewBlendTarget = 1;
+        }
+        return {
+            previousSignature: previousOverviewFocusSignature,
+            previousFocusState: previousOverviewFocusState
+        };
+    }
+
     function clearPinnedSceneSelectionLocks({ scheduleRender: shouldScheduleRender = true } = {}) {
         const didClearDetailSelectionLock = clearPinnedDetailSceneFocus({ scheduleRender: false });
         const didClearOverviewSelectionLock = clearPinnedOverviewSceneFocus({ scheduleRender: false });
@@ -2698,15 +2799,53 @@ export function createTransformerView2dDetailView(panelEl, {
                 nodeId: worldHit.node.id,
                 rowIndex: Math.max(0, Math.floor(worldHit.rowHit.rowIndex))
             };
-            const prevHoveredRow = state.hoveredResidualRow;
+            const residualHoverFocusState = buildResidualRowSelectionFocusState(state.scene, worldHit);
+            const nextOverviewFocusState = residualHoverFocusState?.focusState || null;
+            const nextOverviewFocusSignature = residualHoverFocusState?.signature || '';
+            const previousHoveredRow = state.hoveredResidualRow;
+            const hadResidualHover = !!previousHoveredRow;
             const hadOverviewFocus = !!state.overviewSceneFocus;
-            const didChange = !prevHoveredRow
-                || prevHoveredRow.nodeId !== nextHoveredRow.nodeId
-                || prevHoveredRow.rowIndex !== nextHoveredRow.rowIndex;
-            if (didChange && prevHoveredRow) {
+
+            if (nextOverviewFocusState) {
+                state.hoveredResidualRow = null;
+                state.detailSceneFocus = state.detailScenePinnedFocus || null;
+                state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
+                const { previousSignature } = updateOverviewHoverFocusState(
+                    nextOverviewFocusState,
+                    nextOverviewFocusSignature
+                );
+                resetHoverRowBlend();
+                state.hoverTargetKey = residualHoverKey;
+                tokenHoverSync.setCanvasEntryFromResidualHoverPayload(residualHoverPayload, { emit: true });
+                setHoverDimmingTarget(1, {
+                    immediate: !state.visible,
+                    shouldRender: false
+                });
+                hoverLabelOverlay.show({
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    label: hoverLabel,
+                    info: residualHoverPayload.info,
+                    activationSource: state.activationSource
+                });
+                if (
+                    hadResidualHover
+                    || hadOverviewFocus
+                    || previousSignature !== nextOverviewFocusSignature
+                    || Math.abs((state.hoverDimming?.value || 0) - 1) > 0.001
+                ) {
+                    scheduleRender();
+                }
+                return worldHit?.entry || null;
+            }
+
+            const didChange = !previousHoveredRow
+                || previousHoveredRow.nodeId !== nextHoveredRow.nodeId
+                || previousHoveredRow.rowIndex !== nextHoveredRow.rowIndex;
+            if (didChange && previousHoveredRow) {
                 state.hoverDimming.previousHoveredRow = {
-                    nodeId: prevHoveredRow.nodeId,
-                    rowIndex: prevHoveredRow.rowIndex
+                    nodeId: previousHoveredRow.nodeId,
+                    rowIndex: previousHoveredRow.rowIndex
                 };
                 state.hoverDimming.rowBlend = 0;
                 state.hoverDimming.rowBlendTarget = 1;
@@ -2714,9 +2853,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 resetHoverRowBlend();
             }
             state.hoveredResidualRow = nextHoveredRow;
-            state.overviewSceneFocus = null;
-            state.overviewSceneHoverSignature = '';
-            resetHoverOverviewBlend();
+            updateOverviewHoverFocusState(null, '');
             state.hoverTargetKey = residualHoverKey;
             tokenHoverSync.setCanvasEntryFromResidualHoverPayload(residualHoverPayload, { emit: true });
             setHoverDimmingTarget(1, {
@@ -2762,29 +2899,14 @@ export function createTransformerView2dDetailView(panelEl, {
         }
 
         const hadResidualHover = !!state.hoveredResidualRow;
-        const previousOverviewFocusSignature = state.overviewSceneHoverSignature || '';
         const semanticHoverFocusState = buildSemanticNodeHoverFocusState(state.scene, worldHit);
-        const previousOverviewFocusState = state.overviewSceneFocus || null;
         state.hoveredResidualRow = null;
         state.detailSceneFocus = state.detailScenePinnedFocus || null;
         state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
-        state.overviewSceneFocus = semanticHoverFocusState?.focusState || null;
-        state.overviewSceneHoverSignature = semanticHoverFocusState?.signature || '';
-        if (
-            previousOverviewFocusState
-            && previousOverviewFocusSignature
-            && previousOverviewFocusSignature !== state.overviewSceneHoverSignature
-        ) {
-            state.hoverDimming.previousOverviewFocus = previousOverviewFocusState;
-            state.hoverDimming.overviewBlend = 0;
-            state.hoverDimming.overviewBlendTarget = 1;
-        } else if (!state.overviewSceneFocus) {
-            resetHoverOverviewBlend();
-        } else {
-            state.hoverDimming.previousOverviewFocus = null;
-            state.hoverDimming.overviewBlend = 1;
-            state.hoverDimming.overviewBlendTarget = 1;
-        }
+        const { previousSignature: previousOverviewFocusSignature } = updateOverviewHoverFocusState(
+            semanticHoverFocusState?.focusState || null,
+            semanticHoverFocusState?.signature || ''
+        );
         tokenHoverSync.setCanvasEntryFromHoverPayload(semanticHoverPayload, { emit: true });
         resetHoverRowBlend();
         setHoverDimmingTarget(1, {
@@ -2924,8 +3046,8 @@ export function createTransformerView2dDetailView(panelEl, {
                 controllerState: detailViewportController.getState(),
                 fitBounds: resolveHeadDetailSceneBounds(),
                 padding: VIEW2D_HEAD_DETAIL_VIEWPORT_PADDING,
-                minScale: VIEW2D_HEAD_DETAIL_VIEWPORT_MIN_SCALE,
-                maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+                minScale: detailViewportController.minScale,
+                maxScale: detailViewportController.maxScale
             };
         }
 
@@ -2933,8 +3055,8 @@ export function createTransformerView2dDetailView(panelEl, {
             controllerState: viewportController.getState(),
             fitBounds: state.layout?.sceneBounds || null,
             padding: VIEW2D_DETAIL_VIEWPORT_PADDING,
-            minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
-            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE
+            minScale: viewportController.minScale,
+            maxScale: viewportController.maxScale
         };
     }
 
@@ -2976,12 +3098,12 @@ export function createTransformerView2dDetailView(panelEl, {
             stopAnimation();
         }
         measureCanvasSize();
-        const { width, viewportInsets } = syncViewportControllers({
+        const { width, height, viewportInsets } = syncViewportControllers({
             preserveVisibleCenter: !wasAtFitScene,
             animate: animate && !wasAtFitScene,
             durationMs: VIEW2D_SELECTION_SIDEBAR_VIEWPORT_TRANSITION_MS
         });
-        syncViewportControllerConstraints(width, viewportInsets);
+        syncViewportControllerConstraints(width, height, viewportInsets);
         updateReadouts();
         if (wasAtFitScene) {
             return fitScene({
@@ -3113,6 +3235,9 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function applySemanticTarget(semanticTarget = null, focusLabel = '') {
         state.semanticTarget = buildSemanticTarget(semanticTarget);
+        if (!state.semanticTarget) {
+            state.selectionFocusScale = null;
+        }
         state.focusLabel = String(focusLabel || '').trim() || describeTransformerView2dTarget(state.semanticTarget);
         renderTokenStrip();
         if (state.visible) {
@@ -3381,7 +3506,7 @@ export function createTransformerView2dDetailView(panelEl, {
     function render() {
         if (!state.visible || !state.scene || !state.layout) return false;
         const { width, height, viewportInsets } = syncViewportControllers();
-        syncViewportControllerConstraints(width, viewportInsets);
+        syncViewportControllerConstraints(width, height, viewportInsets);
         viewportController.setSceneBounds(state.layout.sceneBounds || null);
         const headDetailSceneBounds = resolveHeadDetailSceneBounds();
         detailViewportController.setSceneBounds(headDetailSceneBounds);
@@ -3587,15 +3712,16 @@ export function createTransformerView2dDetailView(panelEl, {
         const resolvedDurationMs = Number.isFinite(durationMs)
             ? Math.max(1, Math.floor(durationMs))
             : (hasActiveDetailTarget() ? 520 : 420);
+        const { width, height, viewportInsets } = syncViewportControllers();
+        const transform = resolveViewportFitTransform(bounds, { width, height }, {
+            padding,
+            minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
+            maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
+            viewportInsets
+        });
+        state.selectionFocusScale = Number.isFinite(transform?.scale) ? transform.scale : null;
         if (hasActiveDetailTarget()) {
-            const { width, height, viewportInsets } = syncViewportControllers();
-            const transform = resolveViewportFitTransform(bounds, { width, height }, {
-                padding,
-                minScale: VIEW2D_DETAIL_VIEWPORT_MIN_SCALE,
-                maxScale: VIEW2D_DETAIL_VIEWPORT_MAX_SCALE,
-                viewportInsets
-            });
-            state.headDetailFocusScale = Number.isFinite(transform?.scale) ? transform.scale : null;
+            state.headDetailFocusScale = state.selectionFocusScale;
             state.headDetailDepthActive = animate !== true;
         }
         if (animate) {
@@ -4474,7 +4600,7 @@ export function createTransformerView2dDetailView(panelEl, {
         const { width, height, viewportInsets } = syncViewportControllers({
             preserveVisibleCenter: true
         });
-        syncViewportControllerConstraints(width, viewportInsets);
+        syncViewportControllerConstraints(width, height, viewportInsets);
         viewportController.setSceneBounds(state.layout.sceneBounds || null);
         const shouldAutoFrame = forceAutoFrame
             ? !!state.autoFrameOnResize

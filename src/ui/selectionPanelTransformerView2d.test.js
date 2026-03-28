@@ -15,6 +15,9 @@ import { buildTransformerSceneModel } from '../view2d/model/buildTransformerScen
 import { resolveViewportFitTransform } from '../view2d/runtime/View2dViewportController.js';
 import { flattenSceneNodes, VIEW2D_NODE_KINDS } from '../view2d/schema/sceneTypes.js';
 
+const DETAIL_VIEW_ZOOM_OUT_FLOOR_RATIO = 0.6;
+const SCENE_DETAIL_ZOOM_OUT_FLOOR_RATIO = 0.84;
+
 function createRect(width = 960, height = 600) {
     return {
         width,
@@ -1629,6 +1632,95 @@ describe('createTransformerView2dDetailView', () => {
         expect(view.getViewportState().scale).toBeCloseTo(openedScale, 6);
     });
 
+    it('caps zooming out in focused detail views above the overview floor', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'module'
+            },
+            focusLabel: 'Token embeddings',
+            transitionMode: 'direct'
+        });
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(false);
+
+        const openedScale = view.getViewportState().scale;
+        for (let index = 0; index < 18; index += 1) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: 480,
+                clientY: 300,
+                deltaY: 480
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        const cappedScale = view.getViewportState().scale;
+        expect(cappedScale).toBeLessThan(openedScale);
+        expect(cappedScale).toBeGreaterThanOrEqual(openedScale * DETAIL_VIEW_ZOOM_OUT_FLOOR_RATIO);
+        expect(cappedScale).toBeGreaterThan(TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT);
+    });
+
+    it('caps zooming out in scene-backed deep detail views near the fitted scene scale', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C'],
+            semanticTarget: {
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp',
+                role: 'module'
+            },
+            focusLabel: 'Layer 2 Multilayer Perceptron',
+            detailSemanticTargets: [{
+                componentKind: 'mlp',
+                layerIndex: 1,
+                stage: 'mlp-up',
+                role: 'mlp-up-weight'
+            }],
+            detailFocusLabel: 'MLP Up Weight Matrix',
+            transitionMode: 'direct'
+        });
+
+        expect(canvas.classList.contains('is-head-detail-scene-active')).toBe(true);
+
+        const openedScale = view.getViewportState().scale;
+        for (let index = 0; index < 18; index += 1) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: 480,
+                clientY: 300,
+                deltaY: 480
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        const cappedScale = view.getViewportState().scale;
+        expect(cappedScale).toBeLessThan(openedScale);
+        expect(cappedScale).toBeGreaterThanOrEqual(openedScale * SCENE_DETAIL_ZOOM_OUT_FLOOR_RATIO);
+    });
+
     it('opens already-zoomed-in canvas MLP clicks directly into detail', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
@@ -2239,6 +2331,72 @@ describe('createTransformerView2dDetailView', () => {
                 })
             })
         );
+    });
+
+    it('dims the overview to the hovered residual stream row and shows its hover label', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+        const renderSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'render');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const residualNode = flattenSceneNodes(scene).find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+            && node?.semantic?.layerIndex === 0
+        ));
+        const residualEntry = residualNode ? layout.registry.getNodeEntry(residualNode.id) : null;
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        await vi.advanceTimersByTimeAsync(32);
+
+        const hoverPoint = resolveCompactRowScreenPoint(
+            residualEntry,
+            1,
+            view.getViewportState()
+        );
+        expect(hoverPoint).toBeTruthy();
+
+        canvas.dispatchEvent(createPointerEvent('pointermove', hoverPoint));
+        await vi.advanceTimersByTimeAsync(32);
+
+        const overviewFocusState = renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.currentFocus;
+        expect(overviewFocusState?.rowSelections).toContainEqual({
+            nodeId: residualNode?.id,
+            rowIndex: 1
+        });
+        expect(Array.isArray(overviewFocusState?.activeNodeIds)).toBe(true);
+        expect(overviewFocusState?.activeNodeIds.length).toBeGreaterThan(1);
+        expect(renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.dimStrength).toBeGreaterThan(0.15);
+
+        const hoverLabel = document.body.querySelector('.scene-hover-label');
+        const hoverLabelText = hoverLabel?.querySelector('.scene-hover-label__text');
+        const hoverLabelTokenChip = hoverLabel?.querySelector('.scene-hover-label__token-chip');
+        expect(hoverLabel?.style.display).toBe('block');
+        expect(hoverLabelText?.textContent).toBe('Residual Stream Vector');
+        expect(hoverLabelTokenChip?.textContent || '').toContain('B');
     });
 
     it('prefers the more specific screen-space residual row hit when the world-space hit falls back to a broad semantic card', async () => {

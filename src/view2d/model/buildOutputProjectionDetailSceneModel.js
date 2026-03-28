@@ -1178,6 +1178,7 @@ export function buildOutputProjectionDetailSceneModel({
             metadata: {
                 targetAnchorMode: 'caption-bottom',
                 preserveColor: true,
+                preserveFocusOpacity: true,
                 strokeWidthScale: 0.72
             }
         });

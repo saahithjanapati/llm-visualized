@@ -251,6 +251,10 @@ const MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX_INCOMING = 42;
 const MATRIX_ORNAMENT_ARROW_STROKE_SCREEN_PX = 0.88;
 const MATRIX_ORNAMENT_ARROW_HEAD_LENGTH_SCREEN_PX = 6;
 const MATRIX_ORNAMENT_ARROW_HEAD_WING_SCREEN_PX = 3.2;
+const OVERVIEW_RENDER_CACHE_MIN_OVERSCAN_PX = 160;
+const OVERVIEW_RENDER_CACHE_MAX_OVERSCAN_PX = 240;
+const OVERVIEW_RENDER_CACHE_OVERSCAN_VIEWPORT_RATIO = 0.35;
+const OVERVIEW_RENDER_CACHE_COVERAGE_EPSILON_PX = 0.5;
 
 function parseLinearGradient(input = '') {
     const key = String(input || '');
@@ -1388,6 +1392,76 @@ function resolveVisibleWorldBounds(resolution, {
         width: (resolution.width / safeScale) + (overscan * 2),
         height: (resolution.height / safeScale) + (overscan * 2)
     };
+}
+
+function resolveOverviewRenderCacheOverscanPx(resolution = null) {
+    const width = Math.max(1, Number(resolution?.width) || 0);
+    const height = Math.max(1, Number(resolution?.height) || 0);
+    return Math.max(
+        OVERVIEW_RENDER_CACHE_MIN_OVERSCAN_PX,
+        Math.min(
+            OVERVIEW_RENDER_CACHE_MAX_OVERSCAN_PX,
+            Math.round(Math.min(width, height) * OVERVIEW_RENDER_CACHE_OVERSCAN_VIEWPORT_RATIO)
+        )
+    );
+}
+
+function resolveOverviewRenderCacheLogicalWidth(cache = null) {
+    if (Number.isFinite(cache?.logicalWidth) && cache.logicalWidth > 0) {
+        return Number(cache.logicalWidth);
+    }
+    const dpr = Number.isFinite(cache?.dpr) && cache.dpr > 0 ? Number(cache.dpr) : 1;
+    return Math.max(1, (Number(cache?.pixelWidth) || 0) / dpr);
+}
+
+function resolveOverviewRenderCacheLogicalHeight(cache = null) {
+    if (Number.isFinite(cache?.logicalHeight) && cache.logicalHeight > 0) {
+        return Number(cache.logicalHeight);
+    }
+    const dpr = Number.isFinite(cache?.dpr) && cache.dpr > 0 ? Number(cache.dpr) : 1;
+    return Math.max(1, (Number(cache?.pixelHeight) || 0) / dpr);
+}
+
+function resolveOverviewRenderCacheViewportPixelWidth(cache = null) {
+    if (Number.isFinite(cache?.viewportPixelWidth) && cache.viewportPixelWidth > 0) {
+        return Math.floor(Number(cache.viewportPixelWidth));
+    }
+    return Math.max(1, Math.floor(Number(cache?.pixelWidth) || 0));
+}
+
+function resolveOverviewRenderCacheViewportPixelHeight(cache = null) {
+    if (Number.isFinite(cache?.viewportPixelHeight) && cache.viewportPixelHeight > 0) {
+        return Math.floor(Number(cache.viewportPixelHeight));
+    }
+    return Math.max(1, Math.floor(Number(cache?.pixelHeight) || 0));
+}
+
+function resolveOverviewRenderCacheViewportOffsetX(cache = null) {
+    if (Number.isFinite(cache?.viewportOffsetX)) {
+        return Number(cache.viewportOffsetX);
+    }
+    return Number.isFinite(cache?.offsetX) ? Number(cache.offsetX) : 0;
+}
+
+function resolveOverviewRenderCacheViewportOffsetY(cache = null) {
+    if (Number.isFinite(cache?.viewportOffsetY)) {
+        return Number(cache.viewportOffsetY);
+    }
+    return Number.isFinite(cache?.offsetY) ? Number(cache.offsetY) : 0;
+}
+
+function resolveOverviewRenderCacheRenderOffsetX(cache = null) {
+    if (Number.isFinite(cache?.renderOffsetX)) {
+        return Number(cache.renderOffsetX);
+    }
+    return Number.isFinite(cache?.offsetX) ? Number(cache.offsetX) : 0;
+}
+
+function resolveOverviewRenderCacheRenderOffsetY(cache = null) {
+    if (Number.isFinite(cache?.renderOffsetY)) {
+        return Number(cache.renderOffsetY);
+    }
+    return Number.isFinite(cache?.offsetY) ? Number(cache.offsetY) : 0;
 }
 
 function drawDebugOverlay(ctx, resolution, debugState = {}) {
@@ -2818,6 +2892,14 @@ function drawConnector(
     ctx.restore();
 }
 
+function resolveConnectorFocusAlpha(node = null, sceneFocusState = null) {
+    if (!sceneFocusState) return 1;
+    if (node?.metadata?.preserveFocusOpacity === true) {
+        return 1;
+    }
+    return resolveSceneElementFocusAlpha(sceneFocusState.activeConnectorIds.has(node?.id), sceneFocusState);
+}
+
 function resolveRenderViewportTransform(sceneBounds, resolution, viewportTransform = null) {
     const fitPaddingPx = Math.max(12, Math.round(Math.min(resolution.width, resolution.height) * 0.04));
     const availableWidth = Math.max(1, resolution.width - (fitPaddingPx * 2));
@@ -3039,9 +3121,18 @@ export class CanvasSceneRenderer {
             dpr: null,
             pixelWidth: 0,
             pixelHeight: 0,
+            viewportPixelWidth: 0,
+            viewportPixelHeight: 0,
+            logicalWidth: 0,
+            logicalHeight: 0,
             worldScale: null,
+            viewportOffsetX: null,
+            viewportOffsetY: null,
+            renderOffsetX: null,
+            renderOffsetY: null,
             offsetX: null,
-            offsetY: null
+            offsetY: null,
+            overscanPx: 0
         };
     }
 
@@ -3093,9 +3184,18 @@ export class CanvasSceneRenderer {
 
     invalidateOverviewRenderCache() {
         this.overviewRenderCache.scene = null;
+        this.overviewRenderCache.viewportPixelWidth = 0;
+        this.overviewRenderCache.viewportPixelHeight = 0;
+        this.overviewRenderCache.logicalWidth = 0;
+        this.overviewRenderCache.logicalHeight = 0;
         this.overviewRenderCache.worldScale = null;
+        this.overviewRenderCache.viewportOffsetX = null;
+        this.overviewRenderCache.viewportOffsetY = null;
+        this.overviewRenderCache.renderOffsetX = null;
+        this.overviewRenderCache.renderOffsetY = null;
         this.overviewRenderCache.offsetX = null;
         this.overviewRenderCache.offsetY = null;
+        this.overviewRenderCache.overscanPx = 0;
     }
 
     ensureOverviewRenderCacheSurface(pixelWidth = 0, pixelHeight = 0) {
@@ -3130,29 +3230,98 @@ export class CanvasSceneRenderer {
 
     updateOverviewRenderCache({
         resolution = null,
+        config = null,
+        sceneBounds = null,
         worldScale = 1,
         offsetX = 0,
-        offsetY = 0
+        offsetY = 0,
+        headDetailTarget = null,
+        headDetailDepthActive = false
     } = {}) {
-        const pixelWidth = Number(resolution?.pixelWidth);
-        const pixelHeight = Number(resolution?.pixelHeight);
+        const viewportWidth = Math.max(1, Number(resolution?.width) || 0);
+        const viewportHeight = Math.max(1, Number(resolution?.height) || 0);
+        const safeDpr = Number.isFinite(resolution?.dpr) && resolution.dpr > 0
+            ? Number(resolution.dpr)
+            : 1;
+        const overscanPx = resolveOverviewRenderCacheOverscanPx(resolution);
+        const logicalWidth = viewportWidth + (overscanPx * 2);
+        const logicalHeight = viewportHeight + (overscanPx * 2);
+        const pixelWidth = logicalWidth * safeDpr;
+        const pixelHeight = logicalHeight * safeDpr;
         const cache = this.ensureOverviewRenderCacheSurface(pixelWidth, pixelHeight);
         if (
             !cache?.surface
             || !cache?.ctx
-            || typeof cache.ctx.drawImage !== 'function'
-            || typeof this.ctx?.canvas === 'undefined'
+            || !sceneBounds
         ) {
             return false;
         }
+        const renderOffsetX = (Number.isFinite(offsetX) ? Number(offsetX) : 0) + overscanPx;
+        const renderOffsetY = (Number.isFinite(offsetY) ? Number(offsetY) : 0) + overscanPx;
+        const cacheResolution = {
+            width: logicalWidth,
+            height: logicalHeight,
+            dpr: safeDpr,
+            pixelWidth: Math.max(1, Math.floor(pixelWidth)),
+            pixelHeight: Math.max(1, Math.floor(pixelHeight))
+        };
+        const visibleWorldBounds = resolveVisibleWorldBounds(cacheResolution, {
+            offsetX: renderOffsetX,
+            offsetY: renderOffsetY,
+            worldScale,
+            sceneBounds
+        });
+        const visibleDrawableNodes = collectVisibleEntries(
+            this.drawableNodes,
+            visibleWorldBounds,
+            []
+        );
+        const visibleConnectors = collectVisibleEntries(
+            this.connectors,
+            visibleWorldBounds,
+            []
+        );
+
         cache.ctx.setTransform(1, 0, 0, 1, 0, 0);
         cache.ctx.clearRect(0, 0, cache.pixelWidth, cache.pixelHeight);
-        cache.ctx.drawImage(this.canvas, 0, 0);
+        cache.ctx.setTransform(safeDpr, 0, 0, safeDpr, 0, 0);
+        cache.ctx.globalAlpha = 1;
+        cache.ctx.globalCompositeOperation = 'source-over';
+        cache.ctx.filter = 'none';
+        cache.ctx.shadowBlur = 0;
+        cache.ctx.shadowColor = 'transparent';
+        this.drawOverviewScene({
+            ctx: cache.ctx,
+            sceneBounds,
+            config,
+            worldScale,
+            detailScale: Math.max(0.0001, Number(worldScale) || 1),
+            offsetX: renderOffsetX,
+            offsetY: renderOffsetY,
+            visibleDrawableNodes,
+            visibleConnectors,
+            interactionFastPath: false,
+            interactionState: null,
+            sceneFocusState: null,
+            fixedTextSizing: resolveMhsaDetailFixedTextSizing(this.scene, viewportWidth),
+            headDetailTarget,
+            headDetailDepthActive,
+            disableInactiveFilter: false
+        });
         cache.scene = this.scene;
-        cache.dpr = Number.isFinite(resolution?.dpr) ? Number(Number(resolution.dpr).toFixed(4)) : null;
+        cache.dpr = Number(safeDpr.toFixed(4));
+        cache.viewportPixelWidth = Math.max(1, Math.floor(Number(resolution?.pixelWidth) || 0));
+        cache.viewportPixelHeight = Math.max(1, Math.floor(Number(resolution?.pixelHeight) || 0));
+        cache.logicalWidth = Number(logicalWidth.toFixed(3));
+        cache.logicalHeight = Number(logicalHeight.toFixed(3));
         cache.worldScale = Number.isFinite(worldScale) ? Number(worldScale.toFixed(6)) : null;
+        cache.viewportOffsetX = Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null;
+        cache.viewportOffsetY = Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null;
+        cache.renderOffsetX = Number(renderOffsetX.toFixed(3));
+        cache.renderOffsetY = Number(renderOffsetY.toFixed(3));
         cache.offsetX = Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null;
         cache.offsetY = Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null;
+        cache.overscanPx = overscanPx;
         return true;
     }
 
@@ -3165,8 +3334,8 @@ export class CanvasSceneRenderer {
             && cache?.ctx
             && cache.scene === this.scene
             && cache.dpr === (Number.isFinite(resolution?.dpr) ? Number(Number(resolution.dpr).toFixed(4)) : null)
-            && cache.pixelWidth === Math.max(1, Math.floor(Number(resolution?.pixelWidth) || 0))
-            && cache.pixelHeight === Math.max(1, Math.floor(Number(resolution?.pixelHeight) || 0))
+            && resolveOverviewRenderCacheViewportPixelWidth(cache) === Math.max(1, Math.floor(Number(resolution?.pixelWidth) || 0))
+            && resolveOverviewRenderCacheViewportPixelHeight(cache) === Math.max(1, Math.floor(Number(resolution?.pixelHeight) || 0))
         );
     }
 
@@ -3182,9 +3351,42 @@ export class CanvasSceneRenderer {
                 resolution
             })
             && cache.worldScale === (Number.isFinite(worldScale) ? Number(worldScale.toFixed(6)) : null)
-            && cache.offsetX === (Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null)
-            && cache.offsetY === (Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null)
+            && resolveOverviewRenderCacheViewportOffsetX(cache) === (Number.isFinite(offsetX) ? Number(offsetX.toFixed(3)) : null)
+            && resolveOverviewRenderCacheViewportOffsetY(cache) === (Number.isFinite(offsetY) ? Number(offsetY.toFixed(3)) : null)
         );
+    }
+
+    canCoverOverviewViewportFromCache({
+        resolution = null,
+        worldScale = 1,
+        offsetX = 0,
+        offsetY = 0
+    } = {}) {
+        if (!this.hasReusableOverviewRenderCache({ resolution })) {
+            return false;
+        }
+        const cache = this.overviewRenderCache;
+        const cachedWorldScale = Number(cache?.worldScale);
+        const safeWorldScale = Number(worldScale);
+        if (!(cachedWorldScale > 0) || !(safeWorldScale > 0)) {
+            return false;
+        }
+
+        const scaleRatio = safeWorldScale / cachedWorldScale;
+        const renderOffsetX = resolveOverviewRenderCacheRenderOffsetX(cache);
+        const renderOffsetY = resolveOverviewRenderCacheRenderOffsetY(cache);
+        const logicalWidth = resolveOverviewRenderCacheLogicalWidth(cache);
+        const logicalHeight = resolveOverviewRenderCacheLogicalHeight(cache);
+        const viewportX = (Number.isFinite(offsetX) ? Number(offsetX) : 0) - (renderOffsetX * scaleRatio);
+        const viewportY = (Number.isFinite(offsetY) ? Number(offsetY) : 0) - (renderOffsetY * scaleRatio);
+        const viewportRight = viewportX + (logicalWidth * scaleRatio);
+        const viewportBottom = viewportY + (logicalHeight * scaleRatio);
+        const requiredWidth = Math.max(1, Number(resolution?.width) || 0);
+        const requiredHeight = Math.max(1, Number(resolution?.height) || 0);
+        return viewportX <= OVERVIEW_RENDER_CACHE_COVERAGE_EPSILON_PX
+            && viewportY <= OVERVIEW_RENDER_CACHE_COVERAGE_EPSILON_PX
+            && viewportRight >= (requiredWidth - OVERVIEW_RENDER_CACHE_COVERAGE_EPSILON_PX)
+            && viewportBottom >= (requiredHeight - OVERVIEW_RENDER_CACHE_COVERAGE_EPSILON_PX);
     }
 
     drawTransformedOverviewRenderCache({
@@ -3197,6 +3399,12 @@ export class CanvasSceneRenderer {
         if (
             !this.hasReusableOverviewRenderCache({
                 resolution
+            })
+            || !this.canCoverOverviewViewportFromCache({
+                resolution,
+                worldScale,
+                offsetX,
+                offsetY
             })
             || !this.ctx
             || typeof this.ctx.drawImage !== 'function'
@@ -3212,20 +3420,27 @@ export class CanvasSceneRenderer {
 
         const scaleRatio = safeWorldScale / cachedWorldScale;
         const safeDpr = Number.isFinite(resolution?.dpr) ? Number(resolution.dpr) : 1;
+        const renderOffsetX = resolveOverviewRenderCacheRenderOffsetX(cache);
+        const renderOffsetY = resolveOverviewRenderCacheRenderOffsetY(cache);
         const translateX = (
             (Number.isFinite(offsetX) ? Number(offsetX) : 0)
-            - ((Number(cache?.offsetX) || 0) * scaleRatio)
+            - (renderOffsetX * scaleRatio)
         ) * safeDpr;
         const translateY = (
             (Number.isFinite(offsetY) ? Number(offsetY) : 0)
-            - ((Number(cache?.offsetY) || 0) * scaleRatio)
+            - (renderOffsetY * scaleRatio)
         ) * safeDpr;
 
         this.ctx.save();
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         if (typeof background === 'string' && background.length) {
             this.ctx.fillStyle = background;
-            this.ctx.fillRect(0, 0, cache.pixelWidth, cache.pixelHeight);
+            this.ctx.fillRect(
+                0,
+                0,
+                Math.max(1, Math.floor(Number(resolution?.pixelWidth) || 0)),
+                Math.max(1, Math.floor(Number(resolution?.pixelHeight) || 0))
+            );
         }
         this.ctx.setTransform(scaleRatio, 0, 0, scaleRatio, translateX, translateY);
         this.ctx.drawImage(cache.surface, 0, 0);
@@ -3315,6 +3530,62 @@ export class CanvasSceneRenderer {
         const sceneX = (x - (Number(renderState?.offsetX) || 0)) / worldScale;
         const sceneY = (y - (Number(renderState?.offsetY) || 0)) / worldScale;
         return this.resolveInteractiveHitAtPoint(sceneX, sceneY);
+    }
+
+    drawOverviewScene({
+        ctx = null,
+        sceneBounds = null,
+        config = null,
+        worldScale = 1,
+        detailScale = 1,
+        offsetX = 0,
+        offsetY = 0,
+        visibleDrawableNodes = [],
+        visibleConnectors = [],
+        interactionFastPath = false,
+        interactionState = null,
+        sceneFocusState = null,
+        fixedTextSizing = null,
+        headDetailTarget = null,
+        headDetailDepthActive = false,
+        disableInactiveFilter = false
+    } = {}) {
+        if (!ctx || !sceneBounds) return false;
+
+        ctx.save();
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(worldScale, worldScale);
+        ctx.fillStyle = config?.tokens?.palette?.sceneBackground || 'rgba(0, 0, 0, 0)';
+        ctx.fillRect(0, 0, sceneBounds.width, sceneBounds.height);
+
+        visibleDrawableNodes.forEach(({ node, entry }) => {
+            const focusAlpha = resolveSceneNodeFocusAlpha(node.id, sceneFocusState);
+            if (node.kind === VIEW2D_NODE_KINDS.MATRIX) {
+                drawMatrixNode(ctx, node, entry, config, worldScale, detailScale, {
+                    skipSurfaceEffects: interactionFastPath,
+                    fastPath: interactionFastPath,
+                    headDetailTarget,
+                    headDetailDepthActive,
+                    interactionState,
+                    focusAlpha,
+                    fixedTextSizing,
+                    disableInactiveFilter
+                });
+            } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
+                drawTextLikeNode(ctx, node, entry, config, worldScale, detailScale, focusAlpha, fixedTextSizing);
+            }
+        });
+
+        visibleConnectors.forEach(({ node, entry, stroke }) => {
+            const focusAlpha = resolveConnectorFocusAlpha(node, sceneFocusState);
+            drawConnector(ctx, entry, config, stroke, worldScale, {
+                focusAlpha,
+                emphasize: focusAlpha >= 0.995
+            });
+        });
+
+        ctx.restore();
+        return true;
     }
 
     drawFocusedOverviewNodes({
@@ -3717,9 +3988,7 @@ export class CanvasSceneRenderer {
                     }
                 });
                 detailVisibleConnectors.forEach(({ node, entry, stroke }) => {
-                    const focusAlpha = sceneFocusState
-                        ? resolveSceneElementFocusAlpha(sceneFocusState.activeConnectorIds.has(node.id), sceneFocusState)
-                        : 1;
+                    const focusAlpha = resolveConnectorFocusAlpha(node, sceneFocusState);
                     drawConnector(ctx, entry, config, stroke, detailWorldScale, {
                         focusAlpha,
                         emphasize: focusAlpha >= 0.995
@@ -3839,98 +4108,85 @@ export class CanvasSceneRenderer {
                 );
                 const overlayAlpha = (1 - Math.max(0, Math.min(1, baseInactiveOpacity))) * dimStrength;
                 const fixedTextSizing = resolveMhsaDetailFixedTextSizing(this.scene, resolution.width);
+                const didDrawFocusCache = this.drawTransformedOverviewRenderCache({
+                    resolution,
+                    worldScale,
+                    offsetX,
+                    offsetY,
+                    background: config.tokens.palette.sceneBackground || 'rgba(0, 0, 0, 0)'
+                });
+                if (didDrawFocusCache) {
+                    if (overlayAlpha > 0.001) {
+                        ctx.save();
+                        ctx.globalAlpha = overlayAlpha;
+                        ctx.fillStyle = 'rgb(2, 4, 8)';
+                        ctx.fillRect(0, 0, resolution.width, resolution.height);
+                        ctx.restore();
+                    }
 
-                ctx.save();
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-                ctx.drawImage(this.overviewRenderCache.surface, 0, 0);
-                ctx.restore();
-
-                if (overlayAlpha > 0.001) {
                     ctx.save();
-                    ctx.globalAlpha = overlayAlpha;
-                    ctx.fillStyle = 'rgb(2, 4, 8)';
-                    ctx.fillRect(0, 0, resolution.width, resolution.height);
+                    ctx.translate(offsetX, offsetY);
+                    ctx.scale(worldScale, worldScale);
+                    if (overviewPreviousFocusState) {
+                        const previousFocusAlpha = overviewCurrentFocusState
+                            ? (dimStrength * Math.max(0, 1 - focusBlend))
+                            : dimStrength;
+                        this.drawFocusedOverviewNodes({
+                            ctx,
+                            visibleDrawableNodes,
+                            visibleConnectors,
+                            config,
+                            worldScale,
+                            detailScale,
+                            fixedTextSizing,
+                            focusState: overviewPreviousFocusState,
+                            focusAlpha: previousFocusAlpha,
+                            headDetailTarget: activeHeadDetailTarget,
+                            headDetailDepthActive: !!headDetailDepthActive
+                        });
+                    }
+                    if (overviewCurrentFocusState) {
+                        this.drawFocusedOverviewNodes({
+                            ctx,
+                            visibleDrawableNodes,
+                            visibleConnectors,
+                            config,
+                            worldScale,
+                            detailScale,
+                            fixedTextSizing,
+                            focusState: overviewCurrentFocusState,
+                            focusAlpha: dimStrength * (overviewPreviousFocusState ? focusBlend : 1),
+                            headDetailTarget: activeHeadDetailTarget,
+                            headDetailDepthActive: !!headDetailDepthActive
+                        });
+                    }
                     ctx.restore();
+                    if (debug) {
+                        drawDebugOverlay(ctx, resolution, renderState);
+                    }
+                    return true;
                 }
-
-                ctx.save();
-                ctx.translate(offsetX, offsetY);
-                ctx.scale(worldScale, worldScale);
-                if (overviewPreviousFocusState) {
-                    const previousFocusAlpha = overviewCurrentFocusState
-                        ? (dimStrength * Math.max(0, 1 - focusBlend))
-                        : dimStrength;
-                    this.drawFocusedOverviewNodes({
-                        ctx,
-                        visibleDrawableNodes,
-                        visibleConnectors,
-                        config,
-                        worldScale,
-                        detailScale,
-                        fixedTextSizing,
-                        focusState: overviewPreviousFocusState,
-                        focusAlpha: previousFocusAlpha,
-                        headDetailTarget: activeHeadDetailTarget,
-                        headDetailDepthActive: !!headDetailDepthActive
-                    });
-                }
-                if (overviewCurrentFocusState) {
-                    this.drawFocusedOverviewNodes({
-                        ctx,
-                        visibleDrawableNodes,
-                        visibleConnectors,
-                        config,
-                        worldScale,
-                        detailScale,
-                        fixedTextSizing,
-                        focusState: overviewCurrentFocusState,
-                        focusAlpha: dimStrength * (overviewPreviousFocusState ? focusBlend : 1),
-                        headDetailTarget: activeHeadDetailTarget,
-                        headDetailDepthActive: !!headDetailDepthActive
-                    });
-                }
-                ctx.restore();
-                if (debug) {
-                    drawDebugOverlay(ctx, resolution, renderState);
-                }
-                return true;
             }
 
-            ctx.save();
-            ctx.translate(offsetX, offsetY);
-            ctx.scale(worldScale, worldScale);
-            ctx.fillStyle = config.tokens.palette.sceneBackground;
-            ctx.fillRect(0, 0, sceneBounds.width, sceneBounds.height);
             const fixedTextSizing = resolveMhsaDetailFixedTextSizing(this.scene, resolution.width);
-
-            visibleDrawableNodes.forEach(({ node, entry }) => {
-                const focusAlpha = resolveSceneNodeFocusAlpha(node.id, sceneFocusState);
-                if (node.kind === VIEW2D_NODE_KINDS.MATRIX) {
-                    drawMatrixNode(ctx, node, entry, config, worldScale, detailScale, {
-                        skipSurfaceEffects: interactionFastPath,
-                        fastPath: interactionFastPath,
-                        headDetailTarget: activeHeadDetailTarget,
-                        headDetailDepthActive: !!headDetailDepthActive,
-                        interactionState: normalizedInteractionState,
-                        focusAlpha,
-                        fixedTextSizing,
-                        disableInactiveFilter
-                    });
-                } else if (node.kind === VIEW2D_NODE_KINDS.TEXT || node.kind === VIEW2D_NODE_KINDS.OPERATOR) {
-                    drawTextLikeNode(ctx, node, entry, config, worldScale, detailScale, focusAlpha, fixedTextSizing);
-                }
+            this.drawOverviewScene({
+                ctx,
+                sceneBounds,
+                config,
+                worldScale,
+                detailScale,
+                offsetX,
+                offsetY,
+                visibleDrawableNodes,
+                visibleConnectors,
+                interactionFastPath,
+                interactionState: normalizedInteractionState,
+                sceneFocusState,
+                fixedTextSizing,
+                headDetailTarget: activeHeadDetailTarget,
+                headDetailDepthActive: !!headDetailDepthActive,
+                disableInactiveFilter
             });
-
-            visibleConnectors.forEach(({ node, entry, stroke }) => {
-                const focusAlpha = sceneFocusState
-                    ? resolveSceneElementFocusAlpha(sceneFocusState.activeConnectorIds.has(node.id), sceneFocusState)
-                    : 1;
-                drawConnector(ctx, entry, config, stroke, worldScale, {
-                    focusAlpha,
-                    emphasize: focusAlpha >= 0.995
-                });
-            });
-            ctx.restore();
             const shouldRefreshOverviewRenderCache = !!(
                 !headDetailDepthActive
                 && !interactionFastPath
@@ -3942,9 +4198,13 @@ export class CanvasSceneRenderer {
             if (shouldRefreshOverviewRenderCache) {
                 this.updateOverviewRenderCache({
                     resolution,
+                    config,
+                    sceneBounds,
                     worldScale,
                     offsetX,
-                    offsetY
+                    offsetY,
+                    headDetailTarget: activeHeadDetailTarget,
+                    headDetailDepthActive: !!headDetailDepthActive
                 });
             }
             if (debug) {

@@ -3015,13 +3015,21 @@ describe('CanvasSceneRenderer', () => {
         })).toBe(true);
         renderer.overviewRenderCache = {
             ...renderer.overviewRenderCache,
-            surface: renderer.overviewRenderCache.surface || { width: 480, height: 320 },
+            surface: renderer.overviewRenderCache.surface || { width: 800, height: 640 },
             ctx: renderer.overviewRenderCache.ctx || {},
             scene,
             dpr: 1,
-            pixelWidth: 480,
-            pixelHeight: 320,
+            pixelWidth: 800,
+            pixelHeight: 640,
+            viewportPixelWidth: 480,
+            viewportPixelHeight: 320,
+            logicalWidth: 800,
+            logicalHeight: 640,
             worldScale: 1,
+            viewportOffsetX: 0,
+            viewportOffsetY: 0,
+            renderOffsetX: 160,
+            renderOffsetY: 160,
             offsetX: 0,
             offsetY: 0
         };
@@ -3044,9 +3052,86 @@ describe('CanvasSceneRenderer', () => {
         expect(drawImageOperation).toBeTruthy();
         expect(drawImageOperation?.transformScaleX).toBeCloseTo(1.25, 6);
         expect(drawImageOperation?.transformScaleY).toBeCloseTo(1.25, 6);
-        expect(drawImageOperation?.transformTranslateX).toBeCloseTo(12, 6);
-        expect(drawImageOperation?.transformTranslateY).toBeCloseTo(8, 6);
+        expect(drawImageOperation?.transformTranslateX).toBeCloseTo(-188, 6);
+        expect(drawImageOperation?.transformTranslateY).toBeCloseTo(-192, 6);
         expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(false);
+    });
+
+    it('rerenders the overview when a pan would expose uncovered cache edges', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createMatrixNode({
+                    role: 'overview-card',
+                    semantic: {
+                        componentKind: 'test',
+                        stage: 'overview',
+                        role: 'overview-card'
+                    },
+                    label: {
+                        tex: 'X',
+                        text: 'X'
+                    },
+                    dimensions: {
+                        rows: 4,
+                        cols: 4
+                    },
+                    presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+                    shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+                    visual: {
+                        styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                        disableCardSurfaceEffects: true
+                    },
+                    metadata: {
+                        card: {
+                            width: 180,
+                            height: 120
+                        }
+                    }
+                }),
+                createTextNode({
+                    text: 'Residual stream',
+                    metadata: {
+                        minScreenHeightPx: 0
+                    }
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        renderer.overviewRenderCache = {
+            ...renderer.overviewRenderCache,
+            surface: { width: 480, height: 320 },
+            ctx: {},
+            scene,
+            dpr: 1,
+            pixelWidth: 480,
+            pixelHeight: 320,
+            worldScale: 1,
+            offsetX: 0,
+            offsetY: 0
+        };
+
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 140,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const drawImageOperation = ctx.operations.find((operation) => operation.type === 'drawImage') || null;
+        expect(drawImageOperation).toBeFalsy();
+        expect(ctx.operations.some((operation) => (
+            operation.type === 'fillText'
+            && operation.text === 'Residual stream'
+        ))).toBe(true);
     });
 
     it('reuses the cached overview frame during residual row-hover dimming and redraws only the affected node', () => {

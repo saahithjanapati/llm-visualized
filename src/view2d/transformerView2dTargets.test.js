@@ -693,6 +693,34 @@ describe('transformerView2dTargets', () => {
         expect(payload?.info?.activationData?.sourceStage).toBe('ln2.shift');
     });
 
+    it('exposes hover context for overview residual modules when row hits are unavailable', () => {
+        const payload = buildSemanticNodeHoverPayload({
+            entry: {
+                role: 'module-card',
+                semantic: {
+                    componentKind: 'residual',
+                    layerIndex: 0,
+                    stage: 'incoming',
+                    role: 'module-card'
+                }
+            }
+        });
+
+        expect(payload).toEqual({
+            label: 'Residual Stream Vector',
+            info: {
+                layerIndex: 0,
+                suppressTokenChip: true,
+                activationData: {
+                    label: 'Residual Stream Vector',
+                    stage: 'layer.incoming',
+                    layerIndex: 0,
+                    suppressTokenChip: true
+                }
+            }
+        });
+    });
+
     it('exposes hover token context for input token chips', () => {
         const payload = buildSemanticNodeHoverPayload({
             entry: {
@@ -956,6 +984,40 @@ describe('transformerView2dTargets', () => {
                 }
             }
         });
+    });
+
+    it('builds overview component focus state for hovered residual modules', () => {
+        const scene = buildTransformerSceneModel({
+            layerCount: 1
+        });
+        const nodes = flattenSceneNodes(scene);
+        const incomingResidualNode = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node.semantic?.componentKind === 'residual'
+            && node.semantic?.stage === 'incoming'
+            && node.role === 'module-card'
+        ));
+        const ln1CardNode = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node.semantic?.componentKind === 'layer-norm'
+            && node.semantic?.stage === 'ln1'
+            && node.role === 'module-card'
+        ));
+        const residualToLn1Connector = nodes.find((node) => (
+            node.kind === VIEW2D_NODE_KINDS.CONNECTOR
+            && node.source?.nodeId === incomingResidualNode?.id
+            && node.target?.nodeId === ln1CardNode?.id
+        ));
+
+        const hoverState = buildSemanticNodeHoverFocusState(scene, {
+            entry: incomingResidualNode
+        });
+
+        expect(hoverState?.focusState?.activeNodeIds).toContain(incomingResidualNode?.id);
+        expect(hoverState?.focusState?.activeConnectorIds).toContain(residualToLn1Connector?.id);
+        expect(Array.isArray(hoverState?.focusState?.activeNodeIds)).toBe(true);
+        expect(typeof hoverState?.signature).toBe('string');
+        expect(hoverState?.signature.length).toBeGreaterThan(0);
     });
 
     it('builds overview component focus state for hovered MLP modules', () => {

@@ -133,6 +133,7 @@ describe('buildOutputProjectionDetailSceneModel', () => {
         expect(concatCloseNode?.text).toBe(')');
         expect(concatEqualsNode?.text).toBe('=');
         expect(concatCopyConnectorNodes[0]?.metadata?.targetAnchorMode).toBe('caption-bottom');
+        expect(concatCopyConnectorNodes[0]?.metadata?.preserveFocusOpacity).toBe(true);
         expect(concatHeadNodes).toHaveLength(12);
         expect(headStackTopSpacerNode).toBeTruthy();
         expect(concatSeparatorNodes).toHaveLength(11);
