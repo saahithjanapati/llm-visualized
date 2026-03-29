@@ -15,8 +15,8 @@ import { buildTransformerSceneModel } from '../view2d/model/buildTransformerScen
 import { resolveViewportFitTransform } from '../view2d/runtime/View2dViewportController.js';
 import { flattenSceneNodes, VIEW2D_NODE_KINDS } from '../view2d/schema/sceneTypes.js';
 
-const DETAIL_VIEW_ZOOM_OUT_FLOOR_RATIO = 0.6;
-const SCENE_DETAIL_ZOOM_OUT_FLOOR_RATIO = 0.84;
+const DETAIL_VIEW_ZOOM_OUT_FLOOR_RATIO = 0.5;
+const SCENE_DETAIL_ZOOM_OUT_FLOOR_RATIO = 0.72;
 
 function createRect(width = 960, height = 600) {
     return {

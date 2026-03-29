@@ -26,7 +26,7 @@ describe('googleAnalytics', () => {
     });
 
     it('sends a manual page_view with the full query string and route params', () => {
-        window.history.replaceState({}, '', '/?token=4&generation=0&kvCache=0');
+        window.history.replaceState({}, '', '/SA?token=4&generation=0&kvCache=0');
 
         const tracked = trackGoogleAnalyticsPageView(window.location, {
             referrer: 'https://example.com/landing'
@@ -39,7 +39,7 @@ describe('googleAnalytics', () => {
             'page_view',
             expect.objectContaining({
                 page_title: 'LLM-Visualized',
-                page_location: 'http://localhost:3000/?token=4&generation=0&kvCache=0',
+                page_location: 'http://localhost:3000/SA?token=4&generation=0&kvCache=0',
                 page_referrer: 'https://example.com/landing',
                 page_query_string: 'token=4&generation=0&kvCache=0',
                 page_query_keys: 'token,generation,kvCache',

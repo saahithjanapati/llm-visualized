@@ -69,6 +69,17 @@ function hasExplicitGenerationRouteParams(searchParams) {
         || searchParams.has(GENERATION_ROUTE_PARAM_KV_CACHE_LEGACY);
 }
 
+export function shouldCanonicalizeMainEntryToFirstGenerationRoute(urlLike = null, {
+    hasInitialAppView = false
+} = {}) {
+    if (hasInitialAppView) return false;
+
+    const currentUrl = resolveUrlLike(urlLike);
+    if (!currentUrl || !isMainEntryRoutePath(currentUrl.pathname)) return false;
+
+    return !hasExplicitGenerationRouteParams(currentUrl.searchParams);
+}
+
 function readRouteIndex(searchParams, key, {
     min = 0,
     max = null
@@ -231,8 +242,7 @@ export function syncMainEntryToFirstGenerationRoute({
     if (typeof window === 'undefined' || typeof window.history?.replaceState !== 'function') return false;
 
     const currentUrl = resolveUrlLike(window.location);
-    if (!currentUrl || !isMainEntryRoutePath(currentUrl.pathname)) return false;
-    if (hasExplicitGenerationRouteParams(currentUrl.searchParams)) return false;
+    if (!shouldCanonicalizeMainEntryToFirstGenerationRoute(currentUrl)) return false;
 
     const safeBaseLaneCount = clampLaneCount(baseLaneCount, { maxLaneCount });
     const safeMaxLaneCount = Number.isFinite(maxLaneCount)

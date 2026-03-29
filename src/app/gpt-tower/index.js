@@ -49,6 +49,7 @@ import {
 } from './runtimeAssetUrls.js';
 import {
     resolveGenerationRoute,
+    shouldCanonicalizeMainEntryToFirstGenerationRoute,
     syncMainEntryToFirstGenerationRoute
 } from './generationRoute.js';
 import { initGoogleAnalyticsPageTracking } from './googleAnalytics.js';
@@ -144,6 +145,11 @@ setProjectInfoActiveVisualizationMode(
 const googleAnalyticsPageTracker = initGoogleAnalyticsPageTracking({
     trackInitialPage: false
 });
+if (!shouldCanonicalizeMainEntryToFirstGenerationRoute(window.location, {
+    hasInitialAppView: Boolean(initialAppView)
+})) {
+    googleAnalyticsPageTracker?.trackCurrentPageView?.();
+}
 
 // Optionally load pre-baked geometries to skip heavy procedural work.
 await loadPrecomputedGeometries(PRECOMPUTED_COMPONENTS_SLICE_URL);

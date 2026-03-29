@@ -1,4 +1,5 @@
 import infoMarkdown from '../ui/infoModalContent.md?raw';
+import { trackGoogleAnalyticsPageView } from '../app/gpt-tower/googleAnalytics.js';
 import {
     bindProjectInfoBackLink,
     syncProjectInfoBackLink
@@ -9,6 +10,8 @@ import './page.css';
 
 const contentEl = document.getElementById('infoPageContent');
 const backLinkEl = document.querySelector('.info-page-back-link');
+
+trackGoogleAnalyticsPageView(window.location);
 
 if (backLinkEl) {
     syncProjectInfoBackLink(backLinkEl);

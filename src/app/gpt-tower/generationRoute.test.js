@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
     resolveGenerationRoute,
+    shouldCanonicalizeMainEntryToFirstGenerationRoute,
     syncMainEntryToFirstGenerationRoute,
     syncGenerationRoute
 } from './generationRoute.js';
@@ -106,6 +107,16 @@ describe('generationRoute', () => {
         expect(url.searchParams.get('token')).toBe('4');
         expect(url.searchParams.get('generation')).toBe('0');
         expect(url.searchParams.get('kvCache')).toBe('0');
+    });
+
+    it('marks non-main-entry subroots as already stable for initial tracking', () => {
+        expect(shouldCanonicalizeMainEntryToFirstGenerationRoute('/SA')).toBe(false);
+    });
+
+    it('skips canonicalization when another initial app view owns the route', () => {
+        expect(shouldCanonicalizeMainEntryToFirstGenerationRoute('/?view=2d&component=mhsa', {
+            hasInitialAppView: true
+        })).toBe(false);
     });
 
     it('preserves unrelated query params when canonicalizing the main entry URL', () => {
