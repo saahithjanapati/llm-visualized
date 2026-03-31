@@ -41,7 +41,7 @@ describe('firstVisitSceneHint', () => {
         expect(hint.showIfEligible()).toBe(true);
 
         const root = document.getElementById('firstVisitSceneHint');
-        expect(root?.textContent).toBe('Be sure to click around on different components to learn more about them.');
+        expect(root?.textContent).toBe('Tip: click around the scene to inspect different components.');
         expect(root?.dataset.visible).toBe('true');
         expect(root?.getAttribute('aria-hidden')).toBe('false');
 
