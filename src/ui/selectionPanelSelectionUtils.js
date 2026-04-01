@@ -268,14 +268,14 @@ function isLogitEntryLike(entry) {
 
 export function resolveSelectionLogitEntry(selectionInfo) {
     const directInfo = selectionInfo?.info;
-    if (isLogitEntryLike(directInfo)) {
-        return directInfo;
-    }
     if (isLogitEntryLike(directInfo?.logitEntry)) {
         return directInfo.logitEntry;
     }
     if (isLogitEntryLike(selectionInfo?.logitEntry)) {
         return selectionInfo.logitEntry;
+    }
+    if (isLogitEntryLike(directInfo)) {
+        return directInfo;
     }
 
     const source = selectionInfo?.object || selectionInfo?.hit?.object;

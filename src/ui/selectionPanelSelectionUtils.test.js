@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     isKvCacheVectorSelection,
     normalizeSelectionLabel,
+    resolveSelectionLogitEntry,
     simplifyLayerNormParamDisplayLabel
 } from './selectionPanelSelectionUtils.js';
 
@@ -54,5 +55,23 @@ describe('normalizeSelectionLabel', () => {
 
         expect(isKvCacheVectorSelection(selection)).toBe(true);
         expect(normalizeSelectionLabel('Key Vector', selection)).toBe('Cached Key Vector');
+    });
+
+    it('prefers nested logit entry metadata over the wrapper selection info object', () => {
+        const nestedEntry = {
+            token: 'hello',
+            token_id: 31337,
+            prob: 0.42
+        };
+        const selection = {
+            label: 'Chosen token: hello',
+            info: {
+                tokenId: 31337,
+                tokenIndex: 4,
+                logitEntry: nestedEntry
+            }
+        };
+
+        expect(resolveSelectionLogitEntry(selection)).toBe(nestedEntry);
     });
 });

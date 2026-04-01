@@ -62,4 +62,33 @@ describe('SelectionPanel vector token metadata rows', () => {
         expect(panel.tokenInfoHeadSecondary.textContent).toBe('Token ID');
         expect(panel.tokenInfoHeadTertiary.textContent).toBe('Position');
     });
+
+    it('shows the chosen-token probability from nested logit entry metadata', () => {
+        const panel = createPanelContext();
+        const selection = {
+            label: 'Chosen token: hello',
+            info: {
+                tokenId: 31337,
+                tokenIndex: 4,
+                logitEntry: {
+                    token: 'hello',
+                    token_id: 31337,
+                    prob: 0.42
+                }
+            }
+        };
+
+        const metadata = panel._updateVectorTokenPositionRows(selection, selection.label);
+
+        expect(metadata).toMatchObject({
+            tokenText: 'hello',
+            tokenIdText: '31337'
+        });
+        expect(panel.tokenInfoRow.style.display).toBe('');
+        expect(panel.tokenInfoHeadPrimary.textContent).toBe('Token text');
+        expect(panel.tokenInfoHeadSecondary.textContent).toBe('Token ID');
+        expect(panel.tokenInfoHeadTertiary.textContent).toBe('Selected probability');
+        expect(panel.tokenInfoPosition.textContent).toBe('42%');
+        expect(panel.tokenInfoRow.dataset.empty).toBe('false');
+    });
 });
