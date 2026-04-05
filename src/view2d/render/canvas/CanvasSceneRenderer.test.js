@@ -3491,4 +3491,104 @@ describe('CanvasSceneRenderer', () => {
         expect(drawImageOperation).toBeFalsy();
         expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(true);
     });
+
+    it('applies overview focus dimming even when the overview cache path is unavailable', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const focusedNode = createMatrixNode({
+            role: 'overview-card-focused',
+            semantic: {
+                componentKind: 'test',
+                stage: 'focused',
+                role: 'overview-card'
+            },
+            label: {
+                tex: 'A',
+                text: 'A'
+            },
+            dimensions: {
+                rows: 2,
+                cols: 2
+            },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                disableCardSurfaceEffects: true
+            },
+            metadata: {
+                card: {
+                    width: 140,
+                    height: 96
+                }
+            }
+        });
+        const dimmedNode = createMatrixNode({
+            role: 'overview-card-dimmed',
+            semantic: {
+                componentKind: 'test',
+                stage: 'dimmed',
+                role: 'overview-card'
+            },
+            label: {
+                tex: 'B',
+                text: 'B'
+            },
+            dimensions: {
+                rows: 2,
+                cols: 2
+            },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                disableCardSurfaceEffects: true
+            },
+            metadata: {
+                card: {
+                    width: 140,
+                    height: 96
+                }
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.ROW,
+                    gap: 40,
+                    children: [focusedNode, dimmedNode]
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                overviewFocusTransition: {
+                    currentFocus: {
+                        activeNodeIds: [focusedNode.id],
+                        inactiveOpacity: 0.18
+                    },
+                    focusBlend: 1,
+                    dimStrength: 1
+                }
+            }
+        })).toBe(true);
+
+        const translucentFills = ctx.operations.filter((operation) => (
+            (operation.type === 'fill' || operation.type === 'fillRect')
+            && operation.globalAlpha < 0.99
+        ));
+        expect(translucentFills.length).toBeGreaterThan(0);
+        expect(ctx.operations.some((operation) => operation.type === 'drawImage')).toBe(false);
+    });
 });

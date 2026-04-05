@@ -693,6 +693,7 @@ export function createTransformerView2dDetailView(panelEl, {
         lastAutoFrameViewportSize: null,
         tokenStripSignature: '',
         entryFocusPaddingActive: false,
+        preserveOverviewViewportForSelection: false,
         stagedFocusTransition: null,
         stagedFocusRafId: null,
         stagedHeadDetailTransition: null,
@@ -1130,6 +1131,17 @@ export function createTransformerView2dDetailView(panelEl, {
         return !state.semanticTarget && !state.baseSemanticTarget;
     }
 
+    function shouldPreserveOverviewViewportForSelection({
+        semanticTarget = null,
+        hasDeepDetailTarget = false,
+        initialOverviewSelectionLockTarget = null
+    } = {}) {
+        const safeSemanticTarget = buildSemanticTarget(semanticTarget);
+        if (!safeSemanticTarget || hasDeepDetailTarget) return false;
+        if (safeSemanticTarget.componentKind !== 'residual') return false;
+        return !!initialOverviewSelectionLockTarget;
+    }
+
     function hasSceneBackedDetailTarget() {
         return !!(
             state.headDetailTarget
@@ -1520,7 +1532,7 @@ export function createTransformerView2dDetailView(panelEl, {
     function resolveSelectionViewportMinScale({
         overviewMinScale = VIEW2D_DETAIL_VIEWPORT_MIN_SCALE
     } = {}) {
-        if (isTransformerView2dGraphOverview()) {
+        if (isTransformerView2dGraphOverview() || state.preserveOverviewViewportForSelection) {
             return overviewMinScale;
         }
         const trackedSelectionFocusScale = Number(state.selectionFocusScale) || 0;
@@ -4616,6 +4628,8 @@ export function createTransformerView2dDetailView(panelEl, {
             );
             if (shouldOpenFromOverview) {
                 fitScene({ animate: false });
+            } else if (state.preserveOverviewViewportForSelection) {
+                fitScene({ animate: false });
             } else if (!focusSelection({ animate: false })) {
                 fitScene({ animate: false });
             }
@@ -4712,10 +4726,16 @@ export function createTransformerView2dDetailView(panelEl, {
                 || resolvedDetailTargets.layerNormDetailTarget
                 || resolvedDetailTargets.headDetailTarget
             );
+            state.preserveOverviewViewportForSelection = shouldPreserveOverviewViewportForSelection({
+                semanticTarget,
+                hasDeepDetailTarget,
+                initialOverviewSelectionLockTarget
+            });
             const shouldStageFocusEntry = (
                 normalizedTransitionMode === 'staged-focus'
                 && !!buildSemanticTarget(semanticTarget)
                 && !hasDeepDetailTarget
+                && !state.preserveOverviewViewportForSelection
             );
             const shouldStageHeadDetailEntry = (
                 normalizedTransitionMode === 'staged-head-detail'

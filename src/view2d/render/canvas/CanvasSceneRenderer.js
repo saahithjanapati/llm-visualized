@@ -3913,10 +3913,14 @@ export class CanvasSceneRenderer {
             }
         );
         const disableInactiveFilter = interactionState?.disableInactiveFilter === true;
-        const normalizedInteractionState = sceneFocusState
+        const overviewFallbackFocusState = !headDetailDepthActive
+            ? (overviewCurrentFocusState || overviewPreviousFocusState || null)
+            : null;
+        const activeOverviewSceneFocusState = sceneFocusState || overviewFallbackFocusState;
+        const normalizedInteractionState = activeOverviewSceneFocusState
             ? {
                 ...(interactionState || {}),
-                sceneFocusState
+                sceneFocusState: activeOverviewSceneFocusState
             }
             : interactionState;
         const sceneBounds = this.layout.sceneBounds || this.layout.registry.getSceneBounds();
@@ -4324,7 +4328,7 @@ export class CanvasSceneRenderer {
                 visibleConnectors,
                 interactionFastPath,
                 interactionState: normalizedInteractionState,
-                sceneFocusState,
+                sceneFocusState: activeOverviewSceneFocusState,
                 fixedTextSizing,
                 headDetailTarget: activeHeadDetailTarget,
                 headDetailDepthActive: !!headDetailDepthActive,

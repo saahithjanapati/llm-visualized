@@ -2592,6 +2592,101 @@ describe('createTransformerView2dDetailView', () => {
         expect(renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.dimStrength).toBe(1);
     });
 
+    it('keeps residual overview handoff entries at full-scene fit and restores that overview on fit-scene', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const fitBtn = panelEl.querySelector('[data-transformer-view2d-action="fit-scene"]');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            layerCount: 1
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const overviewFitTransform = resolveViewportFitTransform(layout.sceneBounds, {
+            width: 960,
+            height: 600
+        }, {
+            padding: 28,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module'
+            },
+            focusLabel: 'Layer 1 residual stream',
+            initialOverviewSelectionLockTarget: {
+                semanticTarget: {
+                    componentKind: 'residual',
+                    layerIndex: 0,
+                    stage: 'incoming',
+                    role: 'module'
+                },
+                tokenIndex: 1,
+                tokenLabel: 'B'
+            },
+            transitionMode: 'staged-focus'
+        });
+        await vi.advanceTimersByTimeAsync(32);
+
+        const openedViewportState = view.getViewportState();
+        expect(openedViewportState.scale).toBeCloseTo(overviewFitTransform.scale, 6);
+        expect(openedViewportState.panX).toBeCloseTo(overviewFitTransform.panX, 6);
+        expect(openedViewportState.panY).toBeCloseTo(overviewFitTransform.panY, 6);
+
+        for (let index = 0; index < 12; index += 1) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: 480,
+                clientY: 300,
+                deltaY: 480
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        const zoomedOutViewportState = view.getViewportState();
+        expect(zoomedOutViewportState.scale).toBeLessThan(openedViewportState.scale);
+        expect(zoomedOutViewportState.scale).toBeGreaterThanOrEqual(TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT);
+
+        for (let index = 0; index < 8; index += 1) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: 480,
+                clientY: 300,
+                deltaY: -480
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        expect(view.getViewportState().scale).toBeGreaterThan(zoomedOutViewportState.scale);
+
+        fitBtn?.click();
+        await vi.advanceTimersByTimeAsync(500);
+
+        const refitViewportState = view.getViewportState();
+        expect(refitViewportState.scale).toBeCloseTo(openedViewportState.scale, 5);
+        expect(refitViewportState.panX).toBeCloseTo(openedViewportState.panX, 5);
+        expect(refitViewportState.panY).toBeCloseTo(openedViewportState.panY, 5);
+    });
+
     it('keeps overview residual selections dimmed until the sidebar selection closes', async () => {
         const panelEl = document.getElementById('detailPanel');
         let view = null;
