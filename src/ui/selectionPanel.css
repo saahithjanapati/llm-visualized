@@ -3115,8 +3115,10 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     }
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar {
         display: flex;
-        flex-direction: column-reverse;
-        align-items: stretch;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
         gap: 10px;
         padding: 10px 12px;
         pointer-events: auto;
@@ -3128,10 +3130,11 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
         -webkit-backdrop-filter: none;
     }
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-copy {
-        flex: 0 0 auto;
+        flex: 1 1 auto;
+        min-width: 0;
     }
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-toolbar-actions {
-        align-self: stretch;
+        align-self: center;
         justify-content: flex-end;
         flex: 0 0 auto;
     }
