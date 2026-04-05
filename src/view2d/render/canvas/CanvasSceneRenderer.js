@@ -3654,9 +3654,6 @@ export class CanvasSceneRenderer {
         if (directHit?.rowHit || directHit?.cellHit || directHit?.columnHit) {
             return directHit;
         }
-        if (directHit && !isOverviewResidualVectorStripNode(directHit.node)) {
-            return directHit;
-        }
         const fallbackRowHit = resolveApproximateOverviewResidualRowHitAtScreenPoint(
             this.visibleDrawableNodes?.length ? this.visibleDrawableNodes : this.drawableNodes,
             renderState,
@@ -3671,6 +3668,9 @@ export class CanvasSceneRenderer {
                 ...directHit,
                 rowHit: fallbackRowHit.rowHit || directHit.rowHit || null
             };
+        }
+        if (directHit) {
+            return fallbackRowHit;
         }
         return fallbackRowHit;
     }

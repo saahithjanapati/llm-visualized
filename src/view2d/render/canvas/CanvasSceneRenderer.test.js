@@ -2408,6 +2408,99 @@ describe('CanvasSceneRenderer', () => {
         expect(rowHit?.rowHit?.rowIndex).toBe(1);
     });
 
+    it('prefers overview residual row hits over generic matrix hits at the same screen point', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const residualNode = createMatrixNode({
+            id: 'residual-overview-node',
+            role: 'module-card',
+            semantic: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module-card'
+            },
+            dimensions: { rows: 3, cols: 768 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 6,
+                    rowGap: 0,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+        const genericNode = createMatrixNode({
+            id: 'generic-overlap-node',
+            role: 'projection-weight',
+            semantic: {
+                componentKind: 'projection',
+                layerIndex: 0,
+                stage: 'qkv.q'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [residualNode]
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 0.25,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(residualNode.id);
+        const renderState = renderer.getLastRenderState();
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(renderState?.worldScale).toBeGreaterThan(0);
+
+        const worldScale = renderState.worldScale;
+        const offsetX = renderState.offsetX || 0;
+        const offsetY = renderState.offsetY || 0;
+        const screenContentRight = offsetX + ((entry.contentBounds.x + entry.contentBounds.width) * worldScale);
+        const screenRowCenterY = offsetY + ((entry.contentBounds.y + (entry.layoutData?.rowHeight || 0) + ((entry.layoutData?.rowHeight || 0) * 0.5)) * worldScale);
+        const hoverX = screenContentRight + 3;
+        const hoverY = screenRowCenterY;
+
+        renderer.resolveInteractiveHitAtPoint = () => ({
+            entry: {
+                nodeId: genericNode.id
+            },
+            node: genericNode,
+            rowHit: null,
+            cellHit: null,
+            columnHit: null
+        });
+
+        const hit = renderer.resolveInteractiveHitAtScreenPoint(hoverX, hoverY);
+
+        expect(hit?.node?.id).toBe(residualNode.id);
+        expect(hit?.rowHit?.rowIndex).toBe(1);
+    });
+
     it('resolves band hits for band-interactive compact-row vector strips', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);
