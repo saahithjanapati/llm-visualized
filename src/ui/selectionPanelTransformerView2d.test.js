@@ -2592,7 +2592,7 @@ describe('createTransformerView2dDetailView', () => {
         expect(renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.dimStrength).toBe(1);
     });
 
-    it('keeps residual overview handoff entries at full-scene fit and restores that overview on fit-scene', async () => {
+    it('lets residual overview handoff entries zoom back out and restores the full overview on fit-scene', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
 
@@ -2648,11 +2648,10 @@ describe('createTransformerView2dDetailView', () => {
             transitionMode: 'staged-focus'
         });
         await vi.advanceTimersByTimeAsync(32);
+        await vi.advanceTimersByTimeAsync(420);
 
         const openedViewportState = view.getViewportState();
-        expect(openedViewportState.scale).toBeCloseTo(overviewFitTransform.scale, 6);
-        expect(openedViewportState.panX).toBeCloseTo(overviewFitTransform.panX, 6);
-        expect(openedViewportState.panY).toBeCloseTo(overviewFitTransform.panY, 6);
+        expect(openedViewportState.scale).toBeGreaterThan(overviewFitTransform.scale);
 
         for (let index = 0; index < 12; index += 1) {
             canvas.dispatchEvent(createWheelEvent({
@@ -2682,9 +2681,9 @@ describe('createTransformerView2dDetailView', () => {
         await vi.advanceTimersByTimeAsync(500);
 
         const refitViewportState = view.getViewportState();
-        expect(refitViewportState.scale).toBeCloseTo(openedViewportState.scale, 5);
-        expect(refitViewportState.panX).toBeCloseTo(openedViewportState.panX, 5);
-        expect(refitViewportState.panY).toBeCloseTo(openedViewportState.panY, 5);
+        expect(refitViewportState.scale).toBeCloseTo(overviewFitTransform.scale, 5);
+        expect(refitViewportState.panX).toBeCloseTo(overviewFitTransform.panX, 5);
+        expect(refitViewportState.panY).toBeCloseTo(overviewFitTransform.panY, 5);
     });
 
     it('keeps overview residual selections dimmed until the sidebar selection closes', async () => {

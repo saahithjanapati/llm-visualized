@@ -4628,8 +4628,6 @@ export function createTransformerView2dDetailView(panelEl, {
             );
             if (shouldOpenFromOverview) {
                 fitScene({ animate: false });
-            } else if (state.preserveOverviewViewportForSelection) {
-                fitScene({ animate: false });
             } else if (!focusSelection({ animate: false })) {
                 fitScene({ animate: false });
             }
@@ -4735,7 +4733,6 @@ export function createTransformerView2dDetailView(panelEl, {
                 normalizedTransitionMode === 'staged-focus'
                 && !!buildSemanticTarget(semanticTarget)
                 && !hasDeepDetailTarget
-                && !state.preserveOverviewViewportForSelection
             );
             const shouldStageHeadDetailEntry = (
                 normalizedTransitionMode === 'staged-head-detail'
