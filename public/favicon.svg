@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="LLM-Visualized icon">
+  <rect width="64" height="64" fill="#050505" />
   <rect width="64" height="64" rx="10" fill="#050505" />
   <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
     <g stroke-width="2">

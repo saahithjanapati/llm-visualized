@@ -3162,7 +3162,7 @@ body.mhsa-fullscreen-active .detail-panel-resize-handle {
     }
 }
 
-@media (max-width: 760px) {
+@media (max-aspect-ratio: 1/1), (max-width: 760px) {
     #detailPanel.is-open.is-mhsa-fullscreen.is-transformer-view2d-open .detail-transformer-view2d-selection-sidebar {
         top: 0;
         left: 0;
