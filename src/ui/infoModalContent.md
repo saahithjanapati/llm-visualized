@@ -47,6 +47,7 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - Welch Labs' [deep learning videos](https://www.youtube.com/@WelchLabs/videos)
 - Maarten Grootendorst's [Exploring Language Models](https://newsletter.maartengrootendorst.com/)
 - Sebastian Raschka's [LLM Architecture Gallery](https://sebastianraschka.com/llm-architecture-gallery/)
+- Jay Alammar's [The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)
 - [Khan Academy's](https://www.khanacademy.org/) black-and-colored visual style
 - Jack Morris' [Transformer visualization thread](https://x.com/jxmnop/status/1757129193442173367?s=20)
 - Will Depue's [WebGPT](https://github.com/0hq/WebGPT)
@@ -54,7 +55,6 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - roon (@tszzl)'s post that [latent space is best explored in person](https://x.com/tszzl/status/1964842112438161707)
 - roon (@tszzl)'s essay [Text is the universal interface](https://scale.com/blog/text-universal-interface)
 - Sasha Rush's [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
-- Jay Alammar's [The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)
 - Oriol Vinyals' note that vectors are ["The soul of a neural network"](https://x.com/OriolVinyalsML/status/1796970824353595510)
 - Andrej Karpathy's short story [A Forward Pass](https://karpathy.github.io/2021/03/27/forward-pass/)
 
@@ -66,7 +66,7 @@ Below is an incomplete list of projects, papers, and references that inspired th
 
 - I plan to add more prompts/generations once I get a better sense of traffic volume. I also plan to release my extraction script so people can visualize forward passes of their own prompts.
 
-- The `Copy context to Ask Robot` button in the sidebars is also still pretty experimental. The generated prompts could definitely be made better and optimized.
+- The `Have a question? Copy context to ask 🤖` button in the sidebars is also still pretty experimental. The generated prompts could definitely be made better and optimized.
 
 - There is a lot of unnecessary lag and several interaction bugs that need to be fixed. A lot of the current work is optimization, bug hunting, and cleanup.
 
