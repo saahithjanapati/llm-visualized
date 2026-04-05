@@ -1191,14 +1191,15 @@ body.touch-ui * {
     z-index: 8;
     max-width: min(400px, calc(100vw - 28px));
     padding: 13px 18px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(138, 185, 255, 0.28);
     border-radius: 16px;
     background:
         linear-gradient(180deg, rgba(18, 22, 34, 0.86), rgba(9, 11, 19, 0.82));
     box-shadow:
         0 12px 30px rgba(0, 0, 0, 0.28),
-        0 0 0 1px rgba(255, 255, 255, 0.05),
-        0 0 28px rgba(122, 174, 255, 0.18);
+        0 0 0 1px rgba(170, 208, 255, 0.14),
+        0 0 0 4px rgba(88, 156, 255, 0.08),
+        0 0 28px rgba(122, 174, 255, 0.22);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     color: rgba(241, 246, 255, 0.9);
@@ -1237,7 +1238,7 @@ body.touch-ui * {
 
     #firstVisitSceneHint {
         bottom: calc(max(8px, calc(env(safe-area-inset-bottom) + 8px)) + var(--prompt-token-strip-height, 0px) + 10px);
-        max-width: min(340px, calc(100vw - 20px));
+        max-width: calc(100vw - 12px);
         padding: 11px 14px;
         font-size: 13px;
     }
