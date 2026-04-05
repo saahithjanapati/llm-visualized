@@ -441,12 +441,14 @@ function createLayerNormTextNode({
 
 function createLayerNormOperatorNode({
     text = '',
+    tex = '',
     metadata = null,
     ...rest
 } = {}) {
     return createOperatorNode({
         ...rest,
         text,
+        tex,
         metadata: {
             ...(metadata && typeof metadata === 'object' ? metadata : {}),
             renderMode: 'dom-katex'
@@ -955,6 +957,7 @@ export function buildLayerNormDetailSceneModel({
                     operatorKey: 'hadamard'
                 }),
                 text: HADAMARD_OPERATOR_TEXT,
+                tex: '\\odot',
                 visual: {
                     styleKey: VIEW2D_STYLE_KEYS.OPERATOR
                 }

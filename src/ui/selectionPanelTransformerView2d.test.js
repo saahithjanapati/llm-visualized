@@ -2399,6 +2399,68 @@ describe('createTransformerView2dDetailView', () => {
         expect(hoverLabelTokenChip?.textContent || '').toContain('B');
     });
 
+    it('keeps overview residual-row hover active from a looser screen-space target while zoomed out', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+        const renderSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'render');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const residualNode = flattenSceneNodes(scene).find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+            && node?.semantic?.layerIndex === 0
+        ));
+        const residualEntry = residualNode ? layout.registry.getNodeEntry(residualNode.id) : null;
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        await vi.advanceTimersByTimeAsync(32);
+
+        const hoverPoint = resolveCompactRowScreenPoint(
+            residualEntry,
+            1,
+            view.getViewportState()
+        );
+        expect(hoverPoint).toBeTruthy();
+
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            clientX: hoverPoint.clientX + 14,
+            clientY: hoverPoint.clientY
+        }));
+        await vi.advanceTimersByTimeAsync(32);
+
+        const overviewFocusState = renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.currentFocus;
+        expect(overviewFocusState?.rowSelections).toContainEqual({
+            nodeId: residualNode?.id,
+            rowIndex: 1
+        });
+
+        const hoverLabel = document.body.querySelector('.scene-hover-label');
+        expect(hoverLabel?.style.display).toBe('block');
+    });
+
     it('prefers the more specific screen-space residual row hit when the world-space hit falls back to a broad semantic card', async () => {
         const panelEl = document.getElementById('detailPanel');
         const onOpenSelection = vi.fn(() => true);

@@ -258,6 +258,7 @@ export function createTextNode({
 
 export function createOperatorNode({
     text = '',
+    tex = '',
     ...rest
 } = {}) {
     const base = createNodeBase({
@@ -267,6 +268,7 @@ export function createOperatorNode({
     return {
         ...base,
         text: typeof text === 'string' ? text : '',
+        tex: typeof tex === 'string' ? tex : '',
         presentation: VIEW2D_TEXT_PRESENTATIONS.OPERATOR
     };
 }

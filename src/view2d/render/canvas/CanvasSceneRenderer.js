@@ -835,9 +835,9 @@ function resolveTrackIndex(relativeOffset = 0, itemSize = 0, itemGap = 0, itemCo
     };
 }
 
-const OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX = 4;
-const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_WIDTH_PX = 16;
-const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_HEIGHT_PX = 16;
+const OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX = 6;
+const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_WIDTH_PX = 28;
+const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_HEIGHT_PX = 22;
 
 function isOverviewResidualVectorStripNode(node = null) {
     return !!(

@@ -143,6 +143,7 @@ describe('buildLayerNormDetailSceneModel', () => {
         expect(normalizationEquationNode?.metadata?.fontScale).toBeGreaterThan(1.3);
         expect(normalizationEquationNode?.layout?.offsetY).toBeLessThan(-10);
         expect(hadamardNode?.text).toBe('⊙');
+        expect(hadamardNode?.tex).toBe('\\odot');
         expect(scaleEqualsNode?.text).toBe('=');
         expect(outputPlusNode?.text).toBe('+');
         expect(outputEqualsNode?.text).toBe('=');
