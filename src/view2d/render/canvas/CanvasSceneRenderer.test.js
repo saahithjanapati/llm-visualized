@@ -2501,6 +2501,77 @@ describe('CanvasSceneRenderer', () => {
         expect(hit?.rowHit?.rowIndex).toBe(1);
     });
 
+    it('resolves overview residual row hits from the full card width, not only the compact strip bounds', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const residualNode = createMatrixNode({
+            id: 'residual-card-hover-node',
+            role: 'module-card',
+            semantic: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module-card'
+            },
+            dimensions: { rows: 3, cols: 768 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 6,
+                    rowGap: 0,
+                    paddingX: 12,
+                    paddingY: 8,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [residualNode]
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(residualNode.id);
+        expect(entry?.bounds).toBeTruthy();
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+
+        const contentBounds = entry.contentBounds;
+        const layoutData = entry.layoutData;
+        const stripRight = contentBounds.x + layoutData.innerPaddingX + layoutData.compactWidth;
+        const cardRight = entry.bounds.x + entry.bounds.width;
+        expect(cardRight).toBeGreaterThan(stripRight);
+
+        const hoverX = Math.min(cardRight - 1, stripRight + 4);
+        const hoverY = contentBounds.y + layoutData.innerPaddingY + layoutData.rowHeight + (layoutData.rowHeight * 0.5);
+        const hit = renderer.resolveInteractiveHitAtPoint(hoverX, hoverY);
+
+        expect(hit?.node?.id).toBe(residualNode.id);
+        expect(hit?.rowHit?.rowIndex).toBe(1);
+    });
+
     it('resolves band hits for band-interactive compact-row vector strips', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);

@@ -82,4 +82,4 @@ Thank you to my friends and family who gave me a lot of ideas throughout develop
 
 And thank you for visiting the site! If you have any ideas or feedback to make it better, [I'd love to hear from you](#project-info-feedback)!
 
-I hope you enjoy the site! 😊🫡
+I hope you enjoy the site 😊🫡

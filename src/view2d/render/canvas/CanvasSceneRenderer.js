@@ -873,7 +873,11 @@ function resolveMatrixRowHit(node = null, entry = null, x = 0, y = 0, detailScal
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
     if (!rowItems.length) return null;
-    if (!containsPoint(entry?.contentBounds || entry?.bounds, x, y)) return null;
+    const isOverviewResidualStrip = isOverviewResidualVectorStripNode(node);
+    const hitBounds = isOverviewResidualStrip
+        ? (entry?.bounds || entry?.contentBounds)
+        : (entry?.contentBounds || entry?.bounds);
+    if (!containsPoint(hitBounds, x, y)) return null;
     if (
         node.presentation !== VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS
         && node.presentation !== VIEW2D_MATRIX_PRESENTATIONS.BANDED_ROWS
