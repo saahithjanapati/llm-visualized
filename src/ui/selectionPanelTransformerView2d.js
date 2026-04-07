@@ -237,6 +237,32 @@ function resolveView2dSelectedTokenContext({
     };
 }
 
+function resolveTransformerView2dLayerCount({
+    layerCount = null,
+    activationSource = null
+} = {}) {
+    if (Number.isFinite(layerCount) && layerCount > 0) {
+        return Math.max(1, Math.floor(layerCount));
+    }
+    if (typeof activationSource?.getLayerCount === 'function') {
+        const resolvedLayerCount = Number(activationSource.getLayerCount());
+        if (Number.isFinite(resolvedLayerCount) && resolvedLayerCount > 0) {
+            return Math.max(1, Math.floor(resolvedLayerCount));
+        }
+    }
+    const candidateArrays = [
+        activationSource?.layers,
+        activationSource?.activations?.layers,
+        activationSource?.data?.activations?.layers
+    ];
+    for (const candidate of candidateArrays) {
+        if (Array.isArray(candidate) && candidate.length > 0) {
+            return candidate.length;
+        }
+    }
+    return null;
+}
+
 function resolveTransformerView2dRenderDpr({
     width = 0,
     height = 0,
@@ -614,6 +640,7 @@ export function createTransformerView2dDetailView(panelEl, {
         scene: null,
         layout: null,
         activationSource: null,
+        layerCount: null,
         tokenIndices: null,
         tokenLabels: null,
         isSmallScreen: false,
@@ -3263,6 +3290,7 @@ export function createTransformerView2dDetailView(panelEl, {
     function rebuildSceneState() {
         state.scene = buildTransformerSceneModel({
             activationSource: state.activationSource,
+            layerCount: state.layerCount,
             tokenIndices: state.tokenIndices,
             tokenLabels: state.tokenLabels,
             isSmallScreen: state.isSmallScreen,
@@ -4552,6 +4580,8 @@ export function createTransformerView2dDetailView(panelEl, {
     fitBtn?.addEventListener('click', () => {
         clearStagedHeadDetailTransition();
         clearStagedDetailTransition();
+        clearPinnedSceneSelectionLocks({ scheduleRender: false });
+        clearCanvasHover({ scheduleRender: false, force: true });
         fitScene({ animate: true });
         focusCanvasSurface();
     });
@@ -4688,6 +4718,7 @@ export function createTransformerView2dDetailView(panelEl, {
         },
         open({
             activationSource = null,
+            layerCount = null,
             tokenIndices = null,
             tokenLabels = null,
             semanticTarget = null,
@@ -4706,6 +4737,10 @@ export function createTransformerView2dDetailView(panelEl, {
             state.isSmallScreen = !!isSmallScreen;
             setSelectionSidebarVisible(initialSelectionSidebarVisible === true, { immediate: true });
             state.activationSource = activationSource;
+            state.layerCount = resolveTransformerView2dLayerCount({
+                layerCount,
+                activationSource
+            });
             state.tokenIndices = Array.isArray(tokenIndices) ? [...tokenIndices] : tokenIndices;
             state.tokenLabels = Array.isArray(tokenLabels) ? [...tokenLabels] : tokenLabels;
             const normalizedDetailSemanticTargets = normalizeView2dSemanticTargets(detailSemanticTargets);

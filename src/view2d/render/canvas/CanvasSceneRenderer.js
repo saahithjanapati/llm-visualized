@@ -402,7 +402,9 @@ function drawVectorStripRows(
         );
     const hasFocusedRows = focusedRowIndexSet.size > 0;
     const resolveHighlightStrength = (index) => {
-        if (hasFocusedRows) return 0;
+        if (hasFocusedRows) {
+            return focusedRowIndexSet.has(index) ? 1 : 0;
+        }
         let strength = 0;
         if (Number.isFinite(hoveredRowIndex) && index === hoveredRowIndex) {
             strength = Math.max(strength, Math.max(0, Math.min(1, hoverRowBlend)));

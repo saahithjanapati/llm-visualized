@@ -2652,6 +2652,83 @@ describe('CanvasSceneRenderer', () => {
         expect(hit?.rowHit?.rowIndex).toBe(1);
     });
 
+    it('renders focused compact-row selections with the same stroke highlight used for hovered rows', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const matrixNode = createMatrixNode({
+            id: 'focused-row-node',
+            role: 'module-card',
+            semantic: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module-card'
+            },
+            dimensions: { rows: 3, cols: 768 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 6,
+                    rowGap: 0,
+                    paddingX: 0,
+                    paddingY: 0,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT,
+                    hoverScaleY: 1.16,
+                    hoverGlowColor: 'rgba(255,255,255,0.08)',
+                    hoverGlowBlur: 12,
+                    hoverStrokeColor: 'rgba(255,255,255,0.10)'
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [matrixNode]
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            },
+            interactionState: {
+                detailSceneFocus: {
+                    activeNodeIds: [matrixNode.id],
+                    rowSelections: [
+                        { nodeId: matrixNode.id, rowIndex: 1 }
+                    ]
+                }
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(matrixNode.id);
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+
+        const expectedY = entry.contentBounds.y + entry.layoutData.innerPaddingY + entry.layoutData.rowHeight + 0.5;
+        const strokeRect = ctx.operations.find((operation) => (
+            operation.type === 'strokeRect'
+            && Math.abs(operation.y - expectedY) < 1.25
+        ));
+
+        expect(strokeRect).toBeTruthy();
+    });
+
     it('resolves band hits for band-interactive compact-row vector strips', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);

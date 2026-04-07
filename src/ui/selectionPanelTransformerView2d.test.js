@@ -2218,6 +2218,7 @@ describe('createTransformerView2dDetailView', () => {
         view.setVisible(true);
         view.open({
             activationSource,
+            layerCount: 1,
             tokenIndices,
             tokenLabels,
             isSmallScreen: true
@@ -2622,6 +2623,7 @@ describe('createTransformerView2dDetailView', () => {
         view.setVisible(true);
         view.open({
             activationSource,
+            layerCount: 1,
             tokenIndices,
             tokenLabels,
             semanticTarget: {
@@ -2688,6 +2690,7 @@ describe('createTransformerView2dDetailView', () => {
         view.setVisible(true);
         view.open({
             activationSource,
+            layerCount: 1,
             tokenIndices,
             tokenLabels,
             semanticTarget: {
@@ -2807,6 +2810,7 @@ describe('createTransformerView2dDetailView', () => {
         view.setVisible(true);
         view.open({
             activationSource,
+            layerCount: 1,
             tokenIndices,
             tokenLabels
         });
