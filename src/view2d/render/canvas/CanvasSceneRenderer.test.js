@@ -2572,6 +2572,86 @@ describe('CanvasSceneRenderer', () => {
         expect(hit?.rowHit?.rowIndex).toBe(1);
     });
 
+    it('resolves zoomed-out residual row hits from the card footprint outside the compact strip width', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const residualNode = createMatrixNode({
+            id: 'zoomed-out-residual-card-node',
+            role: 'module-card',
+            semantic: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module-card'
+            },
+            dimensions: { rows: 3, cols: 768 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 6,
+                    rowGap: 0,
+                    paddingX: 12,
+                    paddingY: 8,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        renderer.setScene(createSceneModel({
+            nodes: [residualNode]
+        }));
+
+        expect(renderer.render({
+            width: 400,
+            height: 240,
+            dpr: 1,
+            viewportTransform: {
+                scale: 0.25,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const entry = renderer.layout?.registry?.getNodeEntry(residualNode.id);
+        const renderState = renderer.getLastRenderState();
+        expect(entry?.bounds).toBeTruthy();
+        expect(entry?.contentBounds).toBeTruthy();
+        expect(entry?.layoutData).toBeTruthy();
+        expect(renderState?.worldScale).toBeGreaterThan(0);
+
+        const worldScale = renderState.worldScale;
+        const offsetX = renderState.offsetX || 0;
+        const offsetY = renderState.offsetY || 0;
+        const screenEntryBounds = {
+            x: offsetX + (entry.bounds.x * worldScale),
+            y: offsetY + (entry.bounds.y * worldScale),
+            width: entry.bounds.width * worldScale,
+            height: entry.bounds.height * worldScale
+        };
+        const screenStripRight = offsetX + ((entry.contentBounds.x + entry.layoutData.innerPaddingX + entry.layoutData.compactWidth) * worldScale);
+        const hoverX = Math.min(screenEntryBounds.x + screenEntryBounds.width - 1, screenStripRight + 12);
+        const hoverY = offsetY + ((entry.contentBounds.y + entry.layoutData.innerPaddingY + entry.layoutData.rowHeight + (entry.layoutData.rowHeight * 0.5)) * worldScale);
+
+        expect(hoverX).toBeGreaterThan(screenStripRight);
+
+        const hit = renderer.resolveInteractiveHitAtScreenPoint(hoverX, hoverY);
+
+        expect(hit?.node?.id).toBe(residualNode.id);
+        expect(hit?.rowHit?.rowIndex).toBe(1);
+    });
+
     it('resolves band hits for band-interactive compact-row vector strips', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);

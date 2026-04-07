@@ -835,9 +835,9 @@ function resolveTrackIndex(relativeOffset = 0, itemSize = 0, itemGap = 0, itemCo
     };
 }
 
-const OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX = 6;
-const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_WIDTH_PX = 28;
-const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_HEIGHT_PX = 22;
+const OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX = 10;
+const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_WIDTH_PX = 42;
+const OVERVIEW_RESIDUAL_ROW_MIN_SCREEN_TARGET_HEIGHT_PX = 28;
 
 function isOverviewResidualVectorStripNode(node = null) {
     return !!(
@@ -960,10 +960,15 @@ function resolveApproximateOverviewResidualRowHitAtScreenPoint(drawableNodes = [
                 Math.max(1, (Number(entry.contentBounds?.width) || 0) - (innerPaddingXWorld * 2))
             )
         );
+        const rowTargetWidthWorld = Math.max(
+            compactWidthWorld,
+            Math.max(1, Number(entry.bounds?.width) || 0),
+            Math.max(1, Number(screenEntryBounds.width) || 0) / worldScale
+        );
         const rowAreaBounds = expandScreenBounds({
-            x: screenContentBounds.x + (innerPaddingXWorld * worldScale),
+            x: screenEntryBounds.x,
             y: screenContentBounds.y + (innerPaddingYWorld * worldScale),
-            width: compactWidthWorld * worldScale,
+            width: rowTargetWidthWorld * worldScale,
             height: Math.max(
                 1,
                 (screenContentBounds.height - (innerPaddingYWorld * worldScale * 2))
@@ -979,7 +984,7 @@ function resolveApproximateOverviewResidualRowHitAtScreenPoint(drawableNodes = [
         const rowGapPx = Math.max(0, (Number(layoutData.rowGap) || 0) * worldScale);
         const stridePx = Math.max(0.0001, rowHeightPx + rowGapPx);
         const rowCenterBaseY = screenContentBounds.y + (innerPaddingYWorld * worldScale) + (rowHeightPx * 0.5);
-        const rowCenterX = screenContentBounds.x + (innerPaddingXWorld * worldScale) + ((compactWidthWorld * worldScale) * 0.5);
+        const rowCenterX = screenEntryBounds.x + ((rowTargetWidthWorld * worldScale) * 0.5);
 
         let bestRowIndex = 0;
         let bestRowDistance = Number.POSITIVE_INFINITY;
