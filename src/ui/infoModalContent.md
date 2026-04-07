@@ -37,6 +37,7 @@ Below is an incomplete list of projects, papers, and references that inspired th
 
 - [Andrej Karpathy's minGPT repo](https://github.com/karpathy/minGPT) and the [Zero to Hero series](https://www.youtube.com/playlist?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ)
 - The diagrams in Anthropic's [A Mathematical Framework for Transformer Circuits](https://transformer-circuits.pub/2021/framework/index.html)
+- Oriol Vinyals' post that vectors are ["The soul of a neural network"](https://x.com/OriolVinyalsML/status/1796970824353595510)
 - The diagrams in [Locating and Editing Factual Associations in GPT](https://arxiv.org/pdf/2202.05262)
 - [distill.pub](https://distill.pub/)
 - Brendan Bycroft's [3D GPT Visualization](https://bbycroft.net/llm)
@@ -55,7 +56,6 @@ Below is an incomplete list of projects, papers, and references that inspired th
 - roon (@tszzl)'s post that [latent space is best explored in person](https://x.com/tszzl/status/1964842112438161707)
 - roon (@tszzl)'s essay [Text is the universal interface](https://scale.com/blog/text-universal-interface)
 - Sasha Rush's [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
-- Oriol Vinyals' note that vectors are ["The soul of a neural network"](https://x.com/OriolVinyalsML/status/1796970824353595510)
 - Andrej Karpathy's short story [A Forward Pass](https://karpathy.github.io/2021/03/27/forward-pass/)
 
 ## Limitations and Next Steps
