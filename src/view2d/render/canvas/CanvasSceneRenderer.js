@@ -932,18 +932,19 @@ function resolveApproximateOverviewResidualRowHitAtScreenPoint(drawableNodes = [
     const worldScale = Number(renderState?.worldScale);
     if (!(worldScale > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
 
-    const isCompetingScreenNodeAtPoint = (candidateNodeId = '') => {
+    const resolveTopmostScreenNodeIdAtPoint = () => {
         for (let index = drawableNodes.length - 1; index >= 0; index -= 1) {
             const drawable = drawableNodes[index];
             const node = drawable?.node || null;
             const entry = drawable?.entry || null;
-            if (!node || !entry || node.id === candidateNodeId) continue;
+            if (!node || !entry) continue;
             const screenBounds = projectWorldBoundsToScreen(entry.bounds || entry.contentBounds, renderState);
             if (!screenBounds || !containsPoint(screenBounds, x, y)) continue;
-            return true;
+            return node.id;
         }
-        return false;
+        return '';
     };
+    const topmostScreenNodeId = resolveTopmostScreenNodeIdAtPoint();
 
     let bestCandidate = null;
     let bestScore = Number.POSITIVE_INFINITY;
@@ -994,7 +995,7 @@ function resolveApproximateOverviewResidualRowHitAtScreenPoint(drawableNodes = [
             paddingPx: OVERVIEW_RESIDUAL_ROW_SCREEN_HOVER_PADDING_PX
         });
         if (!containsPoint(rowAreaBounds, x, y)) return;
-        if (isCompetingScreenNodeAtPoint(node.id)) return;
+        if (topmostScreenNodeId && topmostScreenNodeId !== node.id) return;
 
         const rowHeightPx = Math.max(0.0001, (Number(layoutData.rowHeight) || 0) * worldScale);
         const rowGapPx = Math.max(0, (Number(layoutData.rowGap) || 0) * worldScale);

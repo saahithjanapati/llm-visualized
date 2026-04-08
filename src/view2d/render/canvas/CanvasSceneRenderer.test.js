@@ -2756,6 +2756,104 @@ describe('CanvasSceneRenderer', () => {
         expect(hit?.rowHit).toBeNull();
     });
 
+    it('keeps residual fallback row hovers when overlapping nodes sit behind the residual strip', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx);
+        const renderer = new CanvasSceneRenderer({ canvas });
+
+        const competingNode = createMatrixNode({
+            id: 'background-overview-node',
+            role: 'projection-weight',
+            semantic: {
+                componentKind: 'projection',
+                layerIndex: 0,
+                stage: 'qkv.q',
+                role: 'projection-weight'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.MHSA_Q
+            }
+        });
+        const residualNode = createMatrixNode({
+            id: 'foreground-residual-node',
+            role: 'module-card',
+            semantic: {
+                componentKind: 'residual',
+                layerIndex: 0,
+                stage: 'incoming',
+                role: 'module-card'
+            },
+            dimensions: { rows: 3, cols: 768 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.COMPACT_ROWS,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            rowItems: [
+                { label: 'Token A', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token B', gradientCss: 'rgba(80, 160, 255, 0.96)' },
+                { label: 'Token C', gradientCss: 'rgba(80, 160, 255, 0.96)' }
+            ],
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                compactRows: {
+                    compactWidth: 120,
+                    rowHeight: 6,
+                    rowGap: 0,
+                    paddingX: 12,
+                    paddingY: 8,
+                    variant: VIEW2D_VECTOR_STRIP_VARIANT
+                }
+            }
+        });
+
+        const competingEntry = {
+            bounds: { x: 0, y: 0, width: 96, height: 48 },
+            contentBounds: { x: 0, y: 0, width: 96, height: 48 },
+            layoutData: {}
+        };
+        const residualEntry = {
+            bounds: { x: 0, y: 0, width: 168, height: 64 },
+            contentBounds: { x: 0, y: 0, width: 168, height: 64 },
+            layoutData: {
+                innerPaddingX: 12,
+                innerPaddingY: 8,
+                compactWidth: 120,
+                rowHeight: 6,
+                rowGap: 0
+            }
+        };
+
+        renderer.drawableNodes = [
+            { node: competingNode, entry: competingEntry },
+            { node: residualNode, entry: residualEntry }
+        ];
+        renderer.visibleDrawableNodes = renderer.drawableNodes;
+        renderer.lastRenderState = {
+            worldScale: 0.25,
+            offsetX: 0,
+            offsetY: 0
+        };
+        renderer.resolveInteractiveHitAtPoint = () => ({
+            entry: {
+                nodeId: competingNode.id
+            },
+            node: competingNode,
+            rowHit: null,
+            cellHit: null,
+            columnHit: null
+        });
+
+        const hoverX = 12;
+        const hoverY = (residualEntry.layoutData.innerPaddingY + residualEntry.layoutData.rowHeight + (residualEntry.layoutData.rowHeight * 0.5)) * renderer.lastRenderState.worldScale;
+        const hit = renderer.resolveInteractiveHitAtScreenPoint(hoverX, hoverY);
+
+        expect(hit?.node?.id).toBe(residualNode.id);
+        expect(hit?.rowHit?.rowIndex).toBe(1);
+    });
+
     it('renders focused compact-row selections with the same stroke highlight used for hovered rows', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx);
