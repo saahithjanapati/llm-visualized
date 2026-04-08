@@ -1556,10 +1556,21 @@ export function createTransformerView2dDetailView(panelEl, {
         return Math.max(safeBaseMinScale, fitScale * safeFitScaleRatio);
     }
 
+    function shouldUseOverviewZoomFloorForSelectionTarget(semanticTarget = null) {
+        const role = String(semanticTarget?.role || '').trim().toLowerCase();
+        return role === 'input-token-chip-group'
+            || role === 'input-position-chip-group'
+            || role === 'chosen-token-chip-group';
+    }
+
     function resolveSelectionViewportMinScale({
         overviewMinScale = VIEW2D_DETAIL_VIEWPORT_MIN_SCALE
     } = {}) {
-        if (isTransformerView2dGraphOverview() || state.preserveOverviewViewportForSelection) {
+        if (
+            isTransformerView2dGraphOverview()
+            || state.preserveOverviewViewportForSelection
+            || shouldUseOverviewZoomFloorForSelectionTarget(state.semanticTarget)
+        ) {
             return overviewMinScale;
         }
         const trackedSelectionFocusScale = Number(state.selectionFocusScale) || 0;

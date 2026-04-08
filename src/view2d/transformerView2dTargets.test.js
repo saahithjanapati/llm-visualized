@@ -73,7 +73,7 @@ describe('transformerView2dTargets', () => {
                 positionIndex: 3
             }
         });
-        expect(context?.transitionMode || '').toBe('staged-focus');
+        expect(context?.transitionMode || '').toBe('direct');
     });
 
     it('maps vocabulary embedding selections to the overview embedding card instead of a synthetic stage', () => {

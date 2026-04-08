@@ -1556,6 +1556,14 @@ export function resolveTransformerView2dOpenTransitionMode({
     const safeTarget = buildSemanticTarget(semanticTarget);
     if (!safeTarget) return '';
 
+    if (
+        safeTarget.role === 'input-token-chip-group'
+        || safeTarget.role === 'input-position-chip-group'
+        || safeTarget.role === 'chosen-token-chip-group'
+    ) {
+        return 'direct';
+    }
+
     const detailTargets = resolveDetailTargetsFromSemanticTarget(safeTarget);
     if (hasActiveDetailTarget(detailTargets)) {
         return 'direct';

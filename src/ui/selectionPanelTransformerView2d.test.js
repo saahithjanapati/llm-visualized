@@ -2593,6 +2593,95 @@ describe('createTransformerView2dDetailView', () => {
         );
     });
 
+    it('opens overview token-chip targets directly and still allows zooming and fitting back to the full overview', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const fitBtn = panelEl.querySelector('[data-transformer-view2d-action="fit-scene"]');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels,
+            layerCount: 1
+        });
+        const layout = buildSceneLayout(scene, {
+            isSmallScreen: false
+        });
+        const overviewFitTransform = resolveViewportFitTransform(layout.sceneBounds, {
+            width: 960,
+            height: 600
+        }, {
+            padding: 28,
+            minScale: TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT,
+            maxScale: 10
+        });
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            layerCount: 1,
+            tokenIndices,
+            tokenLabels,
+            semanticTarget: {
+                componentKind: 'embedding',
+                stage: 'embedding.token',
+                role: 'input-token-chip-group',
+                tokenIndex: 1,
+                positionIndex: 1
+            },
+            focusLabel: 'Token: B',
+            transitionMode: 'direct'
+        });
+        await vi.advanceTimersByTimeAsync(32);
+
+        const openedViewportState = view.getViewportState();
+        expect(openedViewportState.scale).toBeGreaterThanOrEqual(overviewFitTransform.scale);
+
+        await vi.advanceTimersByTimeAsync(500);
+        expect(view.getViewportState().scale).toBeCloseTo(openedViewportState.scale, 6);
+
+        for (let index = 0; index < 18; index += 1) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: 480,
+                clientY: 300,
+                deltaY: 480
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        const zoomedOutViewportState = view.getViewportState();
+        expect(zoomedOutViewportState.scale).toBeLessThan(openedViewportState.scale);
+        expect(zoomedOutViewportState.scale).toBeLessThanOrEqual(overviewFitTransform.scale);
+        expect(zoomedOutViewportState.scale).toBeGreaterThanOrEqual(TRANSFORMER_VIEW2D_OVERVIEW_MIN_SCALE_DEFAULT);
+
+        for (let index = 0; index < 10; index += 1) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: 480,
+                clientY: 300,
+                deltaY: -480
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        expect(view.getViewportState().scale).toBeGreaterThan(zoomedOutViewportState.scale);
+
+        fitBtn?.click();
+        await vi.advanceTimersByTimeAsync(500);
+
+        const refitViewportState = view.getViewportState();
+        expect(refitViewportState.scale).toBeCloseTo(overviewFitTransform.scale, 5);
+        expect(refitViewportState.panX).toBeCloseTo(overviewFitTransform.panX, 5);
+        expect(refitViewportState.panY).toBeCloseTo(overviewFitTransform.panY, 5);
+    });
+
     it('opens with the matching overview residual row already locked from a source selection target', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);
