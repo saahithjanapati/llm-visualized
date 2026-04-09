@@ -80,4 +80,75 @@ describe('CoreEngine invalidation loop', () => {
         expect(engine._shouldUpdateLayer(layer, { paused: true })).toBe(true);
         expect(layer.needsFrameUpdate).toHaveBeenCalledTimes(2);
     });
+
+    it('prefers raycast roots from active and nearby layers while keeping always-on roots', () => {
+        const engine = createEngine();
+        const rootLayer0 = { userData: { layerIndex: 0 } };
+        const rootLayer1 = { userData: { layerIndex: 1 } };
+        const rootLayer2 = { userData: { layerIndex: 2 } };
+        const rootLayer5 = { userData: { layerIndex: 5 } };
+        const persistentRoot = { userData: {} };
+
+        engine._layers = [
+            { index: 0, isActive: false, _transitionPhase: 'complete' },
+            { index: 1, isActive: false, _transitionPhase: 'complete' },
+            { index: 2, isActive: true, _transitionPhase: 'complete' },
+            { index: 5, isActive: false, _transitionPhase: 'complete' }
+        ];
+        engine._raycastRoots = [rootLayer0, rootLayer1, rootLayer2, rootLayer5, persistentRoot];
+
+        expect(engine._resolvePreferredRaycastRoots()).toEqual([
+            rootLayer1,
+            rootLayer2,
+            persistentRoot
+        ]);
+    });
+
+    it('falls back to the full raycast root list when the preferred roots miss', () => {
+        const engine = createEngine();
+        const preferredRoot = { userData: { layerIndex: 1 } };
+        const fullOnlyRoot = { userData: { layerIndex: 5 } };
+
+        engine._layers = [
+            { index: 1, isActive: true, _transitionPhase: 'complete' },
+            { index: 5, isActive: false, _transitionPhase: 'complete' }
+        ];
+        engine._raycastRoots = [preferredRoot, fullOnlyRoot];
+        const intersectSpy = vi.fn((roots) => {
+            if (roots.length === 1 && roots[0] === preferredRoot) {
+                return [];
+            }
+            return [{ object: fullOnlyRoot }];
+        });
+        engine._intersectRaycastRoots = intersectSpy;
+
+        expect(engine._intersectPreferredRaycastRoots()).toEqual({
+            intersects: [{ object: fullOnlyRoot }],
+            passCount: 2
+        });
+        expect(intersectSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('avoids the full-root fallback when the preferred roots already hit', () => {
+        const engine = createEngine();
+        const preferredRoot = { userData: { layerIndex: 1 } };
+        const fullOnlyRoot = { userData: { layerIndex: 5 } };
+
+        engine._layers = [
+            { index: 1, isActive: true, _transitionPhase: 'complete' },
+            { index: 5, isActive: false, _transitionPhase: 'complete' }
+        ];
+        engine._raycastRoots = [preferredRoot, fullOnlyRoot];
+
+        const preferredRoots = engine._resolvePreferredRaycastRoots();
+        const intersectSpy = vi.fn(() => [{ object: preferredRoot }]);
+        engine._intersectRaycastRoots = intersectSpy;
+
+        expect(engine._intersectPreferredRaycastRoots()).toEqual({
+            intersects: [{ object: preferredRoot }],
+            passCount: 1
+        });
+        expect(intersectSpy).toHaveBeenCalledWith(preferredRoots);
+        expect(intersectSpy).toHaveBeenCalledTimes(1);
+    });
 });

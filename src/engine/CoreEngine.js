@@ -698,6 +698,66 @@ export class CoreEngine {
         return !!this._isUserNavigating;
     }
 
+    _getActiveRaycastLayerIndices() {
+        const activeIndices = new Set();
+        if (!Array.isArray(this._layers) || !this._layers.length) {
+            return activeIndices;
+        }
+        for (let i = 0; i < this._layers.length; i += 1) {
+            const layer = this._layers[i];
+            const layerIndex = Number.isFinite(layer?.index) ? Math.floor(layer.index) : null;
+            if (!Number.isFinite(layerIndex)) continue;
+            if (!(layer?.isActive || layer?._transitionPhase === 'positioning')) continue;
+            activeIndices.add(layerIndex);
+            activeIndices.add(layerIndex - 1);
+            activeIndices.add(layerIndex + 1);
+        }
+        return activeIndices;
+    }
+
+    _resolvePreferredRaycastRoots() {
+        const roots = Array.isArray(this._raycastRoots) ? this._raycastRoots : [];
+        if (roots.length <= 1) return roots;
+        const activeLayerIndices = this._getActiveRaycastLayerIndices();
+        if (!activeLayerIndices.size) return roots;
+
+        const preferredRoots = roots.filter((root) => {
+            const layerIndex = Number.isFinite(root?.userData?.layerIndex)
+                ? Math.floor(root.userData.layerIndex)
+                : null;
+            if (!Number.isFinite(layerIndex)) return true;
+            return activeLayerIndices.has(layerIndex);
+        });
+        return preferredRoots.length ? preferredRoots : roots;
+    }
+
+    _intersectRaycastRoots(roots = []) {
+        if (!Array.isArray(roots) || !roots.length) return [];
+        return this._raycaster.intersectObjects(roots, true);
+    }
+
+    _intersectPreferredRaycastRoots() {
+        const allRoots = Array.isArray(this._raycastRoots) ? this._raycastRoots : [];
+        if (!allRoots.length) {
+            return {
+                intersects: [],
+                passCount: 0
+            };
+        }
+        const preferredRoots = this._resolvePreferredRaycastRoots();
+        const preferredIntersects = this._intersectRaycastRoots(preferredRoots);
+        if (preferredIntersects.length > 0 || preferredRoots === allRoots) {
+            return {
+                intersects: preferredIntersects,
+                passCount: preferredRoots.length ? 1 : 0
+            };
+        }
+        return {
+            intersects: this._intersectRaycastRoots(allRoots),
+            passCount: 2
+        };
+    }
+
     /** Inform the engine that the camera or controls were changed programmatically. */
     notifyCameraUpdated() {
         if (!this.controls) return;
@@ -1780,9 +1840,9 @@ export class CoreEngine {
             return;
         }
 
-        const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
+        const { intersects, passCount } = this._intersectPreferredRaycastRoots();
         if (perfStats.enabled) {
-            perfStats.inc('raycasts');
+            perfStats.inc('raycasts', Math.max(1, passCount || 0));
             perfStats.inc('raycastIntersects', intersects.length);
         }
         const resolved = this._resolveRaycastLabel(intersects);
@@ -2108,9 +2168,9 @@ export class CoreEngine {
             return;
         }
 
-        const intersects = this._raycaster.intersectObjects(this._raycastRoots, true);
+        const { intersects, passCount } = this._intersectPreferredRaycastRoots();
         if (perfStats.enabled) {
-            perfStats.inc('selectRaycasts');
+            perfStats.inc('selectRaycasts', Math.max(1, passCount || 0));
             perfStats.inc('raycastIntersects', intersects.length);
         }
         const resolved = this._resolveRaycastLabel(intersects);
