@@ -2988,7 +2988,8 @@ function drawConnector(
     {
         skipArrowHead = false,
         focusAlpha = 1,
-        emphasize = false
+        emphasize = false,
+        disableScreenSnap = false
     } = {}
 ) {
     const points = Array.isArray(connectorEntry.pathPoints) ? connectorEntry.pathPoints : [];
@@ -3017,14 +3018,14 @@ function drawConnector(
         && connectorEntry.metadata.fixedScreenArrowHeadWingPx > 0
         ? Number(connectorEntry.metadata.fixedScreenArrowHeadWingPx)
         : null;
-    const disableScreenSnap = connectorEntry?.metadata?.disableScreenSnap === true;
+    const shouldDisableScreenSnap = disableScreenSnap || connectorEntry?.metadata?.disableScreenSnap === true;
     const strokeOpacity = safeWorldScale < 0.35
         ? 0.46
         : (safeWorldScale < 0.7 ? 0.54 : (safeWorldScale < 1.25 ? 0.66 : 0.78));
     const flattenedForegroundStroke = connectorEntry?.metadata?.preserveColor === true
         ? foregroundStroke
         : (flattenColorAgainstBlack(foregroundStroke, strokeOpacity) || foregroundStroke);
-    const renderPoints = disableScreenSnap
+    const renderPoints = shouldDisableScreenSnap
         ? points
         : points.map((point) => snapWorldPointToConnectorGrid(point, safeWorldScale));
     const tailPoint = renderPoints[Math.max(0, renderPoints.length - 2)];
@@ -3843,7 +3844,8 @@ export class CanvasSceneRenderer {
             const focusAlpha = resolveConnectorFocusAlpha(node, sceneFocusState);
             drawConnector(ctx, entry, config, stroke, worldScale, {
                 focusAlpha,
-                emphasize: focusAlpha >= 0.995
+                emphasize: focusAlpha >= 0.995,
+                disableScreenSnap: interactionFastPath
             });
         });
 
@@ -3897,7 +3899,8 @@ export class CanvasSceneRenderer {
         focusedConnectors.forEach(({ node, entry, stroke }) => {
             drawConnector(ctx, entry, config, stroke, worldScale, {
                 focusAlpha,
-                emphasize: focusAlpha >= 0.995
+                emphasize: focusAlpha >= 0.995,
+                disableScreenSnap: true
             });
         });
     }
@@ -4003,7 +4006,8 @@ export class CanvasSceneRenderer {
         hoveredConnectors.forEach(({ entry, stroke }) => {
             drawConnector(ctx, entry, config, stroke, worldScale, {
                 focusAlpha: 1,
-                emphasize: false
+                emphasize: false,
+                disableScreenSnap: interactionFastPath
             });
         });
 
@@ -4308,7 +4312,8 @@ export class CanvasSceneRenderer {
                     const focusAlpha = resolveConnectorFocusAlpha(node, sceneFocusState);
                     drawConnector(ctx, entry, config, stroke, detailWorldScale, {
                         focusAlpha,
-                        emphasize: focusAlpha >= 0.995
+                        emphasize: focusAlpha >= 0.995,
+                        disableScreenSnap: interactionFastPath
                     });
                 });
                 ctx.restore();
