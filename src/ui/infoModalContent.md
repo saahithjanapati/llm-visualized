@@ -33,7 +33,7 @@ The 3D visualization was built with Three.js and the site is currently deployed 
 
 ## Some Sources of Inspiration
 
-Below is an incomplete list of projects, papers, and references that inspired the project in some way.
+Below is an incomplete list of sources that inspired this project in some way. If you like this project, you might like these too!
 
 - [Andrej Karpathy's minGPT repo](https://github.com/karpathy/minGPT) and the [Zero to Hero series](https://www.youtube.com/playlist?list=PLAqhIrjkxbuWI23v9cThsA9GvCAUhRvKZ)
 - The diagrams in Anthropic's [A Mathematical Framework for Transformer Circuits](https://transformer-circuits.pub/2021/framework/index.html)
