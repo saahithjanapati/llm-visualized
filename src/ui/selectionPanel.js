@@ -9464,7 +9464,10 @@ export class SelectionPanel {
             .map((node) => ({
                 node,
                 parent: node.parentNode || null,
-                nextSibling: node.nextSibling || null
+                nextSibling: node.nextSibling || null,
+                placeholder: (typeof document !== 'undefined' && typeof document.createComment === 'function')
+                    ? document.createComment('transformer-view2d-selection-sidebar-slot')
+                    : null
             }));
         return this._transformerView2dSelectionSidebarDockRecords;
     }
@@ -9473,10 +9476,24 @@ export class SelectionPanel {
         const sidebarBody = this._transformerView2dDetailView?.getSelectionSidebarBody?.() || null;
         if (!sidebarBody) return false;
         const records = this._ensureTransformerView2dSelectionSidebarDockRecords();
-        records.forEach(({ node }) => {
+        const fragment = (typeof document !== 'undefined' && typeof document.createDocumentFragment === 'function')
+            ? document.createDocumentFragment()
+            : null;
+        records.forEach((record) => {
+            const { node, placeholder } = record || {};
             if (!node || node.parentNode === sidebarBody) return;
-            sidebarBody.appendChild(node);
+            if (placeholder && record.parent && placeholder.parentNode !== record.parent) {
+                record.parent.replaceChild(placeholder, node);
+            }
+            if (fragment) {
+                fragment.appendChild(node);
+            } else {
+                sidebarBody.appendChild(node);
+            }
         });
+        if (fragment?.childNodes?.length) {
+            sidebarBody.appendChild(fragment);
+        }
         this._transformerView2dSelectionSidebarDocked = true;
         return records.length > 0;
     }
@@ -9487,8 +9504,12 @@ export class SelectionPanel {
             this._transformerView2dSelectionSidebarDocked = false;
             return false;
         }
-        records.forEach(({ node, parent, nextSibling }) => {
+        records.forEach(({ node, parent, nextSibling, placeholder }) => {
             if (!node || !parent) return;
+            if (placeholder?.parentNode === parent) {
+                parent.replaceChild(node, placeholder);
+                return;
+            }
             if (nextSibling && nextSibling.parentNode === parent) {
                 parent.insertBefore(node, nextSibling);
                 return;
@@ -9562,8 +9583,7 @@ export class SelectionPanel {
             this._onResize();
             this._renderPreviewSnapshot();
             this._startLoop();
-        } else {
-            this._scheduleResize();
+            return true;
         }
         this._scheduleResize();
         return true;

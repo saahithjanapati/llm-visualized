@@ -20,6 +20,80 @@ function createClassListMock() {
     };
 }
 
+function createMockParentNode(name = 'parent') {
+    return {
+        name,
+        children: [],
+        appendChild(node) {
+            if (!node) return node;
+            if (node.nodeType === 11 && Array.isArray(node.childNodes)) {
+                const nodes = node.childNodes.slice();
+                node.childNodes.length = 0;
+                nodes.forEach((child) => this.appendChild(child));
+                return node;
+            }
+            if (node.parentNode && node.parentNode !== this && typeof node.parentNode.removeChild === 'function') {
+                node.parentNode.removeChild(node);
+            }
+            if (!this.children.includes(node)) {
+                this.children.push(node);
+            }
+            node.parentNode = this;
+            return node;
+        },
+        insertBefore(node, referenceNode) {
+            if (!referenceNode) {
+                return this.appendChild(node);
+            }
+            if (node.parentNode && node.parentNode !== this && typeof node.parentNode.removeChild === 'function') {
+                node.parentNode.removeChild(node);
+            }
+            const referenceIndex = this.children.indexOf(referenceNode);
+            if (referenceIndex === -1) {
+                this.children.push(node);
+            } else {
+                const existingIndex = this.children.indexOf(node);
+                if (existingIndex !== -1) {
+                    this.children.splice(existingIndex, 1);
+                }
+                this.children.splice(referenceIndex, 0, node);
+            }
+            node.parentNode = this;
+            return node;
+        },
+        replaceChild(nextNode, prevNode) {
+            const prevIndex = this.children.indexOf(prevNode);
+            if (prevIndex === -1) {
+                return this.appendChild(nextNode);
+            }
+            if (nextNode.parentNode && nextNode.parentNode !== this && typeof nextNode.parentNode.removeChild === 'function') {
+                nextNode.parentNode.removeChild(nextNode);
+            }
+            this.children.splice(prevIndex, 1, nextNode);
+            nextNode.parentNode = this;
+            if (prevNode) {
+                prevNode.parentNode = null;
+            }
+            return prevNode;
+        },
+        removeChild(node) {
+            const index = this.children.indexOf(node);
+            if (index !== -1) {
+                this.children.splice(index, 1);
+                node.parentNode = null;
+            }
+            return node;
+        }
+    };
+}
+
+function createMockElement(name) {
+    return {
+        name,
+        parentNode: null
+    };
+}
+
 function createPanelContext() {
     const panel = Object.create(SelectionPanel.prototype);
     panel.isOpen = true;
@@ -100,6 +174,9 @@ function createPanelContext() {
     panel._attentionPostAnimatedRows = { clear: vi.fn() };
     panel._currentTransformerView2dContext = null;
     panel._transformerView2dDetailOpen = false;
+    panel._transformerView2dSelectionSidebarDockRecords = [];
+    panel._transformerView2dSelectionSidebarDocked = false;
+    panel._transformerView2dSelectionSidebarRestoreTimer = null;
     panel.engine = {
         pause: vi.fn()
     };
@@ -130,6 +207,60 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
 
         expect(sections.at(-2)).toBe(panel.dataSection);
         expect(sections.at(-1)).toBe(panel.copyContextRow);
+    });
+
+    it('restores docked 2D sidebar sections back to their original DOM slots', () => {
+        const panel = createPanelContext();
+        const host = createMockParentNode('host');
+        const before = createMockElement('before');
+        const sectionA = createMockElement('section-a');
+        const between = createMockElement('between');
+        const sectionB = createMockElement('section-b');
+        const after = createMockElement('after');
+        host.appendChild(before);
+        host.appendChild(sectionA);
+        host.appendChild(between);
+        host.appendChild(sectionB);
+        host.appendChild(after);
+
+        const sidebarBody = createMockParentNode('sidebar');
+        panel.previewRoot = sectionA;
+        panel.vectorLegend = sectionB;
+        panel._transformerView2dDetailView = {
+            ...panel._transformerView2dDetailView,
+            getSelectionSidebarBody: vi.fn(() => sidebarBody)
+        };
+        vi.stubGlobal('document', {
+            createComment: () => ({ nodeType: 8, parentNode: null }),
+            createDocumentFragment: () => ({ nodeType: 11, childNodes: [], appendChild(node) { this.childNodes.push(node); return node; } })
+        });
+
+        try {
+            const docked = panel._dockTransformerView2dSelectionSidebarSections();
+
+            expect(docked).toBe(true);
+            expect(sidebarBody.children).toEqual([sectionA, sectionB]);
+            expect(host.children).toEqual([
+                before,
+                panel._transformerView2dSelectionSidebarDockRecords[0].placeholder,
+                between,
+                panel._transformerView2dSelectionSidebarDockRecords[1].placeholder,
+                after
+            ]);
+
+            const restored = panel._restoreTransformerView2dSelectionSidebarSections();
+
+            expect(restored).toBe(true);
+            expect(host.children).toEqual([before, sectionA, between, sectionB, after]);
+            expect(sidebarBody.children).toEqual([]);
+        } finally {
+            vi.unstubAllGlobals();
+            vi.stubGlobal('localStorage', {
+                getItem: () => null,
+                setItem: () => {},
+                removeItem: () => {}
+            });
+        }
     });
 
     it('schedules hidden 2D view prewarm when the action button becomes available', () => {
@@ -252,6 +383,49 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         expect(shown).toBe(true);
         expect(panel._transformerView2dDetailView.setSelectionSidebarVisible).not.toHaveBeenCalled();
         expect(panel._transformerView2dDetailView.scrollSelectionSidebarToTop).toHaveBeenCalledTimes(1);
+    });
+
+    it('avoids scheduling an extra resize when opening the docked 2D sidebar while the panel is already open', () => {
+        const panel = createPanelContext();
+        panel._dockTransformerView2dSelectionSidebarSections = vi.fn(() => true);
+        panel._syncTransformerView2dSelectionSidebarHeader = vi.fn();
+        panel._transformerView2dDetailView = {
+            isSelectionSidebarVisible: vi.fn(() => false),
+            setSelectionSidebarVisible: vi.fn(),
+            scrollSelectionSidebarToTop: vi.fn()
+        };
+
+        const shown = SelectionPanel.prototype._showTransformerView2dSelectionSidebar.call(panel, {
+            scrollToTop: true
+        });
+
+        expect(shown).toBe(true);
+        expect(panel._onResize).toHaveBeenCalledTimes(1);
+        expect(panel._renderPreviewSnapshot).toHaveBeenCalledTimes(1);
+        expect(panel._startLoop).toHaveBeenCalledTimes(1);
+        expect(panel._scheduleResize).not.toHaveBeenCalled();
+    });
+
+    it('still schedules a resize when opening the docked 2D sidebar while the panel is not yet open', () => {
+        const panel = createPanelContext();
+        panel.isOpen = false;
+        panel._dockTransformerView2dSelectionSidebarSections = vi.fn(() => true);
+        panel._syncTransformerView2dSelectionSidebarHeader = vi.fn();
+        panel._transformerView2dDetailView = {
+            isSelectionSidebarVisible: vi.fn(() => false),
+            setSelectionSidebarVisible: vi.fn(),
+            scrollSelectionSidebarToTop: vi.fn()
+        };
+
+        const shown = SelectionPanel.prototype._showTransformerView2dSelectionSidebar.call(panel, {
+            scrollToTop: true
+        });
+
+        expect(shown).toBe(true);
+        expect(panel._onResize).not.toHaveBeenCalled();
+        expect(panel._renderPreviewSnapshot).not.toHaveBeenCalled();
+        expect(panel._startLoop).not.toHaveBeenCalled();
+        expect(panel._scheduleResize).toHaveBeenCalledTimes(1);
     });
 
     it('does not auto-open the docked 2D selection sidebar on small screens when entering from a selection', () => {
