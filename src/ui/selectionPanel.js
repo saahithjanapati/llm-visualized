@@ -6926,6 +6926,26 @@ export class SelectionPanel {
         }) || lane.expandedVecSegments[0] || null;
         if (!vectorRef) return null;
 
+        const resolveRequestedStageValues = () => {
+            const source = this.activationSource;
+            const baseVectorLength = (
+                source && typeof source.getBaseVectorLength === 'function'
+                    ? Math.max(1, Math.floor(source.getBaseVectorLength() || 0))
+                    : D_MODEL
+            );
+            if (!(Number.isFinite(tokenIndex) && Number.isFinite(resolvedLayerIndex))) {
+                return null;
+            }
+            if (normalizedStage === 'mlp.up' && typeof source?.getMlpUp === 'function') {
+                return source.getMlpUp(resolvedLayerIndex, tokenIndex, baseVectorLength * 4) || null;
+            }
+            if (normalizedStage === 'mlp.activation' && typeof source?.getMlpActivation === 'function') {
+                return source.getMlpActivation(resolvedLayerIndex, tokenIndex, baseVectorLength * 4) || null;
+            }
+            return null;
+        };
+        const requestedStageValues = resolveRequestedStageValues();
+
         const resolvedLabel = String(
             label
             || vectorRef.userData?.activationData?.label
@@ -6939,6 +6959,9 @@ export class SelectionPanel {
                 : {}),
             label: resolvedLabel,
             ...(normalizedStage ? { stage: normalizedStage } : {}),
+            ...(Array.isArray(requestedStageValues) || ArrayBuffer.isView(requestedStageValues)
+                ? { values: Array.from(requestedStageValues) }
+                : {}),
             layerIndex: resolvedLayerIndex,
             ...(Number.isFinite(tokenIndex) ? { tokenIndex: Math.floor(tokenIndex) } : {}),
             ...(Number.isFinite(tokenId) ? { tokenId: Math.floor(tokenId) } : {}),

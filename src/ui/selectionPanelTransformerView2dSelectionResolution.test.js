@@ -359,6 +359,13 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
 
     it('recovers the live expanded MLP-up mesh for 2D selections even when runtime segments are on activation stage', () => {
         const panel = createPanelContext();
+        const preGeluValues = Array.from({ length: 48 }, (_, index) => index + 1);
+        const postGeluValues = Array.from({ length: 48 }, (_, index) => (index + 1) * 10);
+        panel.activationSource = {
+            getBaseVectorLength: () => 12,
+            getMlpUp: vi.fn(() => preGeluValues),
+            getMlpActivation: vi.fn(() => postGeluValues)
+        };
         const { mesh, vectorRef } = createExpandedMlpVectorRef({
             prismCount: 12,
             vectorIndex: 1,
@@ -367,7 +374,8 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
                 stage: 'mlp.activation',
                 layerIndex: 2,
                 tokenIndex: 1,
-                tokenLabel: 'target'
+                tokenLabel: 'target',
+                values: postGeluValues
             }
         });
         panel.engine._layers = [
@@ -401,12 +409,21 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.vectorRef).toBe(vectorRef);
         expect(resolved?.label).toBe('MLP Up Projection');
         expect(resolved?.info?.activationData?.stage).toBe('mlp.up');
+        expect(resolved?.info?.activationData?.values).toEqual(preGeluValues);
+        expect(panel.activationSource.getMlpUp).toHaveBeenCalledWith(2, 1, 48);
         expect(resolved?.kind).toBe('batchedVector');
         expect(resolved?.hit?.instanceId).toBe(12);
     });
 
     it('recovers the live expanded MLP activation mesh for 2D selections even when runtime segments still carry up-projection metadata', () => {
         const panel = createPanelContext();
+        const preGeluValues = Array.from({ length: 48 }, (_, index) => index + 1);
+        const postGeluValues = Array.from({ length: 48 }, (_, index) => (index + 1) * 10);
+        panel.activationSource = {
+            getBaseVectorLength: () => 12,
+            getMlpUp: vi.fn(() => preGeluValues),
+            getMlpActivation: vi.fn(() => postGeluValues)
+        };
         const { mesh, vectorRef } = createExpandedMlpVectorRef({
             prismCount: 12,
             activationData: {
@@ -414,7 +431,8 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
                 stage: 'mlp.up',
                 layerIndex: 4,
                 tokenIndex: 0,
-                tokenLabel: 'prompt'
+                tokenLabel: 'prompt',
+                values: preGeluValues
             }
         });
         panel.engine._layers = [
@@ -450,6 +468,8 @@ describe('SelectionPanel 2D canvas selection resolution', () => {
         expect(resolved?.info?.vectorRef).toBe(vectorRef);
         expect(resolved?.label).toBe('MLP Activation (post GELU)');
         expect(resolved?.info?.activationData?.stage).toBe('mlp.activation');
+        expect(resolved?.info?.activationData?.values).toEqual(postGeluValues);
+        expect(panel.activationSource.getMlpActivation).toHaveBeenCalledWith(4, 0, 48);
         expect(resolved?.kind).toBe('batchedVector');
     });
 
