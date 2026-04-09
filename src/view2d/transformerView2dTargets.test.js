@@ -88,7 +88,8 @@ describe('transformerView2dTargets', () => {
                 stage: 'embedding.token',
                 role: 'module'
             },
-            focusLabel: 'Token embeddings'
+            focusLabel: 'Token embeddings',
+            allowOverviewZoomOutForSelection: true
         });
     });
 

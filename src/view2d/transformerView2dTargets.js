@@ -45,6 +45,30 @@ function isResidualOverviewStreamNode(node = null) {
     );
 }
 
+function shouldAllowOverviewZoomOutForSelectionTarget({
+    semanticTarget = null,
+    detailSemanticTargets = [],
+    initialOverviewSelectionLockTarget = null
+} = {}) {
+    const safeTarget = buildSemanticTarget(semanticTarget);
+    if (!safeTarget) return false;
+    if (Array.isArray(detailSemanticTargets) && detailSemanticTargets.length > 0) {
+        return false;
+    }
+    if (initialOverviewSelectionLockTarget) {
+        return true;
+    }
+    const role = String(safeTarget.role || '').trim().toLowerCase();
+    if (
+        role === 'input-token-chip-group'
+        || role === 'input-position-chip-group'
+        || role === 'chosen-token-chip-group'
+    ) {
+        return true;
+    }
+    return role === 'module';
+}
+
 function isResidualOverviewVectorNode(node = null) {
     return (
         isResidualOverviewStreamNode(node)
@@ -2174,6 +2198,11 @@ export function resolveTransformerView2dActionContext(selectionInfo = null, norm
         ...(initialOverviewSelectionLockTarget ? { initialOverviewSelectionLockTarget } : {}),
         ...(detailSemanticTargets.length ? { detailSemanticTargets } : {}),
         ...(resolvedDetailFocusLabel.length ? { detailFocusLabel: resolvedDetailFocusLabel } : {}),
+        ...(shouldAllowOverviewZoomOutForSelectionTarget({
+            semanticTarget,
+            detailSemanticTargets,
+            initialOverviewSelectionLockTarget
+        }) ? { allowOverviewZoomOutForSelection: true } : {}),
         ...(transitionMode ? { transitionMode } : {}),
         actionLabel: 'View in 2D / matrix form'
     };

@@ -1630,6 +1630,8 @@ describe('CanvasSceneRenderer', () => {
         const fillOps = ctx.operations.filter((entry) => (
             (entry.type === 'fill' || entry.type === 'fillRect')
             && entry.fillStyle !== 'rgba(0, 0, 0, 0)'
+            && entry.fillStyle !== 'rgb(0, 0, 0)'
+            && !(entry.type === 'fillRect' && entry.width === 400 && entry.height === 240)
         ));
         expect(fillOps.length).toBeGreaterThan(0);
         expect(fillOps.every((entry) => entry.filter === 'saturate(0.06) brightness(0.62) grayscale(0.78)')).toBe(true);
@@ -1914,6 +1916,8 @@ describe('CanvasSceneRenderer', () => {
         const fillOps = ctx.operations.filter((entry) => (
             (entry.type === 'fill' || entry.type === 'fillRect')
             && entry.fillStyle !== 'rgba(0, 0, 0, 0)'
+            && entry.fillStyle !== 'rgb(0, 0, 0)'
+            && !(entry.type === 'fillRect' && entry.width === 400 && entry.height === 240)
         ));
         expect(fillOps.length).toBeGreaterThan(0);
         expect(Math.max(...fillOps.map((entry) => Number(entry.globalAlpha) || 0))).toBeLessThanOrEqual(0.081);
@@ -4189,5 +4193,193 @@ describe('CanvasSceneRenderer', () => {
         ));
         expect(translucentFills.length).toBeGreaterThan(0);
         expect(ctx.operations.some((operation) => operation.type === 'drawImage')).toBe(false);
+    });
+
+    it('reuses the visible overview index for cached row-hover redraws', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const hoveredNode = createMatrixNode({
+            role: 'overview-card-hovered',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'overview-card'
+            },
+            label: {
+                tex: 'X',
+                text: 'X'
+            },
+            dimensions: {
+                rows: 4,
+                cols: 4
+            },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                disableCardSurfaceEffects: true
+            },
+            metadata: {
+                card: {
+                    width: 180,
+                    height: 120
+                }
+            }
+        });
+        const targetNode = createMatrixNode({
+            role: 'overview-card-target',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'overview-card'
+            },
+            label: {
+                tex: 'Y',
+                text: 'Y'
+            },
+            dimensions: {
+                rows: 4,
+                cols: 4
+            },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                disableCardSurfaceEffects: true
+            },
+            metadata: {
+                card: {
+                    width: 180,
+                    height: 120
+                }
+            }
+        });
+        const connectorNode = createConnectorNode({
+            role: 'overview-hover-connector',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'overview-hover-connector'
+            },
+            source: createAnchorRef(hoveredNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+            target: createAnchorRef(targetNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+            route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                stroke: 'rgba(255, 255, 255, 0.84)'
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.ROW,
+                    gap: 40,
+                    children: [hoveredNode, targetNode]
+                }),
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    children: [connectorNode]
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+        expect(renderer.overviewVisibleIndex?.nodesById?.get(hoveredNode.id)?.node?.id).toBe(hoveredNode.id);
+        expect(renderer.overviewVisibleIndex?.connectorsByNodeId?.get(hoveredNode.id)?.[0]?.node?.id).toBe(connectorNode.id);
+
+        renderer.drawTransformedOverviewRenderCache = () => true;
+        ctx.operations.length = 0;
+
+        expect(renderer.drawCachedOverviewRowHoverState({
+            ctx,
+            resolution: {
+                width: 480,
+                height: 320,
+                dpr: 1,
+                pixelWidth: 480,
+                pixelHeight: 320
+            },
+            config: renderer.metrics || renderer.layout?.config || null,
+            worldScale: renderer.lastRenderState?.worldScale || 1,
+            detailScale: renderer.lastRenderState?.detailScale || 1,
+            offsetX: renderer.lastRenderState?.offsetX || 0,
+            offsetY: renderer.lastRenderState?.offsetY || 0,
+            visibleDrawableNodes: [],
+            visibleConnectors: [],
+            overviewVisibleIndex: renderer.overviewVisibleIndex,
+            interactionState: {
+                hoveredRow: {
+                    nodeId: hoveredNode.id,
+                    rowIndex: 1
+                }
+            }
+        })).toBe(true);
+
+        expect(ctx.operations.some((operation) => operation.type === 'fillText' && operation.text === 'X')).toBe(true);
+        expect(ctx.operations.some((operation) => operation.type === 'stroke')).toBe(true);
+    });
+
+    it('renders the 2D scene against a solid black background even when the scene background token is transparent', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createMatrixNode({
+                    role: 'overview-card',
+                    semantic: {
+                        componentKind: 'test',
+                        stage: 'overview',
+                        role: 'overview-card'
+                    },
+                    label: {
+                        tex: 'X',
+                        text: 'X'
+                    },
+                    dimensions: {
+                        rows: 2,
+                        cols: 2
+                    },
+                    presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+                    shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+                    visual: {
+                        styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                        disableCardSurfaceEffects: true
+                    },
+                    metadata: {
+                        card: {
+                            width: 140,
+                            height: 96
+                        }
+                    }
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+
+        const firstBackgroundFill = ctx.operations.find((operation) => operation.type === 'fillRect') || null;
+        expect(firstBackgroundFill?.fillStyle).toBe('rgb(0, 0, 0)');
     });
 });

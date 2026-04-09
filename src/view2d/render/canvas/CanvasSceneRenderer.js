@@ -3165,6 +3165,57 @@ function collectVisibleEntries(entries = [], visibleWorldBounds = null, target =
     return target;
 }
 
+function resolveSceneBackgroundFill(config = null) {
+    const sceneStyleFill = resolveView2dStyle(VIEW2D_STYLE_KEYS.SCENE)?.fill || '';
+    const paletteFill = typeof config?.tokens?.palette?.sceneBackground === 'string'
+        ? config.tokens.palette.sceneBackground
+        : '';
+    const preferredFill = paletteFill.trim().length ? paletteFill.trim() : sceneStyleFill;
+    if (!preferredFill || preferredFill === 'transparent' || preferredFill === 'rgba(0, 0, 0, 0)') {
+        return 'rgb(0, 0, 0)';
+    }
+    return preferredFill;
+}
+
+function buildOverviewVisibleIndex(visibleDrawableNodes = [], visibleConnectors = []) {
+    const nodesById = new Map();
+    const connectorsById = new Map();
+    const connectorsByNodeId = new Map();
+    for (let index = 0; index < visibleDrawableNodes.length; index += 1) {
+        const drawable = visibleDrawableNodes[index];
+        const nodeId = typeof drawable?.node?.id === 'string' ? drawable.node.id : '';
+        if (!nodeId) continue;
+        nodesById.set(nodeId, drawable);
+    }
+    const registerConnectorForNode = (nodeId = '', connector = null) => {
+        if (!nodeId || !connector) return;
+        const existing = connectorsByNodeId.get(nodeId);
+        if (existing) {
+            existing.push(connector);
+            return;
+        }
+        connectorsByNodeId.set(nodeId, [connector]);
+    };
+    for (let index = 0; index < visibleConnectors.length; index += 1) {
+        const connector = visibleConnectors[index];
+        const connectorId = typeof connector?.node?.id === 'string' ? connector.node.id : '';
+        if (connectorId) {
+            connectorsById.set(connectorId, connector);
+        }
+        const sourceNodeId = typeof connector?.entry?.source?.nodeId === 'string' ? connector.entry.source.nodeId : '';
+        const targetNodeId = typeof connector?.entry?.target?.nodeId === 'string' ? connector.entry.target.nodeId : '';
+        registerConnectorForNode(sourceNodeId, connector);
+        if (targetNodeId && targetNodeId !== sourceNodeId) {
+            registerConnectorForNode(targetNodeId, connector);
+        }
+    }
+    return {
+        nodesById,
+        connectorsById,
+        connectorsByNodeId
+    };
+}
+
 function createPreparedSceneState(scene = null) {
     if (!scene?.nodes || !Array.isArray(scene.nodes)) return null;
     const layout = buildSceneLayout(scene, {
@@ -3298,6 +3349,7 @@ export class CanvasSceneRenderer {
         this.latchedDetailScale = null;
         this.visibleDrawableNodes = [];
         this.visibleConnectors = [];
+        this.overviewVisibleIndex = null;
         this.overviewScreenHitCache = null;
         this.headDetailSceneState = null;
         this.activeDetailSceneRenderState = null;
@@ -3336,6 +3388,7 @@ export class CanvasSceneRenderer {
         this.metrics = this.layout?.config || null;
         this.latchedDetailScale = null;
         this.activeDetailSceneRenderState = null;
+        this.overviewVisibleIndex = null;
         this.overviewScreenHitCache = null;
         this.invalidateOverviewRenderCache();
         const registry = this.layout?.registry || null;
@@ -3765,7 +3818,7 @@ export class CanvasSceneRenderer {
         ctx.save();
         ctx.translate(offsetX, offsetY);
         ctx.scale(worldScale, worldScale);
-        ctx.fillStyle = config?.tokens?.palette?.sceneBackground || 'rgba(0, 0, 0, 0)';
+        ctx.fillStyle = resolveSceneBackgroundFill(config);
         ctx.fillRect(0, 0, sceneBounds.width, sceneBounds.height);
 
         visibleDrawableNodes.forEach(({ node, entry }) => {
@@ -3802,6 +3855,7 @@ export class CanvasSceneRenderer {
         ctx = null,
         visibleDrawableNodes = [],
         visibleConnectors = [],
+        overviewVisibleIndex = null,
         config = null,
         worldScale = 1,
         detailScale = 1,
@@ -3813,8 +3867,11 @@ export class CanvasSceneRenderer {
     } = {}) {
         if (!ctx || !focusState || focusAlpha <= 0.001) return;
 
-        visibleDrawableNodes.forEach(({ node, entry }) => {
-            if (!focusState.activeNodeIds?.has(node.id)) return;
+        const focusedNodes = focusState.activeNodeIds?.size
+            ? Array.from(focusState.activeNodeIds, (nodeId) => overviewVisibleIndex?.nodesById?.get(nodeId) || null)
+                .filter(Boolean)
+            : visibleDrawableNodes.filter(({ node }) => focusState.activeNodeIds?.has(node.id));
+        focusedNodes.forEach(({ node, entry }) => {
             if (node.kind === VIEW2D_NODE_KINDS.MATRIX) {
                 drawMatrixNode(ctx, node, entry, config, worldScale, detailScale, {
                     skipSurfaceEffects: true,
@@ -3831,8 +3888,13 @@ export class CanvasSceneRenderer {
             }
         });
 
-        visibleConnectors.forEach(({ node, entry, stroke }) => {
-            if (!focusState.activeConnectorIds?.has(node.id)) return;
+        const focusedConnectors = focusState.activeConnectorIds?.size
+            ? Array.from(
+                focusState.activeConnectorIds,
+                (connectorId) => overviewVisibleIndex?.connectorsById?.get(connectorId) || null
+            ).filter(Boolean)
+            : visibleConnectors.filter(({ node }) => focusState.activeConnectorIds?.has(node.id));
+        focusedConnectors.forEach(({ node, entry, stroke }) => {
             drawConnector(ctx, entry, config, stroke, worldScale, {
                 focusAlpha,
                 emphasize: focusAlpha >= 0.995
@@ -3850,6 +3912,7 @@ export class CanvasSceneRenderer {
         offsetY = 0,
         visibleDrawableNodes = [],
         visibleConnectors = [],
+        overviewVisibleIndex = null,
         interactionState = null,
         interactionFastPath = false,
         fixedTextSizing = null,
@@ -3869,11 +3932,18 @@ export class CanvasSceneRenderer {
         registerHoverNodeId(interactionState?.previousHoveredRow);
         if (!hoverNodeIds.size) return false;
 
-        const hoveredNodes = visibleDrawableNodes.filter(({ node, entry }) => (
-            !!entry
-            && node?.kind === VIEW2D_NODE_KINDS.MATRIX
-            && hoverNodeIds.has(node.id)
-        ));
+        const hoveredNodes = Array.from(hoverNodeIds, (nodeId) => overviewVisibleIndex?.nodesById?.get(nodeId) || null)
+            .filter((drawable) => (
+                !!drawable?.entry
+                && drawable?.node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            ));
+        if (!hoveredNodes.length && visibleDrawableNodes.length) {
+            hoveredNodes.push(...visibleDrawableNodes.filter(({ node, entry }) => (
+                !!entry
+                && node?.kind === VIEW2D_NODE_KINDS.MATRIX
+                && hoverNodeIds.has(node.id)
+            )));
+        }
         if (!hoveredNodes.length) return false;
 
         const didDrawBaseCache = this.drawTransformedOverviewRenderCache({
@@ -3881,15 +3951,37 @@ export class CanvasSceneRenderer {
             worldScale,
             offsetX,
             offsetY,
-            background: config?.tokens?.palette?.sceneBackground || 'rgba(0, 0, 0, 0)'
+            background: resolveSceneBackgroundFill(config)
         });
         if (!didDrawBaseCache) return false;
 
-        const hoveredConnectors = visibleConnectors.filter(({ entry }) => {
-            const sourceNodeId = typeof entry?.source?.nodeId === 'string' ? entry.source.nodeId : '';
-            const targetNodeId = typeof entry?.target?.nodeId === 'string' ? entry.target.nodeId : '';
-            return hoverNodeIds.has(sourceNodeId) || hoverNodeIds.has(targetNodeId);
+        const hoveredConnectors = [];
+        const hoveredConnectorIds = new Set();
+        const appendConnector = (connector = null) => {
+            const connectorId = typeof connector?.node?.id === 'string' ? connector.node.id : '';
+            if (!connector || !connectorId || hoveredConnectorIds.has(connectorId)) return;
+            hoveredConnectorIds.add(connectorId);
+            hoveredConnectors.push(connector);
+        };
+        hoverNodeIds.forEach((nodeId) => {
+            const connected = overviewVisibleIndex?.connectorsByNodeId?.get(nodeId) || null;
+            if (connected?.length) {
+                connected.forEach((connector) => appendConnector(connector));
+            }
         });
+        if (!hoveredConnectors.length && visibleConnectors.length) {
+            visibleConnectors.forEach((connector) => {
+                const sourceNodeId = typeof connector?.entry?.source?.nodeId === 'string'
+                    ? connector.entry.source.nodeId
+                    : '';
+                const targetNodeId = typeof connector?.entry?.target?.nodeId === 'string'
+                    ? connector.entry.target.nodeId
+                    : '';
+                if (hoverNodeIds.has(sourceNodeId) || hoverNodeIds.has(targetNodeId)) {
+                    appendConnector(connector);
+                }
+            });
+        }
 
         ctx.save();
         ctx.translate(offsetX, offsetY);
@@ -4025,6 +4117,11 @@ export class CanvasSceneRenderer {
             visibleWorldBounds,
             this.visibleConnectors
         );
+        const overviewVisibleIndex = buildOverviewVisibleIndex(
+            visibleDrawableNodes,
+            visibleConnectors
+        );
+        this.overviewVisibleIndex = overviewVisibleIndex;
         const activeHeadDetailTarget = normalizeHeadDetailTarget(this.scene?.metadata?.headDetailTarget);
         const activeConcatDetailTarget = normalizeConcatDetailTarget(this.scene?.metadata?.concatDetailTarget);
         const activeOutputProjectionDetailTarget = normalizeOutputProjectionDetailTarget(
@@ -4108,6 +4205,7 @@ export class CanvasSceneRenderer {
             connectorCount: this.connectors.length,
             visibleNodeCount: visibleDrawableNodes.length,
             visibleConnectorCount: visibleConnectors.length,
+            overviewVisibleIndex,
             interactionFastPath,
             headDetailTarget: activeHeadDetailTarget ? { ...activeHeadDetailTarget } : null,
             headDetailBounds: cloneBounds(activeHeadDetailBounds),
@@ -4176,7 +4274,7 @@ export class CanvasSceneRenderer {
                     resolution.width
                 );
                 ctx.save();
-                ctx.fillStyle = config.tokens.palette.sceneBackground || 'rgba(0, 0, 0, 0)';
+                ctx.fillStyle = resolveSceneBackgroundFill(config);
                 ctx.fillRect(0, 0, resolution.width, resolution.height);
                 ctx.translate(detailOffsetX, detailOffsetY);
                 ctx.scale(detailWorldScale, detailWorldScale);
@@ -4281,7 +4379,7 @@ export class CanvasSceneRenderer {
                     worldScale,
                     offsetX,
                     offsetY,
-                    background: config.tokens.palette.sceneBackground || 'rgba(0, 0, 0, 0)'
+                    background: resolveSceneBackgroundFill(config)
                 });
                 if (didDrawInteractionCache) {
                     if (debug) {
@@ -4302,6 +4400,7 @@ export class CanvasSceneRenderer {
                     offsetY,
                     visibleDrawableNodes,
                     visibleConnectors,
+                    overviewVisibleIndex,
                     interactionState: normalizedInteractionState,
                     interactionFastPath,
                     fixedTextSizing,
@@ -4332,7 +4431,7 @@ export class CanvasSceneRenderer {
                     worldScale,
                     offsetX,
                     offsetY,
-                    background: config.tokens.palette.sceneBackground || 'rgba(0, 0, 0, 0)'
+                    background: resolveSceneBackgroundFill(config)
                 });
                 if (didDrawFocusCache) {
                     if (overlayAlpha > 0.001) {
@@ -4354,6 +4453,7 @@ export class CanvasSceneRenderer {
                             ctx,
                             visibleDrawableNodes,
                             visibleConnectors,
+                            overviewVisibleIndex,
                             config,
                             worldScale,
                             detailScale,
@@ -4369,6 +4469,7 @@ export class CanvasSceneRenderer {
                             ctx,
                             visibleDrawableNodes,
                             visibleConnectors,
+                            overviewVisibleIndex,
                             config,
                             worldScale,
                             detailScale,

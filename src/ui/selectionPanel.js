@@ -9405,6 +9405,7 @@ export class SelectionPanel {
                 detailSemanticTargets,
                 detailFocusLabel: String(detailFocusLabel || '').trim(),
                 detailInteractionTargets,
+                allowOverviewZoomOutForSelection: false,
                 transitionMode: String(transitionMode || '').trim(),
                 actionLabel: 'View in 2D / matrix form'
             }
@@ -9666,6 +9667,7 @@ export class SelectionPanel {
             detailSemanticTargets: hydratedView2dContext.detailSemanticTargets,
             detailFocusLabel: hydratedView2dContext.detailFocusLabel,
             detailInteractionTargets: hydratedView2dContext.detailInteractionTargets,
+            allowOverviewZoomOutForSelection: hydratedView2dContext.allowOverviewZoomOutForSelection === true,
             transitionMode: hydratedView2dContext.transitionMode,
             initialSelectionSidebarVisible: shouldAutoOpenSelectionSidebar,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()
@@ -15515,6 +15517,7 @@ export class SelectionPanel {
             detailSemanticTargets: view2dContext.detailSemanticTargets,
             detailFocusLabel: view2dContext.detailFocusLabel,
             detailInteractionTargets: view2dContext.detailInteractionTargets,
+            allowOverviewZoomOutForSelection: view2dContext.allowOverviewZoomOutForSelection === true,
             transitionMode: view2dContext.transitionMode,
             initialSelectionSidebarVisible: keepSelectionSidebarVisible,
             isSmallScreen: this._isSmallScreen && this._isSmallScreen()

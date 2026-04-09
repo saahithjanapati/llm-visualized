@@ -123,6 +123,7 @@ const VIEW2D_INTERACTION_KIND_ZOOM = 'zoom';
 // preview budget used by smaller helper canvases.
 const VIEW2D_PREVIEW_DPR_CAP_IDLE = 2;
 const VIEW2D_PREVIEW_DPR_CAP_INTERACTING = VIEW2D_PREVIEW_DPR_CAP_IDLE;
+const VIEW2D_PREVIEW_DPR_CAP_SMALL_SCREEN = 3;
 const VIEW2D_PREVIEW_MIN_RENDER_DPR = 2;
 const VIEW2D_KEYBOARD_PAN_PX_PER_SEC = 620;
 const VIEW2D_KEYBOARD_ZOOM_RATE = 0.00165;
@@ -266,11 +267,16 @@ function resolveTransformerView2dLayerCount({
 function resolveTransformerView2dRenderDpr({
     width = 0,
     height = 0,
-    interacting = false
+    interacting = false,
+    isSmallScreen = false
 } = {}) {
-    const dprCap = interacting
-        ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
-        : VIEW2D_PREVIEW_DPR_CAP_IDLE;
+    const dprCap = isSmallScreen
+        ? VIEW2D_PREVIEW_DPR_CAP_SMALL_SCREEN
+        : (
+            interacting
+                ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
+                : VIEW2D_PREVIEW_DPR_CAP_IDLE
+        );
     const preferredDpr = resolveRenderPixelRatio({
         viewportWidth: width,
         viewportHeight: height,
@@ -283,6 +289,18 @@ function resolveTransformerView2dRenderDpr({
             Math.min(dprCap, VIEW2D_PREVIEW_MIN_RENDER_DPR)
         )
     );
+}
+
+function resolveTransformerView2dRenderDprCap({
+    interacting = false,
+    isSmallScreen = false
+} = {}) {
+    if (isSmallScreen) {
+        return VIEW2D_PREVIEW_DPR_CAP_SMALL_SCREEN;
+    }
+    return interacting
+        ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
+        : VIEW2D_PREVIEW_DPR_CAP_IDLE;
 }
 
 function resolveActiveDetailScene(scene = null, {
@@ -723,6 +741,7 @@ export function createTransformerView2dDetailView(panelEl, {
         detailFrameSignature: '',
         entryFocusPaddingActive: false,
         preserveOverviewViewportForSelection: false,
+        allowOverviewZoomOutForSelection: false,
         stagedFocusTransition: null,
         stagedFocusRafId: null,
         stagedHeadDetailTransition: null,
@@ -1571,6 +1590,7 @@ export function createTransformerView2dDetailView(panelEl, {
         if (
             isTransformerView2dGraphOverview()
             || state.preserveOverviewViewportForSelection
+            || state.allowOverviewZoomOutForSelection
             || shouldUseOverviewZoomFloorForSelectionTarget(state.semanticTarget)
         ) {
             return overviewMinScale;
@@ -3627,15 +3647,18 @@ export function createTransformerView2dDetailView(panelEl, {
         const renderDpr = resolveTransformerView2dRenderDpr({
             width,
             height,
-            interacting: useFastRenderPath
+            interacting: useFastRenderPath,
+            isSmallScreen: state.isSmallScreen
+        });
+        const renderDprCap = resolveTransformerView2dRenderDprCap({
+            interacting: useFastRenderPath,
+            isSmallScreen: state.isSmallScreen
         });
         const didRender = renderer.render({
             width,
             height,
             dpr: renderDpr,
-            dprCap: useFastRenderPath
-                ? VIEW2D_PREVIEW_DPR_CAP_INTERACTING
-                : VIEW2D_PREVIEW_DPR_CAP_IDLE,
+            dprCap: renderDprCap,
             viewportTransform: viewportController.getViewportTransform('detail-transformer-view2d'),
             detailViewportTransform: (
                 state.headDetailDepthActive && hasSceneBackedDetailTarget()
@@ -4838,6 +4861,7 @@ export function createTransformerView2dDetailView(panelEl, {
             detailSemanticTargets = null,
             detailFocusLabel = '',
             detailInteractionTargets = null,
+            allowOverviewZoomOutForSelection = false,
             transitionMode = '',
             initialSelectionSidebarVisible = false,
             isSmallScreen = false
@@ -4875,6 +4899,10 @@ export function createTransformerView2dDetailView(panelEl, {
                 hasDeepDetailTarget,
                 initialOverviewSelectionLockTarget
             });
+            state.allowOverviewZoomOutForSelection = (
+                allowOverviewZoomOutForSelection === true
+                && !hasDeepDetailTarget
+            );
             const shouldStageFocusEntry = (
                 normalizedTransitionMode === 'staged-focus'
                 && !!buildSemanticTarget(semanticTarget)
