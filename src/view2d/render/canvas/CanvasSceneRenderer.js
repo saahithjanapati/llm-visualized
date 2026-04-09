@@ -932,31 +932,42 @@ function resolveApproximateOverviewResidualRowHitAtScreenPoint(drawableNodes = [
     const worldScale = Number(renderState?.worldScale);
     if (!(worldScale > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
 
+    const screenHitCache = renderState?.overviewScreenHitCache || null;
+    const cachedNodes = Array.isArray(screenHitCache?.nodes) ? screenHitCache.nodes : null;
+    const fallbackNodes = cachedNodes?.length
+        ? cachedNodes
+        : drawableNodes.map(({ node, entry }) => ({
+            node,
+            entry,
+            screenEntryBounds: projectWorldBoundsToScreen(entry?.bounds || entry?.contentBounds, renderState),
+            screenContentBounds: projectWorldBoundsToScreen(entry?.contentBounds || entry?.bounds, renderState)
+        }));
+
     const resolveTopmostScreenNodeIdAtPoint = () => {
-        for (let index = drawableNodes.length - 1; index >= 0; index -= 1) {
-            const drawable = drawableNodes[index];
+        for (let index = fallbackNodes.length - 1; index >= 0; index -= 1) {
+            const drawable = fallbackNodes[index];
             const node = drawable?.node || null;
-            const entry = drawable?.entry || null;
-            if (!node || !entry) continue;
-            const screenBounds = projectWorldBoundsToScreen(entry.bounds || entry.contentBounds, renderState);
-            if (!screenBounds || !containsPoint(screenBounds, x, y)) continue;
+            const screenBounds = drawable?.screenEntryBounds || null;
+            if (!node || !screenBounds || !containsPoint(screenBounds, x, y)) continue;
             return node.id;
         }
         return '';
     };
-    const topmostScreenNodeId = resolveTopmostScreenNodeIdAtPoint();
+    const topmostScreenNodeId = (
+        typeof screenHitCache?.resolveTopmostScreenNodeIdAtPoint === 'function'
+            ? screenHitCache.resolveTopmostScreenNodeIdAtPoint(x, y)
+            : resolveTopmostScreenNodeIdAtPoint()
+    );
 
     let bestCandidate = null;
     let bestScore = Number.POSITIVE_INFINITY;
-    drawableNodes.forEach(({ node, entry }) => {
+    fallbackNodes.forEach(({ node, entry, screenEntryBounds, screenContentBounds }) => {
         if (!isOverviewResidualVectorStripNode(node) || !entry?.contentBounds || !entry?.layoutData) {
             return;
         }
         const rowItems = Array.isArray(node.rowItems) ? node.rowItems : [];
         if (!rowItems.length) return;
 
-        const screenEntryBounds = projectWorldBoundsToScreen(entry.bounds || entry.contentBounds, renderState);
-        const screenContentBounds = projectWorldBoundsToScreen(entry.contentBounds || entry.bounds, renderState);
         if (!screenEntryBounds || !screenContentBounds) return;
 
         const expandedEntryBounds = expandScreenBounds(screenEntryBounds, {
@@ -1034,6 +1045,34 @@ function resolveApproximateOverviewResidualRowHitAtScreenPoint(drawableNodes = [
     });
 
     return bestCandidate;
+}
+
+function buildOverviewScreenHitCache(drawableNodes = [], renderState = null) {
+    if (!Array.isArray(drawableNodes) || !drawableNodes.length) {
+        return {
+            nodes: [],
+            resolveTopmostScreenNodeIdAtPoint: () => ''
+        };
+    }
+    const nodes = drawableNodes.map(({ node, entry }) => ({
+        node: node || null,
+        entry: entry || null,
+        screenEntryBounds: projectWorldBoundsToScreen(entry?.bounds || entry?.contentBounds, renderState),
+        screenContentBounds: projectWorldBoundsToScreen(entry?.contentBounds || entry?.bounds, renderState)
+    }));
+    return {
+        nodes,
+        resolveTopmostScreenNodeIdAtPoint(x = 0, y = 0) {
+            for (let index = nodes.length - 1; index >= 0; index -= 1) {
+                const drawable = nodes[index];
+                const node = drawable?.node || null;
+                const screenBounds = drawable?.screenEntryBounds || null;
+                if (!node || !screenBounds || !containsPoint(screenBounds, x, y)) continue;
+                return node.id;
+            }
+            return '';
+        }
+    };
 }
 
 function resolveMatrixCellHit(node = null, entry = null, x = 0, y = 0) {
@@ -3259,6 +3298,7 @@ export class CanvasSceneRenderer {
         this.latchedDetailScale = null;
         this.visibleDrawableNodes = [];
         this.visibleConnectors = [];
+        this.overviewScreenHitCache = null;
         this.headDetailSceneState = null;
         this.activeDetailSceneRenderState = null;
         this.overviewRenderCache = {
@@ -3296,6 +3336,7 @@ export class CanvasSceneRenderer {
         this.metrics = this.layout?.config || null;
         this.latchedDetailScale = null;
         this.activeDetailSceneRenderState = null;
+        this.overviewScreenHitCache = null;
         this.invalidateOverviewRenderCache();
         const registry = this.layout?.registry || null;
         const allNodes = this.scene ? flattenSceneNodes(this.scene) : [];
@@ -4083,6 +4124,11 @@ export class CanvasSceneRenderer {
             detailTargetKind: activeDetailTargetKind,
             headDetailDepthActive: !!headDetailDepthActive
         };
+        renderState.overviewScreenHitCache = buildOverviewScreenHitCache(
+            visibleDrawableNodes,
+            renderState
+        );
+        this.overviewScreenHitCache = renderState.overviewScreenHitCache;
         this.lastRenderState = renderState;
 
         try {

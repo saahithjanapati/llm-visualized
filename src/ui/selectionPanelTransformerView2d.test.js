@@ -2388,6 +2388,10 @@ describe('createTransformerView2dDetailView', () => {
             nodeId: residualNode?.id,
             rowIndex: 1
         });
+        expect(renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.hoveredRow).toEqual({
+            nodeId: residualNode?.id,
+            rowIndex: 1
+        });
         expect(Array.isArray(overviewFocusState?.activeNodeIds)).toBe(true);
         expect(overviewFocusState?.activeNodeIds.length).toBeGreaterThan(1);
         expect(renderSpy.mock.calls.at(-1)?.[0]?.interactionState?.overviewFocusTransition?.dimStrength).toBeGreaterThan(0.15);
@@ -2398,6 +2402,62 @@ describe('createTransformerView2dDetailView', () => {
         expect(hoverLabel?.style.display).toBe('block');
         expect(hoverLabelText?.textContent).toBe('Residual Stream Vector');
         expect(hoverLabelTokenChip?.textContent || '').toContain('B');
+    });
+
+    it('skips the screen-space hover fallback when the world-space overview hover is already specific', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+        const { CanvasSceneRenderer } = await import('../view2d/render/canvas/CanvasSceneRenderer.js');
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+
+        const activationSource = createActivationSource();
+        const tokenIndices = [0, 1, 2];
+        const tokenLabels = ['A', 'B', 'C'];
+        const scene = buildTransformerSceneModel({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        const residualNode = flattenSceneNodes(scene).find((node) => (
+            node?.kind === VIEW2D_NODE_KINDS.MATRIX
+            && node?.role === 'module-card'
+            && node?.semantic?.componentKind === 'residual'
+            && node?.semantic?.stage === 'incoming'
+            && node?.semantic?.layerIndex === 0
+        ));
+
+        const pointHitSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtPoint').mockReturnValue({
+            entry: residualNode,
+            node: residualNode,
+            rowHit: {
+                rowIndex: 1,
+                rowItem: residualNode?.rowItems?.[1]
+            }
+        });
+        const screenHitSpy = vi.spyOn(CanvasSceneRenderer.prototype, 'resolveInteractiveHitAtScreenPoint');
+
+        view.setVisible(true);
+        view.open({
+            activationSource,
+            tokenIndices,
+            tokenLabels
+        });
+        await vi.advanceTimersByTimeAsync(32);
+        pointHitSpy.mockClear();
+        screenHitSpy.mockClear();
+
+        canvas.dispatchEvent(createPointerEvent('pointermove', {
+            clientX: 220,
+            clientY: 180
+        }));
+        await vi.advanceTimersByTimeAsync(32);
+
+        expect(pointHitSpy).toHaveBeenCalled();
+        expect(screenHitSpy).not.toHaveBeenCalled();
     });
 
     it('keeps overview residual-row hover active from a looser screen-space target while zoomed out', async () => {

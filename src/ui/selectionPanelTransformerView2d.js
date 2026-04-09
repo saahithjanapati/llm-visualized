@@ -719,6 +719,8 @@ export function createTransformerView2dDetailView(panelEl, {
         autoFrameOnResize: false,
         lastAutoFrameViewportSize: null,
         tokenStripSignature: '',
+        readoutSignature: '',
+        detailFrameSignature: '',
         entryFocusPaddingActive: false,
         preserveOverviewViewportForSelection: false,
         stagedFocusTransition: null,
@@ -2118,12 +2120,14 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function hideDetailFrame() {
         if (!detailFrame) return;
+        if (state.detailFrameSignature === 'hidden') return;
         detailFrame.classList.remove('is-visible');
         detailFrame.style.left = '';
         detailFrame.style.top = '';
         detailFrame.style.width = '';
         detailFrame.style.height = '';
         detailFrame.style.borderRadius = '';
+        state.detailFrameSignature = 'hidden';
     }
 
     function syncDetailFrame() {
@@ -2173,12 +2177,24 @@ export function createTransformerView2dDetailView(panelEl, {
             return;
         }
 
+        const nextSignature = [
+            Math.round(left),
+            Math.round(top),
+            Math.round(width),
+            Math.round(height),
+            state.isSmallScreen ? 22 : 28
+        ].join('|');
+        if (state.detailFrameSignature === nextSignature) {
+            return;
+        }
+
         detailFrame.style.left = `${Math.round(left)}px`;
         detailFrame.style.top = `${Math.round(top)}px`;
         detailFrame.style.width = `${Math.round(width)}px`;
         detailFrame.style.height = `${Math.round(height)}px`;
         detailFrame.style.borderRadius = `${state.isSmallScreen ? 22 : 28}px`;
         detailFrame.classList.add('is-visible');
+        state.detailFrameSignature = nextSignature;
     }
 
     function resolveViewportWorldBounds(controller = viewportController) {
@@ -2756,20 +2772,23 @@ export function createTransformerView2dDetailView(panelEl, {
         const rect = canvas.getBoundingClientRect();
         const localX = event.clientX - rect.left;
         const localY = event.clientY - rect.top;
-        const hit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
         if (suppressOverviewHover) {
+            const hit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
             clearCanvasHover();
             return hit?.entry || null;
         }
         if (freezeDetailSceneHover) {
+            const hit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
             clearCanvasHover({ scheduleRender: false });
             return hit?.entry || null;
         }
         if (freezeOverviewHover) {
+            const hit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
             clearCanvasHover({ scheduleRender: false });
             return hit?.entry || null;
         }
         if (allowDetailSceneHover) {
+            const hit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
             const detailHoverKey = buildCanvasHoverTargetKey(hit, 'detail');
             if (detailHoverKey === state.hoverTargetKey) {
                 hoverLabelOverlay.move({
@@ -2824,7 +2843,9 @@ export function createTransformerView2dDetailView(panelEl, {
             return hit?.entry || null;
         }
 
-        const worldHit = resolveOverviewCanvasHit(localX, localY);
+        const worldHit = resolveOverviewCanvasHit(localX, localY, {
+            interactionKind: 'hover'
+        });
         const residualHoverPayload = buildResidualRowHoverPayload(worldHit?.rowHit, state.activationSource);
         if (residualHoverPayload && worldHit?.node?.id && Number.isFinite(worldHit?.rowHit?.rowIndex)) {
             const residualHoverKey = buildCanvasHoverTargetKey(worldHit, 'overview-row');
@@ -2855,9 +2876,22 @@ export function createTransformerView2dDetailView(panelEl, {
             const previousHoveredRow = state.hoveredResidualRow;
             const hadResidualHover = !!previousHoveredRow;
             const hadOverviewFocus = !!state.overviewSceneFocus;
+            const didChange = !previousHoveredRow
+                || previousHoveredRow.nodeId !== nextHoveredRow.nodeId
+                || previousHoveredRow.rowIndex !== nextHoveredRow.rowIndex;
 
             if (nextOverviewFocusState) {
-                state.hoveredResidualRow = null;
+                if (didChange && previousHoveredRow) {
+                    state.hoverDimming.previousHoveredRow = {
+                        nodeId: previousHoveredRow.nodeId,
+                        rowIndex: previousHoveredRow.rowIndex
+                    };
+                    state.hoverDimming.rowBlend = 0;
+                    state.hoverDimming.rowBlendTarget = 1;
+                } else if (!didChange) {
+                    resetHoverRowBlend();
+                }
+                state.hoveredResidualRow = nextHoveredRow;
                 state.detailSceneFocus = state.detailScenePinnedFocus || null;
                 state.detailSceneHoverSignature = state.detailScenePinnedSignature || '';
                 const { previousSignature } = updateOverviewHoverFocusState(
@@ -2889,9 +2923,6 @@ export function createTransformerView2dDetailView(panelEl, {
                 return worldHit?.entry || null;
             }
 
-            const didChange = !previousHoveredRow
-                || previousHoveredRow.nodeId !== nextHoveredRow.nodeId
-                || previousHoveredRow.rowIndex !== nextHoveredRow.rowIndex;
             if (didChange && previousHoveredRow) {
                 state.hoverDimming.previousHoveredRow = {
                     nodeId: previousHoveredRow.nodeId,
@@ -3458,9 +3489,32 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     function updateReadouts() {
+        const shouldShowIconActions = shouldShowToolbarIconActions();
+        const stageHeader = resolveTransformerView2dStageHeader(resolveDisplayedStageSemanticTarget());
+        const fitActionVisible = !!(
+            state.visible
+            && state.scene
+            && state.layout
+            && shouldShowTransformerView2dFitSceneAction(resolveFitSceneActionState())
+        );
+        const nextSignature = [
+            state.headDetailDepthActive ? 'depth:1' : 'depth:0',
+            hasActiveDetailTarget() ? 'detail:1' : 'detail:0',
+            hasSceneBackedDetailTarget() ? 'scene-detail:1' : 'scene-detail:0',
+            state.concatDetailTarget ? 'concat:1' : 'concat:0',
+            isTransformerView2dGraphOverview() ? 'overview:1' : 'overview:0',
+            shouldShowIconActions ? 'icons:1' : 'icons:0',
+            fitActionVisible ? 'fit:1' : 'fit:0',
+            stageHeader.layerLabel || '',
+            stageHeader.stageLabel || '',
+            stageHeader.fullLabel || ''
+        ].join('|');
+        if (state.readoutSignature === nextSignature) {
+            return;
+        }
+
         syncHeadDetailChrome();
         syncFitSceneActionVisibility();
-        const shouldShowIconActions = shouldShowToolbarIconActions();
         if (openInfoBtn) {
             const shouldShowInfoAction = shouldShowIconActions;
             openInfoBtn.hidden = !shouldShowInfoAction;
@@ -3480,7 +3534,6 @@ export function createTransformerView2dDetailView(panelEl, {
                 openSettingsBtn.tabIndex = -1;
             }
         }
-        const stageHeader = resolveTransformerView2dStageHeader(resolveDisplayedStageSemanticTarget());
         if (stageLayerReadout) {
             setNodeText(stageLayerReadout, stageHeader.layerLabel);
             stageLayerReadout.hidden = !stageHeader.layerLabel;
@@ -3489,6 +3542,7 @@ export function createTransformerView2dDetailView(panelEl, {
             setNodeText(stageTitleReadout, stageHeader.stageLabel);
             stageTitleReadout.setAttribute('aria-label', stageHeader.fullLabel);
         }
+        state.readoutSignature = nextSignature;
     }
 
     function renderTokenStrip() {
@@ -3851,10 +3905,44 @@ export function createTransformerView2dDetailView(panelEl, {
         return primaryHit;
     }
 
-    function resolveOverviewCanvasHit(localX = 0, localY = 0) {
+    function shouldResolveOverviewScreenFallbackForHover(worldHit = null) {
+        if (
+            Number.isFinite(worldHit?.rowHit?.rowIndex)
+            || Number.isFinite(worldHit?.columnHit?.colIndex)
+            || (
+                Number.isFinite(worldHit?.cellHit?.rowIndex)
+                && Number.isFinite(worldHit?.cellHit?.colIndex)
+            )
+        ) {
+            return false;
+        }
+
+        const worldScale = Number(renderer.getLastRenderState()?.worldScale);
+        if (!(worldScale > 0) || worldScale >= 0.7) {
+            return false;
+        }
+        if (!worldHit) {
+            return true;
+        }
+
+        const worldEntry = worldHit?.entry || worldHit?.node || null;
+        const componentKind = String(worldEntry?.semantic?.componentKind || '').trim().toLowerCase();
+        if (componentKind === 'residual') {
+            return true;
+        }
+
+        return resolveCanvasHitSpecificity(worldHit) <= 11;
+    }
+
+    function resolveOverviewCanvasHit(localX = 0, localY = 0, {
+        interactionKind = 'default'
+    } = {}) {
         if (!Number.isFinite(localX) || !Number.isFinite(localY)) return null;
         const worldPoint = getActiveViewportController().screenToWorld(localX, localY);
         const worldHit = renderer.resolveInteractiveHitAtPoint(worldPoint.x, worldPoint.y);
+        if (interactionKind === 'hover' && !shouldResolveOverviewScreenFallbackForHover(worldHit)) {
+            return worldHit;
+        }
         const screenHit = renderer.resolveInteractiveHitAtScreenPoint(localX, localY);
         return mergeCanvasHits(worldHit, screenHit);
     }
