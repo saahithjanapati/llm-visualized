@@ -2265,7 +2265,6 @@ export function createTransformerView2dDetailView(panelEl, {
     function stopHoverDimmingAnimation() {
         const hoverDimming = state.hoverDimming;
         if (!hoverDimming || hoverDimming.rafId === null) return;
-        cancelAnimationFrame(hoverDimming.rafId);
         hoverDimming.rafId = null;
         hoverDimming.lastTime = 0;
     }
@@ -2286,27 +2285,53 @@ export function createTransformerView2dDetailView(panelEl, {
         hoverDimming.overviewBlendTarget = 1;
     }
 
-    function ensureHoverDimmingAnimation() {
+    function shouldReleasePreviousOverviewFocus({
+        dimValue = state.hoverDimming?.value,
+        dimTarget = state.hoverDimming?.target,
+        overviewBlendValue = state.hoverDimming?.overviewBlend,
+        overviewBlendTarget = state.hoverDimming?.overviewBlendTarget
+    } = {}) {
+        if (overviewBlendTarget < 0.999 || overviewBlendValue < 0.999) {
+            return false;
+        }
+        if (state.overviewSceneFocus) {
+            return true;
+        }
+        return dimTarget <= 0.01 && dimValue <= 0.01;
+    }
+
+    function syncHoverDimmingSettledState() {
         const hoverDimming = state.hoverDimming;
-        if (!hoverDimming || hoverDimming.rafId !== null) return;
-        const shouldReleasePreviousOverviewFocus = ({
-            dimValue = hoverDimming.value,
-            dimTarget = hoverDimming.target,
-            overviewBlendValue = hoverDimming.overviewBlend,
-            overviewBlendTarget = hoverDimming.overviewBlendTarget
-        } = {}) => {
-            if (overviewBlendTarget < 0.999 || overviewBlendValue < 0.999) {
-                return false;
-            }
-            if (state.overviewSceneFocus) {
-                return true;
-            }
-            return dimTarget <= 0.01 && dimValue <= 0.01;
-        };
+        if (!hoverDimming) return true;
         const dimSettled = Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01;
         const rowBlendSettled = Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01;
         const overviewBlendSettled = Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) <= 0.01;
-        if (dimSettled && rowBlendSettled && overviewBlendSettled) {
+        if (!(dimSettled && rowBlendSettled && overviewBlendSettled)) {
+            return false;
+        }
+        hoverDimming.value = hoverDimming.target;
+        hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
+        if (hoverDimming.rowBlendTarget >= 1) {
+            hoverDimming.previousHoveredRow = null;
+        }
+        hoverDimming.overviewBlend = hoverDimming.overviewBlendTarget;
+        if (shouldReleasePreviousOverviewFocus({
+            dimValue: hoverDimming.value,
+            dimTarget: hoverDimming.target,
+            overviewBlendValue: hoverDimming.overviewBlend,
+            overviewBlendTarget: hoverDimming.overviewBlendTarget
+        })) {
+            hoverDimming.previousOverviewFocus = null;
+        }
+        hoverDimming.rafId = null;
+        hoverDimming.lastTime = 0;
+        return true;
+    }
+
+    function advanceHoverDimmingAnimation(now = 0) {
+        const hoverDimming = state.hoverDimming;
+        if (!hoverDimming || hoverDimming.rafId === null) return false;
+        if (!state.visible) {
             hoverDimming.value = hoverDimming.target;
             hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
             if (hoverDimming.rowBlendTarget >= 1) {
@@ -2321,73 +2346,53 @@ export function createTransformerView2dDetailView(panelEl, {
             })) {
                 hoverDimming.previousOverviewFocus = null;
             }
+            hoverDimming.rafId = null;
+            hoverDimming.lastTime = 0;
+            return false;
+        }
+        const previousTime = Number.isFinite(hoverDimming.lastTime) && hoverDimming.lastTime > 0
+            ? hoverDimming.lastTime
+            : now;
+        const dt = Math.max(8, Math.min(32, now - previousTime));
+        hoverDimming.lastTime = now;
+        const alpha = 1 - Math.exp(-dt / VIEW2D_ROW_HOVER_FADE_DURATION_MS);
+        hoverDimming.value += (hoverDimming.target - hoverDimming.value) * alpha;
+        hoverDimming.rowBlend += (hoverDimming.rowBlendTarget - hoverDimming.rowBlend) * alpha;
+        hoverDimming.overviewBlend += (hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) * alpha;
+
+        if (Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01) {
+            hoverDimming.value = hoverDimming.target;
+        }
+        if (Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01) {
+            hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
+            if (hoverDimming.rowBlendTarget >= 1) {
+                hoverDimming.previousHoveredRow = null;
+            }
+        }
+        if (Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) <= 0.01) {
+            hoverDimming.overviewBlend = hoverDimming.overviewBlendTarget;
+            if (shouldReleasePreviousOverviewFocus({
+                dimValue: hoverDimming.value,
+                dimTarget: hoverDimming.target,
+                overviewBlendValue: hoverDimming.overviewBlend,
+                overviewBlendTarget: hoverDimming.overviewBlendTarget
+            })) {
+                hoverDimming.previousOverviewFocus = null;
+            }
+        }
+        return !syncHoverDimmingSettledState();
+    }
+
+    function ensureHoverDimmingAnimation() {
+        const hoverDimming = state.hoverDimming;
+        if (!hoverDimming) return;
+        if (syncHoverDimmingSettledState()) {
             return;
         }
-
-        const tick = (now) => {
-            hoverDimming.rafId = null;
-            if (!state.visible) {
-                hoverDimming.value = hoverDimming.target;
-                hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
-                if (hoverDimming.rowBlendTarget >= 1) {
-                    hoverDimming.previousHoveredRow = null;
-                }
-                hoverDimming.overviewBlend = hoverDimming.overviewBlendTarget;
-                if (shouldReleasePreviousOverviewFocus({
-                    dimValue: hoverDimming.value,
-                    dimTarget: hoverDimming.target,
-                    overviewBlendValue: hoverDimming.overviewBlend,
-                    overviewBlendTarget: hoverDimming.overviewBlendTarget
-                })) {
-                    hoverDimming.previousOverviewFocus = null;
-                }
-                hoverDimming.lastTime = 0;
-                return;
-            }
-            const previousTime = Number.isFinite(hoverDimming.lastTime) && hoverDimming.lastTime > 0
-                ? hoverDimming.lastTime
-                : now;
-            const dt = Math.max(8, Math.min(32, now - previousTime));
-            hoverDimming.lastTime = now;
-            const alpha = 1 - Math.exp(-dt / VIEW2D_ROW_HOVER_FADE_DURATION_MS);
-            hoverDimming.value += (hoverDimming.target - hoverDimming.value) * alpha;
-            hoverDimming.rowBlend += (hoverDimming.rowBlendTarget - hoverDimming.rowBlend) * alpha;
-            hoverDimming.overviewBlend += (hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) * alpha;
-
-            if (Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01) {
-                hoverDimming.value = hoverDimming.target;
-            }
-            if (Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01) {
-                hoverDimming.rowBlend = hoverDimming.rowBlendTarget;
-                if (hoverDimming.rowBlendTarget >= 1) {
-                    hoverDimming.previousHoveredRow = null;
-                }
-            }
-            if (Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) <= 0.01) {
-                hoverDimming.overviewBlend = hoverDimming.overviewBlendTarget;
-                if (shouldReleasePreviousOverviewFocus({
-                    dimValue: hoverDimming.value,
-                    dimTarget: hoverDimming.target,
-                    overviewBlendValue: hoverDimming.overviewBlend,
-                    overviewBlendTarget: hoverDimming.overviewBlendTarget
-                })) {
-                    hoverDimming.previousOverviewFocus = null;
-                }
-            }
-
-            const nextDimSettled = Math.abs(hoverDimming.target - hoverDimming.value) <= 0.01;
-            const nextRowBlendSettled = Math.abs(hoverDimming.rowBlendTarget - hoverDimming.rowBlend) <= 0.01;
-            const nextOverviewBlendSettled = Math.abs(hoverDimming.overviewBlendTarget - hoverDimming.overviewBlend) <= 0.01;
-            render();
-            if (nextDimSettled && nextRowBlendSettled && nextOverviewBlendSettled) {
-                hoverDimming.lastTime = 0;
-                return;
-            }
-            hoverDimming.rafId = requestAnimationFrame(tick);
-        };
-
+        if (hoverDimming.rafId !== null) return;
         hoverDimming.lastTime = 0;
-        hoverDimming.rafId = requestAnimationFrame(tick);
+        hoverDimming.rafId = 'active';
+        scheduleRender();
     }
 
     function setHoverDimmingTarget(target = 0, {
@@ -3679,24 +3684,31 @@ export function createTransformerView2dDetailView(panelEl, {
 
     function scheduleRender() {
         if (state.renderFrame !== null) return;
-        state.renderFrame = requestAnimationFrame(() => {
+        state.renderFrame = requestAnimationFrame((now) => {
             state.renderFrame = null;
+            const hoverAnimationActive = advanceHoverDimmingAnimation(now);
+            const viewportAnimationActive = !!(viewportController.animation || detailViewportController.animation);
+            if (viewportAnimationActive) {
+                viewportController.step(now);
+                detailViewportController.step(now);
+                state.animationFrame = 'active';
+            } else {
+                state.animationFrame = null;
+            }
             render();
+            if (hoverAnimationActive || viewportController.animation || detailViewportController.animation) {
+                scheduleRender();
+            }
         });
     }
 
     function animateViewport() {
-        if (state.animationFrame !== null) return;
-        const tick = (now) => {
+        if (!(viewportController.animation || detailViewportController.animation)) {
             state.animationFrame = null;
-            viewportController.step(now);
-            detailViewportController.step(now);
-            render();
-            if (viewportController.animation || detailViewportController.animation) {
-                state.animationFrame = requestAnimationFrame(tick);
-            }
-        };
-        state.animationFrame = requestAnimationFrame(tick);
+            return;
+        }
+        state.animationFrame = 'active';
+        scheduleRender();
     }
 
     function fitScene({
