@@ -158,9 +158,9 @@ h1 em {
     margin-top: 1.1em;
     padding-top: 3.8em;
     border-top: 1px solid var(--rule);
-    color: rgba(205, 216, 232, 0.2);
-    font-size: 0.62rem;
-    line-height: 1.5;
+    color: rgba(205, 216, 232, 0.3);
+    font-size: 0.72rem;
+    line-height: 1.56;
     scroll-margin-top: 32px;
 }
 
