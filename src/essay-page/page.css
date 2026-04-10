@@ -141,11 +141,11 @@ h1 em {
 
 .essay-note-anchor {
     margin-left: 0.12em;
-    color: var(--gold);
-    font-size: 0.75em;
+    color: var(--blue);
+    font-size: 0.64em;
     line-height: 1;
     text-decoration: none;
-    vertical-align: super;
+    vertical-align: 0.18em;
 }
 
 .essay-note-anchor:hover,
