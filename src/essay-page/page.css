@@ -154,10 +154,10 @@ h1 em {
 }
 
 .essay-note {
-    margin-top: 1.9em;
-    padding-top: 1.2em;
+    margin-top: 4.8em;
+    padding-top: 1.35em;
     border-top: 1px solid var(--rule);
-    color: var(--ink-dim);
+    color: rgba(205, 216, 232, 0.58);
     font-size: 0.98rem;
     line-height: 1.72;
     scroll-margin-top: 32px;
