@@ -139,6 +139,30 @@ h1 em {
     line-height: 1.82;
 }
 
+.essay-note-anchor {
+    margin-left: 0.12em;
+    color: var(--gold);
+    font-size: 0.75em;
+    line-height: 1;
+    text-decoration: none;
+    vertical-align: super;
+}
+
+.essay-note-anchor:hover,
+.essay-note-anchor:focus-visible {
+    color: var(--ink-bright);
+}
+
+.essay-note {
+    margin-top: 1.9em;
+    padding-top: 1.2em;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-dim);
+    font-size: 0.98rem;
+    line-height: 1.72;
+    scroll-margin-top: 32px;
+}
+
 .body-text p:first-of-type::first-letter {
     float: left;
     color: var(--gold);
