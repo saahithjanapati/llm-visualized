@@ -141,8 +141,9 @@ h1 em {
 
 .essay-note-anchor {
     margin-left: 0.12em;
-    color: #7fb8e8;
+    color: #9fd6ff;
     font-size: 0.64em;
+    font-weight: 700;
     line-height: 1;
     text-decoration: none;
     vertical-align: 0.18em;
@@ -158,7 +159,7 @@ h1 em {
     padding-top: 3.8em;
     border-top: 1px solid var(--rule);
     color: rgba(205, 216, 232, 0.33);
-    font-size: 0.9rem;
+    font-size: 0.84rem;
     line-height: 1.72;
     scroll-margin-top: 32px;
 }
