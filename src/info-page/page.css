@@ -1,15 +1,16 @@
 :root {
     color-scheme: dark;
-    --info-bg-top: #020202;
-    --info-bg-bottom: #080808;
-    --info-surface: rgba(255, 255, 255, 0.02);
-    --info-surface-border: rgba(255, 255, 255, 0.08);
-    --info-rule: rgba(255, 255, 255, 0.07);
-    --info-text: #f5f5f5;
-    --info-muted: rgba(255, 255, 255, 0.62);
-    --info-link: #6ea8ff;
-    --info-link-hover: #9bc2ff;
-    --info-glow: rgba(255, 255, 255, 0.05);
+    --info-bg-top: #050505;
+    --info-bg-bottom: #000000;
+    --info-surface: rgba(255, 255, 255, 0.018);
+    --info-surface-border: rgba(120, 170, 242, 0.14);
+    --info-rule: rgba(255, 255, 255, 0.08);
+    --info-rule-blue: rgba(120, 170, 242, 0.16);
+    --info-text: #f2f2f2;
+    --info-muted: rgba(255, 255, 255, 0.52);
+    --info-soft: rgba(255, 255, 255, 0.76);
+    --info-link: #78aaf2;
+    --info-link-hover: #b8d2fb;
 }
 
 * {
@@ -19,35 +20,29 @@
 html,
 body {
     min-height: 100%;
-    height: 100%;
     margin: 0;
 }
 
 body {
     color: var(--info-text);
     background:
-        radial-gradient(circle at top, rgba(255, 255, 255, 0.03), transparent 32%),
+        linear-gradient(180deg, rgba(55, 113, 205, 0.04), transparent 250px),
         linear-gradient(180deg, var(--info-bg-top) 0%, var(--info-bg-bottom) 100%);
-    font-family: "Space Grotesk", "Rajdhani", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0;
 }
 
-body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 24%),
-        radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.02), transparent 22%);
+a:focus-visible,
+button:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.72);
+    outline-offset: 3px;
 }
 
 .info-page-shell {
     width: 100%;
     min-height: 100dvh;
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    padding: 0;
+    padding-bottom: max(30px, env(safe-area-inset-bottom));
 }
 
 .info-page-back-link {
@@ -60,61 +55,51 @@ body::before {
         max(20px, calc(env(safe-area-inset-right) + 16px))
         18px
         max(20px, calc(env(safe-area-inset-left) + 16px));
-    color: var(--info-link);
+    color: rgba(120, 170, 242, 0.82);
     text-decoration: none;
-    font-size: 14px;
-    letter-spacing: 0.04em;
-    opacity: 0.72;
+    font-size: 0.9rem;
+    font-weight: 650;
     transition:
-        opacity 160ms ease,
+        color 160ms ease,
         transform 160ms ease;
 }
 
 .info-page-back-link:hover,
 .info-page-back-link:focus-visible {
     color: var(--info-link-hover);
-    opacity: 1;
     transform: translateX(-2px);
 }
 
 .info-page-card {
-    flex: 1 1 auto;
-    min-height: 0;
-    padding:
-        24px
-        max(30px, calc(env(safe-area-inset-right) + 22px))
-        max(32px, calc(env(safe-area-inset-bottom) + 20px))
-        max(30px, calc(env(safe-area-inset-left) + 22px));
-    border: 1px solid var(--info-surface-border);
+    width: min(980px, calc(100% - 60px));
+    margin: 0 auto;
+    padding: 32px 34px 40px;
+    border: 0;
     border-radius: 0;
-    background: linear-gradient(180deg, var(--info-surface), rgba(255, 255, 255, 0.008));
+    background: transparent;
     box-shadow: none;
-}
-
-.info-page-card::before {
-    display: none;
 }
 
 .info-page-eyebrow {
     margin: 0 0 12px;
     color: var(--info-muted);
-    font-size: 12px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
+    font-size: 0.78rem;
+    font-weight: 760;
 }
 
 .info-page-title {
     margin: 0 0 28px;
-    max-width: 10ch;
-    font-size: clamp(2.2rem, 5vw, 3.6rem);
-    line-height: 0.92;
-    letter-spacing: -0.04em;
+    color: var(--info-text);
+    font-size: 3.45rem;
+    line-height: 0.98;
+    letter-spacing: 0;
+    white-space: nowrap;
 }
 
 .info-page-markdown {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 19px;
 }
 
 .info-page-markdown > * {
@@ -125,53 +110,53 @@ body::before {
 .info-page-markdown h2,
 .info-page-markdown h3 {
     color: var(--info-text);
-    font-weight: 600;
-    letter-spacing: -0.025em;
+    font-weight: 720;
+    letter-spacing: 0;
 }
 
 .info-page-markdown h2 {
     margin-top: 10px;
-    padding-top: 20px;
-    border-top: 1px solid var(--info-rule);
-    font-size: clamp(1.32rem, 2.2vw, 1.62rem);
-    line-height: 1.1;
+    padding-top: 22px;
+    border-top: 1px solid var(--info-rule-blue);
+    font-size: 1.55rem;
+    line-height: 1.16;
 }
 
 .info-page-markdown h3 {
     color: var(--info-muted);
-    font-size: clamp(0.98rem, 1.35vw, 1.1rem);
-    line-height: 1.25;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+    font-size: 1rem;
+    line-height: 1.35;
 }
 
 .info-page-markdown p,
 .info-page-markdown li {
-    color: var(--info-text);
-    font-size: clamp(1rem, 1.02vw, 1.06rem);
-    line-height: 1.78;
+    color: var(--info-soft);
+    font-size: 1.03rem;
+    line-height: 1.76;
     text-wrap: pretty;
 }
 
 .info-page-markdown > blockquote + p {
-    font-size: clamp(1.06rem, 1.2vw, 1.18rem);
-    line-height: 1.7;
+    color: var(--info-text);
+    font-size: 1.08rem;
+    line-height: 1.72;
 }
 
 .info-page-markdown ul {
-    margin: 0;
-    padding-left: 1.15rem;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    margin: 0;
+    padding-left: 1.15rem;
 }
 
 .info-page-markdown li::marker {
     color: var(--info-muted);
 }
 
-.info-page-markdown strong {
-    color: var(--info-link-hover);
+.info-page-markdown strong,
+.info-page-markdown em {
+    color: #ffffff;
 }
 
 .info-page-markdown kbd {
@@ -180,19 +165,16 @@ body::before {
     justify-content: center;
     min-width: 1.8em;
     margin: 0 0.12em;
-    padding: 0.12em 0.48em 0.08em;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-bottom-width: 2px;
-    border-radius: 0.5rem;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.1),
-        0 6px 18px rgba(0, 0, 0, 0.18);
-    color: #f8fbff;
-    font-family: "Space Grotesk", "Rajdhani", "Segoe UI", system-ui, -apple-system, sans-serif;
-    font-size: 0.92em;
-    font-weight: 600;
-    line-height: 1.15;
+    padding: 0.12em 0.46em 0.08em;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-bottom-color: rgba(255, 255, 255, 0.22);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--info-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    font-weight: 760;
+    line-height: 1.2;
     vertical-align: middle;
     white-space: nowrap;
 }
@@ -200,30 +182,27 @@ body::before {
 .info-page-markdown a {
     color: var(--info-link);
     text-decoration-thickness: 1.5px;
-    text-underline-offset: 0.18em;
-    text-decoration-color: rgba(255, 255, 255, 0.3);
+    text-underline-offset: 0.2em;
+    text-decoration-color: rgba(102, 173, 255, 0.38);
 }
 
 .info-page-markdown a:hover,
 .info-page-markdown a:focus-visible {
     color: var(--info-link-hover);
-    text-decoration-color: rgba(255, 255, 255, 0.85);
+    text-decoration-color: rgba(168, 206, 255, 0.86);
 }
 
 .info-page-markdown blockquote {
     margin: 0;
-    padding: 16px 18px;
-    border: 1px solid rgba(110, 168, 255, 0.42);
-    border-radius: 18px;
-    background: linear-gradient(180deg, rgba(110, 168, 255, 0.1), rgba(110, 168, 255, 0.035));
-    box-shadow:
-        0 0 0 1px rgba(110, 168, 255, 0.12),
-        0 14px 42px rgba(0, 0, 0, 0.24);
-    backdrop-filter: blur(12px);
+    padding: 2px 0 2px 18px;
+    border: 0;
+    border-left: 2px solid rgba(120, 170, 242, 0.48);
+    border-radius: 0;
+    background: transparent;
 }
 
 .info-page-markdown blockquote p {
-    color: #dce9ff;
+    color: var(--info-soft);
     line-height: 1.65;
 }
 
@@ -232,35 +211,32 @@ body::before {
     outline: none;
 }
 
-@media (max-width: 700px) {
-    .info-page-shell {
-        width: 100%;
-        min-height: 100dvh;
-        padding: 0;
+.info-page-markdown .project-info-scroll-target.is-feedback-spotlighted {
+    animation: infoFeedbackSpotlight 1800ms ease;
+}
+
+@keyframes infoFeedbackSpotlight {
+    0%,
+    100% {
+        border-left-color: rgba(120, 170, 242, 0.48);
     }
 
-    .info-page-back-link {
-        padding:
-            max(16px, calc(env(safe-area-inset-top) + 8px))
-            max(16px, calc(env(safe-area-inset-right) + 12px))
-            14px
-            max(16px, calc(env(safe-area-inset-left) + 12px));
-        font-size: 14px;
+    35% {
+        border-left-color: rgba(184, 210, 251, 0.92);
+        background: rgba(120, 170, 242, 0.035);
     }
+}
 
+@media (max-width: 760px) {
     .info-page-card {
-        padding:
-            18px
-            max(16px, calc(env(safe-area-inset-right) + 12px))
-            max(20px, calc(env(safe-area-inset-bottom) + 14px))
-            max(16px, calc(env(safe-area-inset-left) + 12px));
-        border-radius: 0;
+        width: min(100% - 32px, 980px);
+        padding: 24px 20px 28px;
     }
 
     .info-page-title {
-        margin-bottom: 20px;
-        font-size: clamp(1.8rem, 9vw, 2.6rem);
-        line-height: 1;
+        margin-bottom: 22px;
+        font-size: 2.38rem;
+        line-height: 1.04;
     }
 
     .info-page-markdown {
@@ -278,16 +254,27 @@ body::before {
     }
 
     .info-page-markdown h2 {
-        font-size: 1.28rem;
-        padding-top: 16px;
+        padding-top: 18px;
+        font-size: 1.3rem;
     }
 
     .info-page-markdown h3 {
-        font-size: 0.96rem;
+        font-size: 0.98rem;
     }
 
     .info-page-markdown blockquote {
         padding: 15px 14px;
-        border-radius: 16px;
+    }
+}
+
+@media (max-width: 420px) {
+    .info-page-card {
+        width: min(100% - 28px, 980px);
+        padding-right: 16px;
+        padding-left: 16px;
+    }
+
+    .info-page-title {
+        font-size: 2.18rem;
     }
 }

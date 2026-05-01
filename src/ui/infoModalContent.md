@@ -80,6 +80,6 @@ Thank you to everyone on the internet who has already been generous with their t
 
 Thank you to my friends and family who gave me a lot of ideas throughout development. This project would not be the same without their feedback.
 
-And thank you for visiting the site! If you have any ideas or feedback to make it better, [I'd love to hear from you](#project-info-feedback)!
+And thank you for visiting the site! If you have any ideas or feedback to make it better, I'd love to hear from you (through [this form](https://forms.gle/YD5UPKAnasYtCutbA) or [DM on X](https://x.com/stargaz3r42)).
 
 I hope you enjoy the site 😊🫡

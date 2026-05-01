@@ -265,11 +265,14 @@ export class CoreEngine {
         this._pointer   = new THREE.Vector2();
         this._raycastingEnabled = true; // can be toggled via public API
         this._raycastRoots = [];
+        this._raycastIntersections = [];
         this._raycastRaf = null;
         this._lastPointerX = null;
         this._lastPointerY = null;
         this._raycastSelectionHandler = null;
         this._raycastHoverHandler = null;
+        this._raycastHoverSelectionKey = null;
+        this._hoverLabelRenderKey = null;
         this._hoveringClickable = false;
         this._hoverLabelsEnabled = true;
         this._hoverLabelsSuppressed = false;
@@ -470,6 +473,7 @@ export class CoreEngine {
             ? opts.keyboardZoomMinDistance
             : KEYBOARD_ZOOM_MIN_DISTANCE;
         this._keyboardZoomVector = new THREE.Vector3();
+        this._cameraClampOffset = new THREE.Vector3();
         this._keyboardCodes = new Set([
             'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
             'KeyW', 'KeyA', 'KeyS', 'KeyD',
@@ -733,7 +737,7 @@ export class CoreEngine {
 
     _intersectRaycastRoots(roots = []) {
         if (!Array.isArray(roots) || !roots.length) return [];
-        return this._raycaster.intersectObjects(roots, true);
+        return this._getRaycastIntersections(roots);
     }
 
     _intersectPreferredRaycastRoots() {
@@ -1801,15 +1805,95 @@ export class CoreEngine {
     }
 
     _emitRaycastHoverSelection(selection = null) {
+        const key = this._buildRaycastSelectionKey(selection);
+        if (this._raycastHoverSelectionKey === key) return;
+        this._raycastHoverSelectionKey = key;
         if (this._raycastHoverHandler) {
             this._raycastHoverHandler(selection || null);
         }
     }
 
     _clearRaycastHoverState() {
-        if (this._hoverLabelDiv) this._hoverLabelDiv.style.display = 'none';
+        if (this._hoverLabelDiv && this._hoverLabelDiv.style.display !== 'none') {
+            this._hoverLabelDiv.style.display = 'none';
+        }
+        this._hoverLabelRenderKey = null;
         this._setCanvasCursor(false);
         this._emitRaycastHoverSelection(null);
+    }
+
+    _getRaycastIntersections(roots = this._raycastRoots) {
+        const intersections = Array.isArray(this._raycastIntersections)
+            ? this._raycastIntersections
+            : [];
+        intersections.length = 0;
+        this._raycaster.intersectObjects(roots, true, intersections);
+        this._raycastIntersections = intersections;
+        return intersections;
+    }
+
+    _buildRaycastSelectionPayload(resolved, labelOverride = null) {
+        if (!resolved) return null;
+        return {
+            label: labelOverride || resolved.label,
+            kind: resolved.kind || null,
+            info: resolved.info || null,
+            object: resolved.object || resolved.hit?.object || null,
+            hit: resolved.hit || null
+        };
+    }
+
+    _buildRaycastSelectionKey(selection = null) {
+        if (!selection) return null;
+        const object = selection.object || selection.hit?.object || null;
+        const info = selection.info;
+        let infoKey = '';
+        if (info && typeof info === 'object') {
+            const parts = [];
+            const fields = [
+                'category',
+                'layerIndex',
+                'headIndex',
+                'laneIndex',
+                'laneLayoutIndex',
+                'tokenIndex',
+                'tokenId',
+                'vectorIndex',
+                'prismIndex',
+                'rowIndex',
+                'colIndex',
+                'stage',
+                'role',
+                'queryTokenIndex',
+                'keyTokenIndex'
+            ];
+            for (let i = 0; i < fields.length; i++) {
+                const field = fields[i];
+                const value = info[field];
+                if (value !== undefined && value !== null) {
+                    parts.push(`${field}:${value}`);
+                }
+            }
+            const logitEntry = info.logitEntry;
+            if (logitEntry && typeof logitEntry === 'object') {
+                const tokenId = Number.isFinite(logitEntry.tokenId) ? logitEntry.tokenId : '';
+                const token = typeof logitEntry.token === 'string' ? logitEntry.token : '';
+                parts.push(`logit:${tokenId}:${token}`);
+            }
+            infoKey = parts.join('|');
+        } else if (info !== undefined && info !== null) {
+            infoKey = String(info);
+        }
+        const hit = selection.hit || null;
+        const objectKey = object?.uuid || object?.id || '';
+        const instanceKey = Number.isFinite(hit?.instanceId) ? hit.instanceId : '';
+        return `${selection.kind || ''}|${selection.label || ''}|${objectKey}|${instanceKey}|${infoKey}`;
+    }
+
+    _emitRaycastSelection(selection = null) {
+        if (this._raycastSelectionHandler) {
+            this._raycastSelectionHandler(selection || null);
+        }
     }
 
     _performRaycastAt(clientX, clientY, { force = false } = {}) {
@@ -1852,30 +1936,31 @@ export class CoreEngine {
                 resolved.info,
                 resolved.object || resolved.hit?.object || null
             );
-            const rendered = this._renderHoverLabel(
-                hoverLabel,
-                resolved.info,
-                resolved.object || resolved.hit?.object || null
-            );
+            const hoverSelection = this._buildRaycastSelectionPayload(resolved, hoverLabel);
+            const selection = this._buildRaycastSelectionPayload(resolved);
+            const renderKey = this._buildRaycastSelectionKey(hoverSelection);
+            const rendered = renderKey === this._hoverLabelRenderKey
+                ? true
+                : this._renderHoverLabel(
+                    hoverLabel,
+                    resolved.info,
+                    resolved.object || resolved.hit?.object || null
+                );
             if (!rendered) {
                 this._clearRaycastHoverState();
-                return;
+                return null;
             }
+            this._hoverLabelRenderKey = renderKey;
             this._hoverLabelDiv.style.left = `${clientX + 12}px`;
             this._hoverLabelDiv.style.top  = `${clientY + 12}px`;
             this._hoverLabelDiv.style.display = 'block';
             this._setCanvasCursor(true);
-            this._emitRaycastHoverSelection({
-                label: hoverLabel,
-                kind: resolved.kind || null,
-                info: resolved.info || null,
-                object: resolved.object || resolved.hit?.object || null,
-                hit: resolved.hit || null
-            });
-            return;
+            this._emitRaycastHoverSelection(hoverSelection);
+            return selection;
         }
         // No intersection with a labelled object – hide overlay.
         this._clearRaycastHoverState();
+        return null;
     }
 
     _renderHoverLabel(label = '', info = null, object = null) {
@@ -2148,7 +2233,7 @@ export class CoreEngine {
 
     _performSelectionAt(clientX, clientY, { force = false } = {}) {
         if (!this._raycastingEnabled) {
-            if (this._raycastSelectionHandler) this._raycastSelectionHandler(null);
+            this._emitRaycastSelection(null);
             return;
         }
         if (!force && this._isUserNavigating) return;
@@ -2164,7 +2249,7 @@ export class CoreEngine {
         this._pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
         this._raycaster.setFromCamera(this._pointer, this.camera);
         if (!this._raycastRoots.length) {
-            if (this._raycastSelectionHandler) this._raycastSelectionHandler(null);
+            this._emitRaycastSelection(null);
             return;
         }
 
@@ -2175,18 +2260,10 @@ export class CoreEngine {
         }
         const resolved = this._resolveRaycastLabel(intersects);
         if (!resolved || !resolved.label) {
-            if (this._raycastSelectionHandler) this._raycastSelectionHandler(null);
+            this._emitRaycastSelection(null);
             return;
         }
-        if (this._raycastSelectionHandler) {
-            this._raycastSelectionHandler({
-                label: resolved.label,
-                kind: resolved.kind || null,
-                info: resolved.info || null,
-                object: resolved.object || resolved.hit?.object || null,
-                hit: resolved.hit || null
-            });
-        }
+        this._emitRaycastSelection(this._buildRaycastSelectionPayload(resolved));
     }
 
     _scheduleRaycast() {
@@ -2296,7 +2373,9 @@ export class CoreEngine {
         if (!this.camera || !this.controls || !this.controls.target) return;
         if (!(typeof limit === 'number' && Number.isFinite(limit) && limit > 0)) return;
 
-        const offset = new THREE.Vector3().copy(this.camera.position).sub(this.controls.target);
+        const offset = this._cameraClampOffset || new THREE.Vector3();
+        this._cameraClampOffset = offset;
+        offset.copy(this.camera.position).sub(this.controls.target);
         const distance = offset.length();
         if (!(distance > limit) || distance <= 0) return;
 

@@ -151,4 +151,53 @@ describe('CoreEngine invalidation loop', () => {
         expect(intersectSpy).toHaveBeenCalledWith(preferredRoots);
         expect(intersectSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('reuses the raycast intersection target array', () => {
+        const engine = createEngine();
+        const oldHit = { object: { name: 'old' } };
+        const newHit = { object: { name: 'new' } };
+        engine._raycastRoots = [{ name: 'root' }];
+        engine._raycastIntersections = [oldHit];
+        engine._raycaster = {
+            intersectObjects: vi.fn((roots, recursive, target) => {
+                target.push(newHit);
+                return target;
+            })
+        };
+
+        const result = engine._getRaycastIntersections();
+
+        expect(result).toBe(engine._raycastIntersections);
+        expect(result).toEqual([newHit]);
+        expect(engine._raycaster.intersectObjects).toHaveBeenCalledWith(
+            engine._raycastRoots,
+            true,
+            result
+        );
+    });
+
+    it('emits hover raycast selections only when the target changes', () => {
+        const engine = createEngine();
+        engine._raycastHoverSelectionKey = null;
+        engine._raycastHoverHandler = vi.fn();
+        const object = { uuid: 'same-object' };
+        const selection = {
+            label: 'Value Vector',
+            kind: 'mergedKV',
+            object,
+            hit: { object, instanceId: 4 },
+            info: { category: 'V', layerIndex: 1, headIndex: 2, tokenIndex: 3 }
+        };
+
+        engine._emitRaycastHoverSelection(selection);
+        engine._emitRaycastHoverSelection({ ...selection });
+        engine._emitRaycastHoverSelection({ ...selection, info: { ...selection.info, tokenIndex: 5 } });
+        engine._emitRaycastHoverSelection(null);
+        engine._emitRaycastHoverSelection(null);
+
+        expect(engine._raycastHoverHandler).toHaveBeenCalledTimes(3);
+        expect(engine._raycastHoverHandler.mock.calls[0][0]).toEqual(selection);
+        expect(engine._raycastHoverHandler.mock.calls[1][0].info.tokenIndex).toBe(5);
+        expect(engine._raycastHoverHandler.mock.calls[2][0]).toBeNull();
+    });
 });

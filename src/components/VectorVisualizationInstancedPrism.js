@@ -109,6 +109,43 @@ function cloneColorList(colors) {
         : new THREE.Color(0.5, 0.5, 0.5));
 }
 
+function normalizeFiniteRange(values) {
+    if (!values || values.length === 0) return [];
+
+    const length = values.length;
+    let minVal = Infinity;
+    let maxVal = -Infinity;
+    let hasFinite = false;
+
+    for (let i = 0; i < length; i++) {
+        const value = values[i];
+        if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+        if (value < minVal) minVal = value;
+        if (value > maxVal) maxVal = value;
+        hasFinite = true;
+    }
+
+    const normalized = new Array(length);
+    if (!hasFinite) {
+        normalized.fill(0.5);
+        return normalized;
+    }
+
+    const range = maxVal - minVal;
+    if (range < 1e-7) {
+        normalized.fill(0.5);
+        return normalized;
+    }
+
+    for (let i = 0; i < length; i++) {
+        const value = values[i];
+        normalized[i] = (typeof value === 'number' && Number.isFinite(value))
+            ? (value - minVal) / range
+            : 0.5;
+    }
+    return normalized;
+}
+
 export class VectorVisualizationInstancedPrism {
     constructor(initialData = null, initialPosition = new THREE.Vector3(0, 0, 0), numSubsections = 30, instanceCount = VECTOR_LENGTH_PRISM, options = {}) {
         this.group = new THREE.Group();
@@ -142,6 +179,7 @@ export class VectorVisualizationInstancedPrism {
         this._scratchColorMid = new THREE.Color();
         this._scratchColorLeft = new THREE.Color();
         this._scratchColorRight = new THREE.Color();
+        this._colorBufferScratch = null;
 
         // Create a material per vector so we can vary opacity independently,
         // but force program reuse by returning a stable cache key.
@@ -239,49 +277,11 @@ varying float vGradientT;`
     }
 
     minMaxNormalize(dataArray) {
-        if (!dataArray || dataArray.length === 0) return [];
-        const finiteData = dataArray.filter(val => typeof val === 'number' && isFinite(val));
-        if (finiteData.length === 0) return dataArray.map(() => 0.5); // Default if no finite numbers
-
-        let minVal = finiteData[0];
-        let maxVal = finiteData[0];
-        for (let i = 1; i < finiteData.length; i++) {
-            if (finiteData[i] < minVal) minVal = finiteData[i];
-            if (finiteData[i] > maxVal) maxVal = finiteData[i];
-        }
-        const range = maxVal - minVal;
-        if (range < 1e-7) return dataArray.map(val => (typeof val === 'number' && isFinite(val) ? 0.5 : 0.5));
-        return dataArray.map(val => {
-            if (typeof val === 'number' && isFinite(val)) {
-                return (val - minVal) / range;
-            } else {
-                return 0.5; // Default for non-finite original values
-            }
-        });
+        return normalizeFiniteRange(dataArray);
     }
 
     layerNormalize(vectorData) {
-        // Existing layerNormalize logic - assumed to return values in a typical range (e.g., roughly -1 to 1, or 0 to 1 after some scaling)
-        // For visualization, the output of layerNormalize should ideally be consistently in 0-1 range or be minMaxNormalized before height scaling.
-        // Let's assume it gives values that can be scaled. If it already produces 0-1, that's fine.
-        if (!vectorData || vectorData.length === 0) return [];
-        const finiteData = vectorData.filter(val => typeof val === 'number' && isFinite(val));
-        if (finiteData.length === 0) return vectorData.map(() => 0.5);
-        let minVal = finiteData[0];
-        let maxVal = finiteData[0];
-        for (let i = 1; i < finiteData.length; i++) {
-            if (finiteData[i] < minVal) minVal = finiteData[i];
-            if (finiteData[i] > maxVal) maxVal = finiteData[i];
-        }
-        const range = maxVal - minVal;
-        if (range < 1e-7) return vectorData.map(val => (typeof val === 'number' && isFinite(val) ? 0.5 : 0.5));
-        return vectorData.map(val => {
-            if (typeof val === 'number' && isFinite(val)) {
-                return (val - minVal) / range; // Ensures 0-1 output for layerNorm too
-            } else {
-                return 0.5;
-            }
-        });
+        return normalizeFiniteRange(vectorData);
     }
     
     // This method now ALWAYS applies fixed dimensions. Colors are based on subsections.
@@ -613,15 +613,39 @@ varying float vGradientT;`
         }
 
 
-        const buffers = this._buildColorBuffers();
+        const buffers = this._buildColorBuffers(this._getReusableColorBuffers());
         this._applyColorBuffers(buffers);
     }
 
-    _buildColorBuffers() {
+    _getReusableColorBuffers() {
+        const length = this.instanceCount * 3;
+        const scratch = this._colorBufferScratch;
+        if (
+            scratch
+            && scratch.colorStart?.length === length
+            && scratch.colorEnd?.length === length
+            && scratch.instanceColors?.length === length
+        ) {
+            return scratch;
+        }
+        this._colorBufferScratch = {
+            colorStart: new Float32Array(length),
+            colorEnd: new Float32Array(length),
+            instanceColors: new Float32Array(length)
+        };
+        return this._colorBufferScratch;
+    }
+
+    _buildColorBuffers(targetBuffers = null) {
         const count = this.instanceCount;
-        const colorStart = new Float32Array(count * 3);
-        const colorEnd = new Float32Array(count * 3);
-        const instanceColors = new Float32Array(count * 3);
+        const buffers = targetBuffers || {
+            colorStart: new Float32Array(count * 3),
+            colorEnd: new Float32Array(count * 3),
+            instanceColors: new Float32Array(count * 3)
+        };
+        const colorStart = buffers.colorStart;
+        const colorEnd = buffers.colorEnd;
+        const instanceColors = buffers.instanceColors;
         const midColor = this._scratchColorMid;
         const leftColor = this._scratchColorLeft;
         const rightColor = this._scratchColorRight;
@@ -640,7 +664,7 @@ varying float vGradientT;`
             colorEnd[i3 + 1] = rightColor.g;
             colorEnd[i3 + 2] = rightColor.b;
         }
-        return { colorStart, colorEnd, instanceColors };
+        return buffers;
     }
 
     _applyColorBuffers(buffers) {
@@ -839,7 +863,9 @@ varying float vGradientT;`
                 this.currentKeyColors.push(new THREE.Color(0.5,0.5,0.5));
             }
         }
-        const buffers = this._buildColorBuffers();
+        const buffers = this._buildColorBuffers(
+            cacheSource && cacheKey ? null : this._getReusableColorBuffers()
+        );
         this._applyColorBuffers(buffers);
 
         if (cacheSource && cacheKey) {
