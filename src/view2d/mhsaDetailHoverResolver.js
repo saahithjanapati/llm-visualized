@@ -1670,14 +1670,6 @@ function buildOutputProjectionHeadOutputRowResult(index = null, node = null, row
             ...(copyNodeId ? [{
                 nodeId: copyNodeId,
                 rowIndex
-            }] : []),
-            ...(concatOutputNodeId ? [{
-                nodeId: concatOutputNodeId,
-                rowIndex
-            }] : []),
-            ...(concatOutputCopyNodeId ? [{
-                nodeId: concatOutputCopyNodeId,
-                rowIndex
             }] : [])
         ],
         cellSelections: [

@@ -110,11 +110,11 @@ describe('output projection detail hover', () => {
             nodeId: copyMatrixNode?.id,
             rowIndex: 1
         });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+        expect(hoverState?.focusState?.rowSelections).not.toContainEqual({
             nodeId: concatOutputNode?.id,
             rowIndex: 1
         });
-        expect(hoverState?.focusState?.rowSelections).toContainEqual({
+        expect(hoverState?.focusState?.rowSelections).not.toContainEqual({
             nodeId: concatOutputCopyNode?.id,
             rowIndex: 1
         });
@@ -154,11 +154,11 @@ describe('output projection detail hover', () => {
             nodeId: copyMatrixNode?.id,
             rowIndex: 1
         });
-        expect(mirroredHoverState?.focusState?.rowSelections).toContainEqual({
+        expect(mirroredHoverState?.focusState?.rowSelections).not.toContainEqual({
             nodeId: concatOutputNode?.id,
             rowIndex: 1
         });
-        expect(mirroredHoverState?.focusState?.rowSelections).toContainEqual({
+        expect(mirroredHoverState?.focusState?.rowSelections).not.toContainEqual({
             nodeId: concatOutputCopyNode?.id,
             rowIndex: 1
         });

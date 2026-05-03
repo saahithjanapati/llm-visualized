@@ -186,16 +186,7 @@ import {
 import {
     resolveMhsaTokenMatrixHoverTokenEntries
 } from './selectionPanelMhsaTokenHoverUtils.js';
-import {
-    buildMhsaSceneModel
-} from '../view2d/model/buildMhsaSceneModel.js';
 import { createHoverLabelOverlay } from './hoverLabelOverlay.js';
-import {
-    buildSceneLayout
-} from '../view2d/layout/buildSceneLayout.js';
-import {
-    CanvasSceneRenderer
-} from '../view2d/render/canvas/CanvasSceneRenderer.js';
 import {
     resolveMhsaTokenMatrixCanvasMode,
     shouldRenderMhsaTokenMatrixCanvas,
@@ -352,12 +343,44 @@ import { getLayerNormParamData } from '../data/layerNormParams.js';
 import './selectionPanel.css';
 
 let transformerView2dDetailViewModulePromise = null;
+let mhsaTokenMatrixCanvasPreviewModulesPromise = null;
+let mhsaTokenMatrixCanvasPreviewModules = null;
 
 function loadTransformerView2dDetailViewModule() {
     if (!transformerView2dDetailViewModulePromise) {
         transformerView2dDetailViewModulePromise = import('./selectionPanelTransformerView2d.js');
     }
     return transformerView2dDetailViewModulePromise;
+}
+
+function loadMhsaTokenMatrixCanvasPreviewModules() {
+    if (mhsaTokenMatrixCanvasPreviewModules) {
+        return Promise.resolve(mhsaTokenMatrixCanvasPreviewModules);
+    }
+    if (!mhsaTokenMatrixCanvasPreviewModulesPromise) {
+        mhsaTokenMatrixCanvasPreviewModulesPromise = Promise.all([
+            import('../view2d/model/buildMhsaSceneModel.js'),
+            import('../view2d/layout/buildSceneLayout.js'),
+            import('../view2d/render/canvas/CanvasSceneRenderer.js')
+        ])
+            .then(([sceneModelModule, layoutModule, rendererModule]) => {
+                mhsaTokenMatrixCanvasPreviewModules = {
+                    buildMhsaSceneModel: sceneModelModule.buildMhsaSceneModel,
+                    buildSceneLayout: layoutModule.buildSceneLayout,
+                    CanvasSceneRenderer: rendererModule.CanvasSceneRenderer
+                };
+                return mhsaTokenMatrixCanvasPreviewModules;
+            })
+            .catch((error) => {
+                mhsaTokenMatrixCanvasPreviewModulesPromise = null;
+                throw error;
+            });
+    }
+    return mhsaTokenMatrixCanvasPreviewModulesPromise;
+}
+
+function getLoadedMhsaTokenMatrixCanvasPreviewModules() {
+    return mhsaTokenMatrixCanvasPreviewModules;
 }
 
 function scheduleUiPrewarmFrame(callback) {
@@ -4094,9 +4117,7 @@ export class SelectionPanel {
         this._mhsaTokenMatrixData = null;
         this._mhsaTokenMatrixSceneModel = null;
         this._mhsaTokenMatrixSceneLayout = null;
-        this._mhsaTokenMatrixCanvasRenderer = this.mhsaTokenMatrixCanvas
-            ? new CanvasSceneRenderer({ canvas: this.mhsaTokenMatrixCanvas })
-            : null;
+        this._mhsaTokenMatrixCanvasRenderer = null;
         this._mhsaTokenMatrixHoverOverlay = typeof document !== 'undefined'
             ? createHoverLabelOverlay({
                 documentRef: document,
@@ -13839,8 +13860,28 @@ export class SelectionPanel {
             });
             return false;
         }
+        const canvasPreviewModules = getLoadedMhsaTokenMatrixCanvasPreviewModules();
+        const CanvasSceneRendererClass = canvasPreviewModules?.CanvasSceneRenderer || null;
+        if (!CanvasSceneRendererClass) {
+            const renderToken = this._mhsaTokenMatrixRenderToken;
+            void loadMhsaTokenMatrixCanvasPreviewModules()
+                .then(() => {
+                    if (renderToken !== this._mhsaTokenMatrixRenderToken) return;
+                    this._scheduleMhsaTokenMatrixCanvasRender();
+                })
+                .catch((error) => {
+                    this._publishMhsaTokenMatrixCanvasDebugState('render-module-load-error', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                    console.warn('Failed to load MHSA canvas renderer:', error);
+                });
+            this._publishMhsaTokenMatrixCanvasDebugState('render-skip', {
+                reason: 'renderer-module-loading'
+            });
+            return false;
+        }
         if (!this._mhsaTokenMatrixCanvasRenderer) {
-            this._mhsaTokenMatrixCanvasRenderer = new CanvasSceneRenderer({
+            this._mhsaTokenMatrixCanvasRenderer = new CanvasSceneRendererClass({
                 canvas: this.mhsaTokenMatrixCanvas
             });
         } else {
@@ -13925,6 +13966,89 @@ export class SelectionPanel {
             this._renderMhsaTokenMatrixCanvasPreview();
         });
         this._publishMhsaTokenMatrixCanvasDebugState('schedule-frame');
+    }
+
+    _buildMhsaTokenMatrixCanvasScene({
+        renderToken = null,
+        previewData = null,
+        previewOptions = null,
+        layoutMetrics = null
+    } = {}) {
+        const mode = this._resolveMhsaTokenMatrixCanvasMode();
+        if (!shouldRenderMhsaTokenMatrixCanvas(mode) || !this.mhsaTokenMatrixCanvas) {
+            this._publishMhsaTokenMatrixCanvasDebugState('scene-skip', {
+                reason: shouldRenderMhsaTokenMatrixCanvas(mode) ? 'missing-canvas' : 'canvas-mode-off'
+            });
+            return false;
+        }
+
+        const buildScene = ({
+            buildMhsaSceneModel: buildSceneModelFn,
+            buildSceneLayout: buildSceneLayoutFn
+        } = {}) => {
+            if (renderToken !== this._mhsaTokenMatrixRenderToken) return false;
+            if (!shouldRenderMhsaTokenMatrixCanvas(this._resolveMhsaTokenMatrixCanvasMode()) || !this.mhsaTokenMatrixCanvas) {
+                return false;
+            }
+            if (
+                typeof buildSceneModelFn !== 'function'
+                || typeof buildSceneLayoutFn !== 'function'
+            ) {
+                this._publishMhsaTokenMatrixCanvasDebugState('scene-build-error', {
+                    error: 'missing canvas preview builders'
+                });
+                return false;
+            }
+            try {
+                const isSmallScreen = this._isSmallScreen && this._isSmallScreen();
+                this._mhsaTokenMatrixSceneModel = buildSceneModelFn({
+                    previewData,
+                    layerIndex: previewOptions?.layerIndex,
+                    headIndex: previewOptions?.headIndex,
+                    isSmallScreen,
+                    layoutMetrics
+                });
+                if (this._mhsaTokenMatrixSceneModel) {
+                    this._mhsaTokenMatrixSceneLayout = buildSceneLayoutFn(this._mhsaTokenMatrixSceneModel, {
+                        isSmallScreen,
+                        layoutMetrics
+                    });
+                }
+                this._publishMhsaTokenMatrixCanvasDebugState('scene-built', {
+                    rowCount: previewData?.rowCount || 0,
+                    columnCount: previewData?.columnCount || 0,
+                    sceneRootCount: Array.isArray(this._mhsaTokenMatrixSceneModel?.nodes)
+                        ? this._mhsaTokenMatrixSceneModel.nodes.length
+                        : 0
+                });
+                this._syncMhsaTokenMatrixCanvasPresentation({
+                    domReady: !!this._mhsaTokenMatrixWorkspace
+                });
+                return true;
+            } catch (sceneModelError) {
+                this._publishMhsaTokenMatrixCanvasDebugState('scene-build-error', {
+                    error: sceneModelError instanceof Error ? sceneModelError.message : String(sceneModelError)
+                });
+                console.warn('Failed to build MHSA 2D scene model/layout:', sceneModelError);
+                return false;
+            }
+        };
+
+        const loadedModules = getLoadedMhsaTokenMatrixCanvasPreviewModules();
+        if (loadedModules) {
+            return buildScene(loadedModules);
+        }
+
+        void loadMhsaTokenMatrixCanvasPreviewModules()
+            .then(buildScene)
+            .catch((error) => {
+                this._publishMhsaTokenMatrixCanvasDebugState('scene-module-load-error', {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                console.warn('Failed to load MHSA canvas preview modules:', error);
+            });
+        this._publishMhsaTokenMatrixCanvasDebugState('scene-module-loading');
+        return false;
     }
 
     _renderMhsaTokenMatrixPreview() {
@@ -14028,33 +14152,12 @@ export class SelectionPanel {
             this._mhsaTokenMatrixLayoutMetrics = layoutMetrics;
             this._mhsaTokenMatrixSceneModel = null;
             this._mhsaTokenMatrixSceneLayout = null;
-            try {
-                this._mhsaTokenMatrixSceneModel = buildMhsaSceneModel({
-                    previewData,
-                    layerIndex: previewOptions.layerIndex,
-                    headIndex: previewOptions.headIndex,
-                    isSmallScreen: this._isSmallScreen && this._isSmallScreen(),
-                    layoutMetrics
-                });
-                if (this._mhsaTokenMatrixSceneModel) {
-                    this._mhsaTokenMatrixSceneLayout = buildSceneLayout(this._mhsaTokenMatrixSceneModel, {
-                        isSmallScreen: this._isSmallScreen && this._isSmallScreen(),
-                        layoutMetrics
-                    });
-                }
-                this._publishMhsaTokenMatrixCanvasDebugState('scene-built', {
-                    rowCount: previewData.rowCount,
-                    columnCount: previewData.columnCount,
-                    sceneRootCount: Array.isArray(this._mhsaTokenMatrixSceneModel?.nodes)
-                        ? this._mhsaTokenMatrixSceneModel.nodes.length
-                        : 0
-                });
-            } catch (sceneModelError) {
-                this._publishMhsaTokenMatrixCanvasDebugState('scene-build-error', {
-                    error: sceneModelError instanceof Error ? sceneModelError.message : String(sceneModelError)
-                });
-                console.warn('Failed to build MHSA 2D scene model/layout:', sceneModelError);
-            }
+            this._buildMhsaTokenMatrixCanvasScene({
+                renderToken,
+                previewData,
+                previewOptions,
+                layoutMetrics
+            });
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-rows', String(previewData.rowCount));
             this.mhsaTokenMatrixBody.style.setProperty('--mhsa-token-matrix-band-count', String(previewData.bandCount || 1));
             applyMhsaTokenMatrixLayoutVars(this.mhsaTokenMatrixBody, layoutMetrics);
