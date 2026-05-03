@@ -8,6 +8,7 @@ import { buildTransformerSceneModel } from '../view2d/model/buildTransformerScen
 import { appState } from '../state/appState.js';
 import { CanvasSceneRenderer } from '../view2d/render/canvas/CanvasSceneRenderer.js';
 import { resolveRenderPixelRatio } from '../utils/constants.js';
+import { perfStats } from '../utils/perfStats.js';
 import {
     normalizeRaycastLabel,
     simplifyLayerNormParamHoverLabel
@@ -180,6 +181,67 @@ const VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS =
     TRANSFORMER_VIEW2D_STAGED_HEAD_DETAIL_OVERVIEW_TO_HEAD_DURATION_MS;
 const VIEW2D_HEAD_DETAIL_DEPTH_ENTER_RATIO = 0.97;
 const VIEW2D_HEAD_DETAIL_DEPTH_EXIT_RATIO = 0.95;
+const VIEW2D_SCENE_STATE_CACHE_LIMIT = 12;
+
+let nextView2dActivationSourceCacheId = 1;
+const view2dActivationSourceCacheIds = new WeakMap();
+
+function nowMs() {
+    return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+}
+
+function resolveView2dActivationSourceCacheId(activationSource = null) {
+    if (
+        activationSource
+        && (typeof activationSource === 'object' || typeof activationSource === 'function')
+    ) {
+        if (!view2dActivationSourceCacheIds.has(activationSource)) {
+            view2dActivationSourceCacheIds.set(
+                activationSource,
+                nextView2dActivationSourceCacheId
+            );
+            nextView2dActivationSourceCacheId += 1;
+        }
+        return `source:${view2dActivationSourceCacheIds.get(activationSource)}`;
+    }
+    return `source:${String(activationSource ?? 'null')}`;
+}
+
+function buildTransformerView2dSceneStateCacheKey(state = {}) {
+    const kvCacheState = {
+        kvCacheModeEnabled: !!appState.kvCacheModeEnabled,
+        kvCachePrefillActive: !!appState.kvCachePrefillActive,
+        kvCacheDecodeActive: !!(appState.kvCacheModeEnabled && !appState.kvCachePrefillActive),
+        kvCachePassIndex: Number.isFinite(appState.kvCachePassIndex)
+            ? Math.max(0, Math.floor(appState.kvCachePassIndex))
+            : 0
+    };
+    return JSON.stringify({
+        activationSourceId: resolveView2dActivationSourceCacheId(state.activationSource),
+        layerCount: Number.isFinite(state.layerCount) ? Math.max(1, Math.floor(state.layerCount)) : null,
+        tokenIndices: Array.isArray(state.tokenIndices) ? state.tokenIndices : null,
+        tokenLabels: Array.isArray(state.tokenLabels) ? state.tokenLabels : null,
+        isSmallScreen: !!state.isSmallScreen,
+        headDetailTarget: state.headDetailTarget || null,
+        concatDetailTarget: state.concatDetailTarget || null,
+        outputProjectionDetailTarget: state.outputProjectionDetailTarget || null,
+        mlpDetailTarget: state.mlpDetailTarget || null,
+        layerNormDetailTarget: state.layerNormDetailTarget || null,
+        kvCacheState
+    });
+}
+
+function rememberTransformerView2dSceneState(cache, key, value) {
+    if (!cache || !key || !value) return;
+    if (cache.has(key)) cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > VIEW2D_SCENE_STATE_CACHE_LIMIT) {
+        const oldestKey = cache.keys().next().value;
+        cache.delete(oldestKey);
+    }
+}
 
 function normalizeView2dTokenChipIndex(value = null) {
     return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
@@ -753,6 +815,7 @@ export function createTransformerView2dDetailView(panelEl, {
     let selectionSidebarCloseTimerId = null;
     let openViewportStabilizationTimerId = null;
     let openViewportStabilizationAttempts = 0;
+    const sceneStateCache = new Map();
 
     function clearSelectionSidebarCloseTimer() {
         if (selectionSidebarCloseTimerId === null) return;
@@ -3355,35 +3418,74 @@ export function createTransformerView2dDetailView(panelEl, {
     }
 
     function rebuildSceneState() {
-        state.scene = buildTransformerSceneModel({
-            activationSource: state.activationSource,
-            layerCount: state.layerCount,
-            tokenIndices: state.tokenIndices,
-            tokenLabels: state.tokenLabels,
-            isSmallScreen: state.isSmallScreen,
-            headDetailTarget: state.headDetailTarget,
-            concatDetailTarget: state.concatDetailTarget,
-            outputProjectionDetailTarget: state.outputProjectionDetailTarget,
-            mlpDetailTarget: state.mlpDetailTarget,
-            layerNormDetailTarget: state.layerNormDetailTarget,
-            kvCacheState: {
-                kvCacheModeEnabled: !!appState.kvCacheModeEnabled,
-                kvCachePrefillActive: !!appState.kvCachePrefillActive,
-                kvCacheDecodeActive: !!(appState.kvCacheModeEnabled && !appState.kvCachePrefillActive),
-                kvCachePassIndex: Number.isFinite(appState.kvCachePassIndex)
-                    ? Math.max(0, Math.floor(appState.kvCachePassIndex))
-                    : 0
-            }
-        });
-        const activeDetailScene = resolveActiveDetailScene(state.scene, {
-            headDetailTarget: state.headDetailTarget,
-            outputProjectionDetailTarget: state.outputProjectionDetailTarget,
-            mlpDetailTarget: state.mlpDetailTarget,
-            layerNormDetailTarget: state.layerNormDetailTarget
-        });
-        state.detailSceneIndex = activeDetailScene
-            ? createMhsaDetailSceneIndex(activeDetailScene)
-            : null;
+        const cacheKey = buildTransformerView2dSceneStateCacheKey(state);
+        const cachedSceneState = sceneStateCache.get(cacheKey) || null;
+        let sceneCacheHit = !!cachedSceneState;
+        let modelMs = 0;
+        let detailIndexMs = 0;
+        let layoutMs = 0;
+
+        if (cachedSceneState) {
+            state.scene = cachedSceneState.scene;
+            state.layout = cachedSceneState.layout;
+            state.detailSceneIndex = cachedSceneState.detailSceneIndex || null;
+        } else {
+            const modelStart = perfStats.enabled ? nowMs() : 0;
+            state.scene = buildTransformerSceneModel({
+                activationSource: state.activationSource,
+                layerCount: state.layerCount,
+                tokenIndices: state.tokenIndices,
+                tokenLabels: state.tokenLabels,
+                isSmallScreen: state.isSmallScreen,
+                headDetailTarget: state.headDetailTarget,
+                concatDetailTarget: state.concatDetailTarget,
+                outputProjectionDetailTarget: state.outputProjectionDetailTarget,
+                mlpDetailTarget: state.mlpDetailTarget,
+                layerNormDetailTarget: state.layerNormDetailTarget,
+                kvCacheState: {
+                    kvCacheModeEnabled: !!appState.kvCacheModeEnabled,
+                    kvCachePrefillActive: !!appState.kvCachePrefillActive,
+                    kvCacheDecodeActive: !!(appState.kvCacheModeEnabled && !appState.kvCachePrefillActive),
+                    kvCachePassIndex: Number.isFinite(appState.kvCachePassIndex)
+                        ? Math.max(0, Math.floor(appState.kvCachePassIndex))
+                        : 0
+                }
+            });
+            if (perfStats.enabled) modelMs = nowMs() - modelStart;
+
+            const detailIndexStart = perfStats.enabled ? nowMs() : 0;
+            const activeDetailScene = resolveActiveDetailScene(state.scene, {
+                headDetailTarget: state.headDetailTarget,
+                outputProjectionDetailTarget: state.outputProjectionDetailTarget,
+                mlpDetailTarget: state.mlpDetailTarget,
+                layerNormDetailTarget: state.layerNormDetailTarget
+            });
+            state.detailSceneIndex = activeDetailScene
+                ? createMhsaDetailSceneIndex(activeDetailScene)
+                : null;
+            if (perfStats.enabled) detailIndexMs = nowMs() - detailIndexStart;
+
+            const layoutStart = perfStats.enabled ? nowMs() : 0;
+            state.layout = buildSceneLayout(state.scene, {
+                isSmallScreen: state.isSmallScreen
+            });
+            if (perfStats.enabled) layoutMs = nowMs() - layoutStart;
+
+            rememberTransformerView2dSceneState(sceneStateCache, cacheKey, {
+                scene: state.scene,
+                layout: state.layout,
+                detailSceneIndex: state.detailSceneIndex
+            });
+            sceneCacheHit = false;
+        }
+
+        if (perfStats.enabled) {
+            perfStats.addTime('view2dModel', modelMs);
+            perfStats.addTime('view2dLayout', layoutMs + detailIndexMs);
+            perfStats.inc(sceneCacheHit ? 'view2dSceneCacheHits' : 'view2dSceneCacheMisses');
+            perfStats.setGauge('view2dSceneCacheSize', sceneStateCache.size);
+        }
+
         state.detailScenePinnedFocus = null;
         state.detailScenePinnedSignature = '';
         state.detailScenePinnedTokenEntries = null;
@@ -3414,10 +3516,9 @@ export function createTransformerView2dDetailView(panelEl, {
             }
             state.pendingDetailInteractionTargets = [];
         }
-        state.layout = buildSceneLayout(state.scene, {
-            isSmallScreen: state.isSmallScreen
-        });
-        renderer.setScene(state.scene, state.layout);
+        if (renderer.scene !== state.scene || renderer.layout !== state.layout) {
+            renderer.setScene(state.scene, state.layout);
+        }
         viewportController.setSceneBounds(state.layout?.sceneBounds || null);
         return !!state.scene && !!state.layout;
     }
@@ -3654,6 +3755,10 @@ export function createTransformerView2dDetailView(panelEl, {
             interacting: useFastRenderPath,
             isSmallScreen: state.isSmallScreen
         });
+        const perfStart = perfStats.enabled ? nowMs() : 0;
+        if (perfStats.enabled) {
+            perfStats.beginFrame(perfStart);
+        }
         const didRender = renderer.render({
             width,
             height,
@@ -3686,6 +3791,15 @@ export function createTransformerView2dDetailView(panelEl, {
                     }
             }
         });
+        if (perfStats.enabled) {
+            const perfEnd = nowMs();
+            const renderState = renderer.lastRenderState || {};
+            perfStats.addTime('view2dRender', perfEnd - perfStart);
+            perfStats.setGauge('view2dVisibleNodes', renderState.visibleNodeCount);
+            perfStats.setGauge('view2dVisibleConnectors', renderState.visibleConnectorCount);
+            perfStats.setGauge('view2dDpr', renderState.dpr);
+            perfStats.endFrame(perfEnd);
+        }
         const activeSceneFocusState = getActiveSceneFocusState();
         const captionSceneState = renderer.getActiveCaptionSceneState();
         const keepCaptionOverlayDuringInteraction = state.headDetailDepthActive
@@ -4817,7 +4931,9 @@ export function createTransformerView2dDetailView(panelEl, {
                 scheduleRender: shouldScheduleRender
             });
         },
-        setVisible(visible = false) {
+        setVisible(visible = false, {
+            skipRender = false
+        } = {}) {
             state.visible = !!visible;
             root.classList.toggle('is-visible', state.visible);
             root.setAttribute('aria-hidden', state.visible ? 'false' : 'true');
@@ -4848,7 +4964,9 @@ export function createTransformerView2dDetailView(panelEl, {
                 updateCanvasCursor(null);
                 return;
             }
-            this.resizeAndRender();
+            if (!skipRender) {
+                this.resizeAndRender();
+            }
         },
         open({
             activationSource = null,

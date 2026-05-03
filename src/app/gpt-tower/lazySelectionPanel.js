@@ -36,6 +36,7 @@ export function createLazySelectionPanel(options = {}) {
             updateLoadedPanelData(data);
         },
         openTransformerView2d: (config) => panel.openTransformerView2d(config),
+        prewarmTransformerView2d: (config) => panel.prewarmTransformerView2d?.(config),
         isTransformerView2dOpen: () => panel.isTransformerView2dOpen?.() === true
     };
 }

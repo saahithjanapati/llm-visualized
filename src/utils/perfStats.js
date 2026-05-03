@@ -22,6 +22,11 @@ export const perfStats = {
         selectRaycasts: 0,
         raycastIntersects: 0,
         vectorUpdates: 0,
+        view2dModel: 0,
+        view2dLayout: 0,
+        view2dRender: 0,
+        view2dSceneCacheHits: 0,
+        view2dSceneCacheMisses: 0,
     },
     _gauges: {},
     _snapshot: null,
@@ -94,6 +99,11 @@ export const perfStats = {
             selectRaycasts: perFrame(this._accum.selectRaycasts || 0),
             raycastIntersects: perFrame(this._accum.raycastIntersects || 0),
             vectorUpdates: perFrame(this._accum.vectorUpdates || 0),
+            view2dModelMs: perFrame(this._accum.view2dModel || 0),
+            view2dLayoutMs: perFrame(this._accum.view2dLayout || 0),
+            view2dRenderMs: perFrame(this._accum.view2dRender || 0),
+            view2dSceneCacheHits: perFrame(this._accum.view2dSceneCacheHits || 0),
+            view2dSceneCacheMisses: perFrame(this._accum.view2dSceneCacheMisses || 0),
             gauges: { ...this._gauges },
         };
         this._snapshotVersion += 1;

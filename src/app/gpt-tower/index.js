@@ -356,6 +356,24 @@ const selectionPanel = createLazySelectionPanel({
     }
 });
 
+const prewarmTransformerView2d = ({ immediate = false } = {}) => {
+    void selectionPanel.prewarmTransformerView2d?.({ immediate });
+};
+
+const scheduleTransformerView2dPrewarm = () => {
+    if (!transformerView2dBtn) return;
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => prewarmTransformerView2d(), { timeout: 3000 });
+        return;
+    }
+    setTimeout(() => prewarmTransformerView2d(), 1200);
+};
+
+transformerView2dBtn?.addEventListener('pointerenter', () => prewarmTransformerView2d({ immediate: true }));
+transformerView2dBtn?.addEventListener('focus', () => prewarmTransformerView2d({ immediate: true }));
+transformerView2dBtn?.addEventListener('touchstart', () => prewarmTransformerView2d({ immediate: true }), { passive: true });
+scheduleTransformerView2dPrewarm();
+
 transformerView2dBtn?.addEventListener('click', (event) => {
     event.preventDefault();
     showTopControls();

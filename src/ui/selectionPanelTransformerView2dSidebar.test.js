@@ -345,7 +345,9 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         });
 
         expect(opened).toBe(true);
-        expect(panel._transformerView2dDetailView.setVisible).toHaveBeenCalledWith(true);
+        expect(panel._transformerView2dDetailView.setVisible).toHaveBeenCalledWith(true, {
+            skipRender: true
+        });
         expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
             expect.objectContaining({
                 initialSelectionSidebarVisible: true
@@ -362,8 +364,8 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
                 subtitleTertiaryHtml: 'Why the model uses it in this layer.'
             })
         );
-        expect(panel._startLoop).toHaveBeenCalled();
-        expect(panel._stopLoop).not.toHaveBeenCalled();
+        expect(panel._startLoop).not.toHaveBeenCalled();
+        expect(panel._stopLoop).toHaveBeenCalled();
     });
 
     it('does not redundantly reopen the docked 2D sidebar when it is already visible', () => {
@@ -457,7 +459,9 @@ describe('SelectionPanel transformer-view2d sidebar handoff', () => {
         });
 
         expect(opened).toBe(true);
-        expect(panel._transformerView2dDetailView.setVisible).toHaveBeenCalledWith(true);
+        expect(panel._transformerView2dDetailView.setVisible).toHaveBeenCalledWith(true, {
+            skipRender: true
+        });
         expect(panel._transformerView2dDetailView.open).toHaveBeenCalledWith(
             expect.objectContaining({
                 initialSelectionSidebarVisible: false,

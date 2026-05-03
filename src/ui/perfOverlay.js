@@ -8,10 +8,17 @@ function formatNumber(value, decimals = 1) {
 function buildOverlayText(snapshot) {
     const gauges = snapshot.gauges || {};
     const tweens = Number.isFinite(gauges.tweens) ? Math.round(gauges.tweens) : '--';
+    const view2dNodes = Number.isFinite(gauges.view2dVisibleNodes)
+        ? Math.round(gauges.view2dVisibleNodes)
+        : '--';
+    const view2dConnectors = Number.isFinite(gauges.view2dVisibleConnectors)
+        ? Math.round(gauges.view2dVisibleConnectors)
+        : '--';
     const lines = [
         'Perf',
         `FPS: ${formatNumber(snapshot.fps, 1)} | Frame: ${formatNumber(snapshot.totalMs, 1)} ms`,
         `Update: ${formatNumber(snapshot.updateMs, 1)} | Tween: ${formatNumber(snapshot.tweenMs, 1)} | Render: ${formatNumber(snapshot.renderMs, 1)}`,
+        `2D: Model ${formatNumber(snapshot.view2dModelMs, 1)} | Layout ${formatNumber(snapshot.view2dLayoutMs, 1)} | Render ${formatNumber(snapshot.view2dRenderMs, 1)} | Nodes ${view2dNodes}/${view2dConnectors}`,
         `Trails: ${formatNumber(snapshot.trailUpdates, 1)} /f | Colors: ${formatNumber(snapshot.colorUpdates, 1)} /f | Cache: ${formatNumber(snapshot.colorCacheHitRate, 0)}%`,
         `Raycast: ${formatNumber(snapshot.raycasts, 2)} /f | Select: ${formatNumber(snapshot.selectRaycasts, 2)} /f | Hits: ${formatNumber(snapshot.raycastIntersects, 1)} /f`,
         `Tweens: ${tweens}`,

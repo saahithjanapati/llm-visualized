@@ -4375,11 +4375,16 @@ export class SelectionPanel {
                 || typeof eventOrOptions.type === 'string'
             )
         );
+        const force = !!(
+            eventOrOptions
+            && typeof eventOrOptions === 'object'
+            && eventOrOptions.force === true
+        );
         if (this._transformerView2dDetailView || this._transformerView2dDetailViewPromise) {
             this._clearTransformerView2dDetailViewPrewarmHandle();
             return false;
         }
-        if (!this._currentTransformerView2dContext && !this._transformerView2dDetailOpen) {
+        if (!force && !this._currentTransformerView2dContext && !this._transformerView2dDetailOpen) {
             return false;
         }
 
@@ -9435,6 +9440,10 @@ export class SelectionPanel {
         });
     }
 
+    prewarmTransformerView2d({ immediate = false } = {}) {
+        return this._scheduleTransformerView2dDetailViewPrewarm({ immediate, force: true });
+    }
+
     _getTransformerView2dSelectionSidebarSections() {
         return [
             this.previewRoot,
@@ -9582,7 +9591,11 @@ export class SelectionPanel {
         if (this.isOpen) {
             this._onResize();
             this._renderPreviewSnapshot();
-            this._startLoop();
+            if (this._transformerView2dDetailOpen) {
+                this._stopLoop();
+            } else {
+                this._startLoop();
+            }
             return true;
         }
         this._scheduleResize();
@@ -9697,9 +9710,10 @@ export class SelectionPanel {
         ).trim();
         this._setSubtitleSecondaryText(`Focus: ${resolvedCanvasFocusLabel}`);
         this._setSubtitleTertiaryText('Prototype view. Drag or use one finger to pan, and pinch or scroll to zoom.');
+        this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
         this.open();
         this._setHoverLabelSuppression(true);
-        detailView?.setVisible(true);
+        detailView?.setVisible(true, { skipRender: true });
         detailView?.open({
             activationSource: this.activationSource,
             tokenIndices: Array.isArray(this.attentionTokenIndices) ? this.attentionTokenIndices : this.laneTokenIndices,
@@ -9723,20 +9737,10 @@ export class SelectionPanel {
                 );
             }
         }
-        const shouldKeepSelectionPreviewLoop = !!(
-            resolvedSelection
-            && this.currentPreview
-            && this._transformerView2dDetailView?.isSelectionSidebarVisible?.() === true
-        );
         setProjectInfoActiveVisualizationMode(
             PROJECT_INFO_ACTIVE_VISUALIZATION_MODES.TRANSFORMER_VIEW2D
         );
-        this.engine?.pause?.(TRANSFORMER_VIEW2D_PAUSE_REASON);
-        if (shouldKeepSelectionPreviewLoop) {
-            this._startLoop();
-        } else {
-            this._stopLoop();
-        }
+        this._stopLoop();
         this._setAttentionVisibility(false);
         this._setPanelTokenHoverEntry(null, { emit: true });
         if (syncRoute) {
@@ -15252,6 +15256,7 @@ export class SelectionPanel {
             && this.currentPreview
             && !this._geluDetailOpen
             && !this._softmaxDetailOpen
+            && !this._transformerView2dDetailOpen
             && !this._previewPausedForPanelResize
         );
     }
@@ -16536,7 +16541,8 @@ export function initSelectionPanel(options = {}) {
             handleSelection: () => {},
             close: () => {},
             updateData: () => {},
-            openTransformerView2d: () => false
+            openTransformerView2d: () => false,
+            prewarmTransformerView2d: () => false
         };
     }
     return {
@@ -16544,6 +16550,7 @@ export function initSelectionPanel(options = {}) {
         close: () => panel.close(),
         updateData: (data) => panel.updateData(data),
         openTransformerView2d: (config) => panel.openTransformerView2d(config),
+        prewarmTransformerView2d: (config) => panel.prewarmTransformerView2d(config),
         isTransformerView2dOpen: () => panel.isTransformerView2dOpen()
     };
 }
