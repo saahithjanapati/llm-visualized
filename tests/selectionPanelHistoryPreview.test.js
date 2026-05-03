@@ -648,7 +648,7 @@ describe('selectionPanel history preview reuse', () => {
         );
     });
 
-    it('suppresses 3D hover sync while the 2D transformer preview is open', () => {
+    it('suppresses 3D hover sync while the 2D transformer preview is open', async () => {
         buildPanelDom();
         const engine = {
             pause: vi.fn(),
@@ -657,10 +657,10 @@ describe('selectionPanel history preview reuse', () => {
         };
         const panel = initSelectionPanel({ engine });
 
-        expect(panel.openTransformerView2d({
+        await expect(panel.openTransformerView2d({
             semanticTarget: null,
             focusLabel: 'Transformer overview'
-        })).toBe(true);
+        })).resolves.toBe(true);
         expect(engine.setHoverLabelsSuppressed).toHaveBeenCalledWith(true);
 
         panel.handleSelection(makeSelection());

@@ -4485,4 +4485,214 @@ describe('CanvasSceneRenderer', () => {
         expect(firstMove?.x).toBeCloseTo(rawStartPoint?.x || 0, 6);
         expect(firstMove?.y).toBeCloseTo(rawStartPoint?.y || 0, 6);
     });
+
+    it('keeps connector paths continuous after zoom interactions settle', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const sourceNode = createMatrixNode({
+            role: 'source',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'source'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                hidden: true,
+                card: {
+                    width: 24,
+                    height: 24,
+                    cornerRadius: 0
+                }
+            }
+        });
+        const targetNode = createMatrixNode({
+            role: 'target',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'target'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                hidden: true,
+                card: {
+                    width: 24,
+                    height: 24,
+                    cornerRadius: 0
+                }
+            }
+        });
+        const connectorNode = createConnectorNode({
+            role: 'settled-connector',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'settled-connector'
+            },
+            source: createAnchorRef(sourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+            target: createAnchorRef(targetNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+            route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                stroke: 'rgba(255, 255, 255, 0.84)'
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.ROW,
+                    gap: 37,
+                    children: [sourceNode, targetNode]
+                }),
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    children: [connectorNode]
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        const connectorItem = renderer.connectors.find((item) => item.node?.id === connectorNode.id) || null;
+        connectorItem.entry.pathPoints = [
+            { x: 10.13, y: 20.27 },
+            { x: 72.89, y: 20.27 }
+        ];
+
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1.3,
+                offsetX: 18,
+                offsetY: 11
+            }
+        })).toBe(true);
+
+        const connectorStroke = ctx.operations.find((operation) => (
+            operation.type === 'stroke'
+            && operation.path?.some((segment) => segment.type === 'lineTo')
+        )) || null;
+        const firstMove = connectorStroke?.path?.find((segment) => segment.type === 'moveTo') || null;
+        expect(firstMove?.x).toBeCloseTo(10.13, 6);
+        expect(firstMove?.y).toBeCloseTo(20.27, 6);
+    });
+
+    it('keeps connector stroke width continuous across zoom thresholds', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const sourceNode = createMatrixNode({
+            role: 'source',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'source'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                hidden: true,
+                card: {
+                    width: 24,
+                    height: 24,
+                    cornerRadius: 0
+                }
+            }
+        });
+        const targetNode = createMatrixNode({
+            role: 'target',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'target'
+            },
+            dimensions: { rows: 1, cols: 1 },
+            presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+            shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.RESIDUAL
+            },
+            metadata: {
+                hidden: true,
+                card: {
+                    width: 24,
+                    height: 24,
+                    cornerRadius: 0
+                }
+            }
+        });
+        const connectorNode = createConnectorNode({
+            role: 'continuous-width-connector',
+            semantic: {
+                componentKind: 'test',
+                stage: 'overview',
+                role: 'continuous-width-connector'
+            },
+            source: createAnchorRef(sourceNode.id, VIEW2D_ANCHOR_SIDES.RIGHT),
+            target: createAnchorRef(targetNode.id, VIEW2D_ANCHOR_SIDES.LEFT),
+            route: VIEW2D_CONNECTOR_ROUTES.HORIZONTAL,
+            visual: {
+                styleKey: VIEW2D_STYLE_KEYS.CONNECTOR_NEUTRAL,
+                stroke: 'rgba(255, 255, 255, 0.84)'
+            }
+        });
+        const scene = createSceneModel({
+            nodes: [
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.ROW,
+                    gap: 37,
+                    children: [sourceNode, targetNode]
+                }),
+                createGroupNode({
+                    direction: VIEW2D_LAYOUT_DIRECTIONS.OVERLAY,
+                    children: [connectorNode]
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+
+        const measureConnectorWidth = (scale) => {
+            ctx.operations.length = 0;
+            expect(renderer.render({
+                width: 480,
+                height: 320,
+                dpr: 1,
+                viewportTransform: {
+                    scale,
+                    offsetX: 18,
+                    offsetY: 11
+                },
+                interactionState: {
+                    interactionKind: 'zoom'
+                }
+            })).toBe(true);
+            const connectorStroke = ctx.operations.find((operation) => (
+                operation.type === 'stroke'
+                && operation.path?.some((segment) => segment.type === 'lineTo')
+            )) || null;
+            return Number(connectorStroke?.effectiveLineWidth) || 0;
+        };
+
+        const belowThresholdWidth = measureConnectorWidth(0.69);
+        const aboveThresholdWidth = measureConnectorWidth(0.71);
+        expect(Math.abs(aboveThresholdWidth - belowThresholdWidth)).toBeLessThan(0.05);
+    });
 });

@@ -94,7 +94,7 @@ describe('buildMhsaSceneModel', () => {
             componentKind: 'residual',
             layerIndex: 2,
             headIndex: 4,
-            stage: 'ln1.shift',
+            stage: 'ln1.output',
             tokenIndex: 0
         });
         expect(sourceNode?.metadata?.caption?.position).toBe('bottom');
@@ -105,7 +105,7 @@ describe('buildMhsaSceneModel', () => {
             componentKind: 'residual',
             layerIndex: 2,
             headIndex: 4,
-            stage: 'ln1.shift',
+            stage: 'ln1.output',
             branchKey: 'q',
             tokenIndex: 0
         });

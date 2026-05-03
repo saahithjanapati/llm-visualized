@@ -46,14 +46,14 @@ describe('buildHeadDetailSceneModel', () => {
         expect(connectorNodes).toHaveLength(3);
         expect(connectorNodes.every((node) => node.source?.anchor === 'center')).toBe(true);
         expect(resolveView2dCaptionLines(firstCopy)).toEqual([
-            { tex: 'X_{\\ln}^{Q}', text: 'X_ln^Q' },
+            { tex: 'x_{\\ln}^{Q}', text: 'x_ln^Q' },
             { tex: '(4, 768)', text: '(4, 768)' }
         ]);
         expect(firstCopy?.rowItems?.[0]?.semantic).toMatchObject({
             componentKind: 'residual',
             layerIndex: 0,
             headIndex: 2,
-            stage: 'ln1.shift',
+            stage: 'ln1.output',
             branchKey: 'q',
             tokenIndex: 0
         });

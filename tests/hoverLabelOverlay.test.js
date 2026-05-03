@@ -63,7 +63,7 @@ describe('hoverLabelOverlay', () => {
             'scene-hover-label__attention-row'
         ]);
         expect(metricRows).toHaveLength(1);
-        expect(metricRows[0]?.querySelector('.scene-hover-label__attention-metric-role')?.textContent).toBe('Score');
+        expect(metricRows[0]?.querySelector('.scene-hover-label__attention-metric-role')?.textContent).toBe('Score:');
         expect(metricRows[0]?.querySelector('.scene-hover-label__attention-metric-value')?.textContent).toBe('0.3750');
         expect(rows).toHaveLength(2);
         expect(rows[0]?.querySelector('.scene-hover-label__attention-role')?.textContent).toBe('Source');

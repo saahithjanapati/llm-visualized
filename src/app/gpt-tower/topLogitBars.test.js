@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { getLogitTokenChipColorHex, resolveLogitTokenChipColorKey } from './logitColor.js';
+import {
+    getLogitTokenChipColorHex,
+    getLogitTokenColorUnit,
+    resolveLogitTokenChipColorKey,
+    resolveLogitTokenSeed
+} from './logitColor.js';
 import {
     addTopLogitBars,
     buildTopLogitHoverLabel,
@@ -148,6 +153,8 @@ describe('resolveChosenLogitDisplayColorKey', () => {
 
         const actualColor = new THREE.Color();
         barGroup.userData.instancedMesh.getColorAt(chosenEntry.instanceIndex, actualColor);
+        const nonChosenColor = new THREE.Color();
+        barGroup.userData.instancedMesh.getColorAt(0, nonChosenColor);
 
         const expectedColorKey = resolveChosenLogitDisplayColorKey({
             activationSource,
@@ -161,6 +168,21 @@ describe('resolveChosenLogitDisplayColorKey', () => {
         expect(actualColor.r).toBeCloseTo(expectedColor.r, 5);
         expect(actualColor.g).toBeCloseTo(expectedColor.g, 5);
         expect(actualColor.b).toBeCloseTo(expectedColor.b, 5);
+
+        const nonChosenSeed = resolveLogitTokenSeed(activationSource.getLogitsForToken(0)[0], 0);
+        const brightNonChosenUnit = getLogitTokenColorUnit(nonChosenSeed);
+        const brightNonChosenColor = new THREE.Color().setHSL(
+            brightNonChosenUnit.h,
+            brightNonChosenUnit.s,
+            brightNonChosenUnit.l
+        );
+        const brightHsl = { h: 0, s: 0, l: 0 };
+        const dimmedHsl = { h: 0, s: 0, l: 0 };
+        brightNonChosenColor.getHSL(brightHsl);
+        nonChosenColor.getHSL(dimmedHsl);
+
+        expect(dimmedHsl.l).toBeLessThan(brightHsl.l * 0.5);
+        expect(dimmedHsl.s).toBeGreaterThan(0.5);
     });
 });
 

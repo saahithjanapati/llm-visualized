@@ -2966,6 +2966,44 @@ function drawConnectorArrowHead(ctx, startPoint, endPoint, strokeWidth, fillStyl
     ctx.restore();
 }
 
+function clamp01(value = 0) {
+    return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function lerpValue(start = 0, end = 0, alpha = 0) {
+    return start + ((end - start) * clamp01(alpha));
+}
+
+function smoothstep(edge0 = 0, edge1 = 1, value = 0) {
+    if (edge0 === edge1) {
+        return value >= edge1 ? 1 : 0;
+    }
+    const t = clamp01((value - edge0) / (edge1 - edge0));
+    return t * t * (3 - (2 * t));
+}
+
+function resolveConnectorScreenStrokeWidthPx(worldScale = 1) {
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    const smallRamp = smoothstep(0.18, 0.35, safeWorldScale);
+    const mediumRamp = smoothstep(0.35, 0.7, safeWorldScale);
+    const largeRamp = smoothstep(0.7, 1.25, safeWorldScale);
+    return 0.58
+        + (lerpValue(0, 0.72 - 0.58, smallRamp))
+        + (lerpValue(0, 0.88 - 0.72, mediumRamp))
+        + (lerpValue(0, 1.02 - 0.88, largeRamp));
+}
+
+function resolveConnectorStrokeOpacity(worldScale = 1) {
+    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
+    const smallRamp = smoothstep(0.18, 0.35, safeWorldScale);
+    const mediumRamp = smoothstep(0.35, 0.7, safeWorldScale);
+    const largeRamp = smoothstep(0.7, 1.25, safeWorldScale);
+    return 0.46
+        + (lerpValue(0, 0.54 - 0.46, smallRamp))
+        + (lerpValue(0, 0.66 - 0.54, mediumRamp))
+        + (lerpValue(0, 0.78 - 0.66, largeRamp));
+}
+
 function snapWorldPointToConnectorGrid(point, worldScale = 1) {
     if (!point || typeof point !== 'object') return point;
     const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
@@ -3003,12 +3041,7 @@ function drawConnector(
         && connectorEntry.metadata.fixedScreenStrokeWidthPx > 0
         ? Number(connectorEntry.metadata.fixedScreenStrokeWidthPx)
         : null;
-    const targetScreenWidthPx = fixedScreenStrokeWidthPx
-        ?? (
-            safeWorldScale < 0.35
-                ? 0.58
-                : (safeWorldScale < 0.7 ? 0.72 : (safeWorldScale < 1.25 ? 0.88 : 1.02))
-        );
+    const targetScreenWidthPx = fixedScreenStrokeWidthPx ?? resolveConnectorScreenStrokeWidthPx(safeWorldScale);
     const strokeWidth = (Math.max(0.42, targetScreenWidthPx) * strokeWidthScale * (emphasize ? 1.18 : 1)) / safeWorldScale;
     const fixedScreenArrowHeadLengthPx = Number.isFinite(connectorEntry?.metadata?.fixedScreenArrowHeadLengthPx)
         && connectorEntry.metadata.fixedScreenArrowHeadLengthPx > 0
@@ -3018,16 +3051,17 @@ function drawConnector(
         && connectorEntry.metadata.fixedScreenArrowHeadWingPx > 0
         ? Number(connectorEntry.metadata.fixedScreenArrowHeadWingPx)
         : null;
-    const shouldDisableScreenSnap = disableScreenSnap || connectorEntry?.metadata?.disableScreenSnap === true;
-    const strokeOpacity = safeWorldScale < 0.35
-        ? 0.46
-        : (safeWorldScale < 0.7 ? 0.54 : (safeWorldScale < 1.25 ? 0.66 : 0.78));
+    // Keep pinch-zoom frames and settled frames on the same vector coordinates.
+    const shouldSnapToScreen = connectorEntry?.metadata?.enableScreenSnap === true
+        && !disableScreenSnap
+        && connectorEntry?.metadata?.disableScreenSnap !== true;
+    const strokeOpacity = resolveConnectorStrokeOpacity(safeWorldScale);
     const flattenedForegroundStroke = connectorEntry?.metadata?.preserveColor === true
         ? foregroundStroke
         : (flattenColorAgainstBlack(foregroundStroke, strokeOpacity) || foregroundStroke);
-    const renderPoints = shouldDisableScreenSnap
-        ? points
-        : points.map((point) => snapWorldPointToConnectorGrid(point, safeWorldScale));
+    const renderPoints = shouldSnapToScreen
+        ? points.map((point) => snapWorldPointToConnectorGrid(point, safeWorldScale))
+        : points;
     const tailPoint = renderPoints[Math.max(0, renderPoints.length - 2)];
     const headPoint = renderPoints[renderPoints.length - 1];
     const rawTailPoint = points[Math.max(0, points.length - 2)];

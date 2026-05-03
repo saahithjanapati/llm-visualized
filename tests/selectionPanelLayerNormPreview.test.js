@@ -15,7 +15,7 @@ function collectLabelledGroups(root, label) {
 }
 
 describe('selectionPanel layer norm preview', () => {
-    it('derives layer norm parameter totals from the live base vector length when available', () => {
+    it('uses the GPT-2 layer norm parameter width instead of the live display length', () => {
         const engine = {
             _layers: [
                 {
@@ -33,8 +33,8 @@ describe('selectionPanel layer norm preview', () => {
             }
         }, engine);
 
-        expect(summary.perParameterCount).toBe(1024);
-        expect(summary.totalParameterCount).toBe(2048);
+        expect(summary.perParameterCount).toBe(768);
+        expect(summary.totalParameterCount).toBe(1536);
         expect(summary.layerNormKind).toBe('ln1');
         expect(summary.layerIndex).toBe(0);
     });

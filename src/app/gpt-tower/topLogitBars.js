@@ -14,6 +14,10 @@ import {
     TOP_LOGIT_BAR_INSET_X,
     TOP_LOGIT_BAR_Y_OFFSET,
     TOP_LOGIT_BAR_OPACITY,
+    TOP_LOGIT_BAR_UNSELECTED_LIGHTNESS_SCALE,
+    TOP_LOGIT_BAR_UNSELECTED_MIN_LIGHTNESS,
+    TOP_LOGIT_BAR_UNSELECTED_MAX_LIGHTNESS,
+    TOP_LOGIT_BAR_UNSELECTED_SATURATION_SCALE,
     TOP_LOGIT_BAR_RISE_DURATION_MS
 } from '../../utils/constants.js';
 import { resolveLogitEntryText } from '../../utils/logitTokenText.js';
@@ -535,6 +539,29 @@ function getBrightTokenColor(seed, cache) {
     return color;
 }
 
+function dimTopLogitBarColor(color) {
+    const baseColor = color instanceof THREE.Color
+        ? color
+        : new THREE.Color(color ?? 0xffffff);
+    const hsl = { h: 0, s: 0, l: 0 };
+    baseColor.getHSL(hsl);
+    const saturation = Math.max(0, Math.min(1, hsl.s * TOP_LOGIT_BAR_UNSELECTED_SATURATION_SCALE));
+    const lightness = Math.max(
+        TOP_LOGIT_BAR_UNSELECTED_MIN_LIGHTNESS,
+        Math.min(TOP_LOGIT_BAR_UNSELECTED_MAX_LIGHTNESS, hsl.l * TOP_LOGIT_BAR_UNSELECTED_LIGHTNESS_SCALE)
+    );
+    return new THREE.Color().setHSL(hsl.h, saturation, lightness);
+}
+
+function resolveTopLogitBarDisplayColor(color, { selected = false } = {}) {
+    if (selected) {
+        return color instanceof THREE.Color
+            ? color.clone()
+            : new THREE.Color(color ?? 0xffffff);
+    }
+    return dimTopLogitBarColor(color);
+}
+
 function computeLogitBarHeight(prob, maxProb) {
     const minHeight = TOP_LOGIT_BAR_MIN_HEIGHT;
     const maxHeight = Math.max(minHeight + 1, TOP_LOGIT_BAR_MAX_HEIGHT);
@@ -707,7 +734,8 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
             if (!Number.isFinite(prob)) continue;
             const height = computeLogitBarHeight(prob, globalMaxProb);
             const seed = resolveLogitTokenSeed(entry, i);
-            let barColor = getBrightTokenColor(seed, colorCache);
+            const tokenColor = getBrightTokenColor(seed, colorCache);
+            let barColor = tokenColor;
             const startHeight = Math.max(0.1, TOP_LOGIT_BAR_MIN_HEIGHT * 0.15);
             const xPos = baseX + i * barSpacing;
             if (entry) {
@@ -719,9 +747,10 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                         chosenEntry: entry,
                         chosenTokenIndex,
                         fallbackIndex: i,
-                        fallbackColor: barColor
+                        fallbackColor: tokenColor
                     });
                 }
+                barColor = resolveTopLogitBarDisplayColor(barColor, { selected: isChosenBar });
                 const label = buildTopLogitHoverLabel(entry);
                 const instanceIndex = instances.length;
                 instanceLabels[instanceIndex] = label;
@@ -746,11 +775,13 @@ export function addTopLogitBars({ activationSource, laneTokenIndices, laneZs, vo
                         z: laneZ,
                         baseY,
                         targetHeight: height,
-                        fallbackColor: barColor.clone(),
+                        fallbackColor: tokenColor.clone(),
                         fallbackIndex: i
                     });
                 }
             } else {
+                const isChosenBar = i === bestIdx && laneIdx === lastLaneIdx;
+                barColor = resolveTopLogitBarDisplayColor(barColor, { selected: isChosenBar });
                 const instanceIndex = instances.length;
                 instanceLabels[instanceIndex] = 'Logit';
                 instanceEntries[instanceIndex] = entry;
