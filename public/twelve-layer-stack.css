@@ -679,11 +679,11 @@ body.touch-ui * {
 
 @media (max-width: 600px) {
     #topControls {
-        gap: 6px;
+        gap: clamp(4px, 1.4vw, 5px);
         left: max(8px, env(safe-area-inset-left));
         right: max(8px, env(safe-area-inset-right));
         max-width: none;
-        justify-content: stretch;
+        justify-content: flex-end;
         pointer-events: none;
     }
     #topControls > * {
@@ -693,25 +693,31 @@ body.touch-ui * {
         pointer-events: none;
     }
     #topControls button {
-        min-height: 40px;
+        min-height: 42px;
         border-radius: 10px;
     }
     #pauseBtn,
     #skipMenuToggle,
     #settingsBtn,
     #infoBtn {
-        width: 40px;
-        min-width: 40px;
-        height: 40px;
+        width: clamp(40px, 11.5vw, 42px);
+        min-width: clamp(40px, 11.5vw, 42px);
+        height: clamp(40px, 11.5vw, 42px);
     }
     #followModeBtn,
     #transformerView2dBtn {
         min-width: 0;
-        min-height: 40px;
-        flex: 1 1 0;
+        min-height: 42px;
+        flex: 0 1 auto;
         justify-content: center;
-        padding-inline: clamp(10px, 3vw, 14px);
+        padding-inline: clamp(8px, 2.4vw, 12px);
         font-size: 12px;
+    }
+    #followModeBtn {
+        width: clamp(66px, 21vw, 84px);
+    }
+    #transformerView2dBtn {
+        width: clamp(50px, 16vw, 66px);
     }
 }
 

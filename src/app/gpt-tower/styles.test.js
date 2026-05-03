@@ -34,7 +34,10 @@ describe('startup mobile chrome styles', () => {
     it('keeps top-control mobile sizing rules in the eager tower stylesheet', () => {
         const eagerSelectors = [
             '#topControls > * {',
-            '#topControls[data-auto-hidden="true"] > * {'
+            '#topControls[data-auto-hidden="true"] > * {',
+            'width: clamp(40px, 11.5vw, 42px);',
+            'width: clamp(66px, 21vw, 84px);',
+            'width: clamp(50px, 16vw, 66px);'
         ];
 
         eagerSelectors.forEach((selector) => {
