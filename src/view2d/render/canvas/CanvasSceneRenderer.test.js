@@ -3354,7 +3354,7 @@ describe('CanvasSceneRenderer', () => {
         expect(Math.min(arrowShaft.path[0].x, arrowShaft.path[1].x)).toBeGreaterThanOrEqual(0);
     });
 
-    it('scales the MLP x_ln incoming edge connector with the scene zoom', () => {
+    it('keeps the MLP x_ln incoming edge connector stroke stable while arrow geometry follows scene zoom', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx, 960, 540);
         const renderer = new CanvasSceneRenderer({ canvas });
@@ -3411,7 +3411,7 @@ describe('CanvasSceneRenderer', () => {
         expect(zoomedOutArrow.tipX).toBeLessThan((zoomedOutArrow.contentBounds?.x || 0) - 4);
         expect(zoomedInArrow.tipX).toBeLessThan((zoomedInArrow.contentBounds?.x || 0) - 4);
         expect(zoomedInArrow.effectiveLength / Math.max(0.01, zoomedOutArrow.effectiveLength)).toBeCloseTo(zoomRatio, 0);
-        expect(zoomedInArrow.effectiveLineWidth).toBeGreaterThan(zoomedOutArrow.effectiveLineWidth);
+        expect(zoomedInArrow.effectiveLineWidth).toBeCloseTo(zoomedOutArrow.effectiveLineWidth, 6);
         expect(zoomedInArrow.effectiveHeadLength).toBeGreaterThan(zoomedOutArrow.effectiveHeadLength);
         expect(zoomedInArrow.effectiveHeadSpan).toBeGreaterThan(zoomedOutArrow.effectiveHeadSpan);
     });
@@ -3477,7 +3477,7 @@ describe('CanvasSceneRenderer', () => {
         expect((lastPathPoint?.x || 0)).toBeGreaterThan(connectorEntry?.pathPoints?.[0]?.x || 0);
     });
 
-    it('scales the MLP(x_ln) outgoing right-edge connector with the scene zoom', () => {
+    it('keeps the MLP(x_ln) outgoing right-edge connector stroke stable while arrow geometry follows scene zoom', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx, 960, 540);
         const renderer = new CanvasSceneRenderer({ canvas });
@@ -3543,7 +3543,7 @@ describe('CanvasSceneRenderer', () => {
             (zoomedInArrow.contentBounds?.x || 0) + (zoomedInArrow.contentBounds?.width || 0) + 4
         );
         expect(zoomedInArrow.effectiveLength / Math.max(0.01, zoomedOutArrow.effectiveLength)).toBeCloseTo(zoomRatio, 0);
-        expect(zoomedInArrow.effectiveLineWidth).toBeGreaterThan(zoomedOutArrow.effectiveLineWidth);
+        expect(zoomedInArrow.effectiveLineWidth).toBeCloseTo(zoomedOutArrow.effectiveLineWidth, 6);
         expect(zoomedInArrow.effectiveHeadLength).toBeGreaterThan(zoomedOutArrow.effectiveHeadLength);
         expect(zoomedInArrow.effectiveHeadSpan).toBeGreaterThan(zoomedOutArrow.effectiveHeadSpan);
     });
@@ -3638,7 +3638,105 @@ describe('CanvasSceneRenderer', () => {
         );
     });
 
-    it('reuses the cached overview frame while the outer scene is being panned or zoomed', () => {
+    it('reuses the cached overview frame while the outer scene is panned at the same zoom', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        const renderer = new CanvasSceneRenderer({ canvas });
+        const scene = createSceneModel({
+            nodes: [
+                createMatrixNode({
+                    role: 'overview-card',
+                    semantic: {
+                        componentKind: 'test',
+                        stage: 'overview',
+                        role: 'overview-card'
+                    },
+                    label: {
+                        tex: 'X',
+                        text: 'X'
+                    },
+                    dimensions: {
+                        rows: 4,
+                        cols: 4
+                    },
+                    presentation: VIEW2D_MATRIX_PRESENTATIONS.CARD,
+                    shape: VIEW2D_MATRIX_SHAPES.MATRIX,
+                    visual: {
+                        styleKey: VIEW2D_STYLE_KEYS.RESIDUAL,
+                        disableCardSurfaceEffects: true
+                    },
+                    metadata: {
+                        card: {
+                            width: 180,
+                            height: 120
+                        }
+                    }
+                }),
+                createTextNode({
+                    text: 'Residual stream',
+                    metadata: {
+                        minScreenHeightPx: 0
+                    }
+                })
+            ]
+        });
+
+        renderer.setScene(scene);
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0
+            }
+        })).toBe(true);
+        renderer.overviewRenderCache = {
+            ...renderer.overviewRenderCache,
+            surface: renderer.overviewRenderCache.surface || { width: 800, height: 640 },
+            ctx: renderer.overviewRenderCache.ctx || {},
+            scene,
+            dpr: 1,
+            pixelWidth: 800,
+            pixelHeight: 640,
+            viewportPixelWidth: 480,
+            viewportPixelHeight: 320,
+            logicalWidth: 800,
+            logicalHeight: 640,
+            worldScale: 1,
+            viewportOffsetX: 0,
+            viewportOffsetY: 0,
+            renderOffsetX: 160,
+            renderOffsetY: 160,
+            offsetX: 0,
+            offsetY: 0
+        };
+
+        ctx.operations.length = 0;
+
+        expect(renderer.render({
+            width: 480,
+            height: 320,
+            dpr: 1,
+            interacting: true,
+            viewportTransform: {
+                scale: 1,
+                offsetX: 12,
+                offsetY: 8
+            }
+        })).toBe(true);
+
+        const drawImageOperation = ctx.operations.find((operation) => operation.type === 'drawImage') || null;
+        expect(drawImageOperation).toBeTruthy();
+        expect(drawImageOperation?.transformScaleX).toBeCloseTo(1, 6);
+        expect(drawImageOperation?.transformScaleY).toBeCloseTo(1, 6);
+        expect(drawImageOperation?.transformTranslateX).toBeCloseTo(-148, 6);
+        expect(drawImageOperation?.transformTranslateY).toBeCloseTo(-152, 6);
+        expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(false);
+    });
+
+    it('rerenders the overview when the interaction scale changes without a zoom marker', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx, 480, 320);
         const renderer = new CanvasSceneRenderer({ canvas });
@@ -3728,12 +3826,11 @@ describe('CanvasSceneRenderer', () => {
         })).toBe(true);
 
         const drawImageOperation = ctx.operations.find((operation) => operation.type === 'drawImage') || null;
-        expect(drawImageOperation).toBeTruthy();
-        expect(drawImageOperation?.transformScaleX).toBeCloseTo(1.25, 6);
-        expect(drawImageOperation?.transformScaleY).toBeCloseTo(1.25, 6);
-        expect(drawImageOperation?.transformTranslateX).toBeCloseTo(-188, 6);
-        expect(drawImageOperation?.transformTranslateY).toBeCloseTo(-192, 6);
-        expect(ctx.operations.some((operation) => operation.type === 'fillText')).toBe(false);
+        expect(drawImageOperation).toBeFalsy();
+        expect(ctx.operations.some((operation) => (
+            operation.type === 'fillText'
+            && operation.text === 'Residual stream'
+        ))).toBe(true);
     });
 
     it('rerenders the overview when a pan would expose uncovered cache edges', () => {
@@ -4590,7 +4687,7 @@ describe('CanvasSceneRenderer', () => {
         expect(firstMove?.y).toBeCloseTo(20.27, 6);
     });
 
-    it('keeps connector stroke width continuous across zoom thresholds', () => {
+    it('keeps connector stroke width fixed in screen pixels across zoom levels', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx, 480, 320);
         const renderer = new CanvasSceneRenderer({ canvas });
@@ -4691,8 +4788,11 @@ describe('CanvasSceneRenderer', () => {
             return Number(connectorStroke?.effectiveLineWidth) || 0;
         };
 
-        const belowThresholdWidth = measureConnectorWidth(0.69);
-        const aboveThresholdWidth = measureConnectorWidth(0.71);
-        expect(Math.abs(aboveThresholdWidth - belowThresholdWidth)).toBeLessThan(0.05);
+        const zoomedOutWidth = measureConnectorWidth(0.45);
+        const normalWidth = measureConnectorWidth(1);
+        const zoomedInWidth = measureConnectorWidth(1.4);
+        expect(zoomedOutWidth).toBeCloseTo(normalWidth, 6);
+        expect(zoomedInWidth).toBeCloseTo(normalWidth, 6);
+        expect(normalWidth).toBeGreaterThan(0.8);
     });
 });

@@ -251,6 +251,8 @@ const MATRIX_ORNAMENT_ARROW_SHAFT_SCREEN_PX_INCOMING = 42;
 const MATRIX_ORNAMENT_ARROW_STROKE_SCREEN_PX = 0.88;
 const MATRIX_ORNAMENT_ARROW_HEAD_LENGTH_SCREEN_PX = 6;
 const MATRIX_ORNAMENT_ARROW_HEAD_WING_SCREEN_PX = 3.2;
+const CONNECTOR_SCREEN_STROKE_WIDTH_PX = 0.88;
+const CONNECTOR_STROKE_OPACITY = 0.66;
 const OVERVIEW_RENDER_CACHE_MIN_OVERSCAN_PX = 160;
 const OVERVIEW_RENDER_CACHE_MAX_OVERSCAN_PX = 240;
 const OVERVIEW_RENDER_CACHE_OVERSCAN_VIEWPORT_RATIO = 0.35;
@@ -2966,42 +2968,12 @@ function drawConnectorArrowHead(ctx, startPoint, endPoint, strokeWidth, fillStyl
     ctx.restore();
 }
 
-function clamp01(value = 0) {
-    return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+function resolveConnectorScreenStrokeWidthPx() {
+    return CONNECTOR_SCREEN_STROKE_WIDTH_PX;
 }
 
-function lerpValue(start = 0, end = 0, alpha = 0) {
-    return start + ((end - start) * clamp01(alpha));
-}
-
-function smoothstep(edge0 = 0, edge1 = 1, value = 0) {
-    if (edge0 === edge1) {
-        return value >= edge1 ? 1 : 0;
-    }
-    const t = clamp01((value - edge0) / (edge1 - edge0));
-    return t * t * (3 - (2 * t));
-}
-
-function resolveConnectorScreenStrokeWidthPx(worldScale = 1) {
-    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
-    const smallRamp = smoothstep(0.18, 0.35, safeWorldScale);
-    const mediumRamp = smoothstep(0.35, 0.7, safeWorldScale);
-    const largeRamp = smoothstep(0.7, 1.25, safeWorldScale);
-    return 0.58
-        + (lerpValue(0, 0.72 - 0.58, smallRamp))
-        + (lerpValue(0, 0.88 - 0.72, mediumRamp))
-        + (lerpValue(0, 1.02 - 0.88, largeRamp));
-}
-
-function resolveConnectorStrokeOpacity(worldScale = 1) {
-    const safeWorldScale = Math.max(0.0001, Number.isFinite(worldScale) ? worldScale : 1);
-    const smallRamp = smoothstep(0.18, 0.35, safeWorldScale);
-    const mediumRamp = smoothstep(0.35, 0.7, safeWorldScale);
-    const largeRamp = smoothstep(0.7, 1.25, safeWorldScale);
-    return 0.46
-        + (lerpValue(0, 0.54 - 0.46, smallRamp))
-        + (lerpValue(0, 0.66 - 0.54, mediumRamp))
-        + (lerpValue(0, 0.78 - 0.66, largeRamp));
+function resolveConnectorStrokeOpacity() {
+    return CONNECTOR_STROKE_OPACITY;
 }
 
 function snapWorldPointToConnectorGrid(point, worldScale = 1) {
@@ -3647,8 +3619,11 @@ export class CanvasSceneRenderer {
         if (!(cachedWorldScale > 0) || !(safeWorldScale > 0)) {
             return false;
         }
+        if (cachedWorldScale !== Number(safeWorldScale.toFixed(6))) {
+            return false;
+        }
 
-        const scaleRatio = safeWorldScale / cachedWorldScale;
+        const scaleRatio = 1;
         const renderOffsetX = resolveOverviewRenderCacheRenderOffsetX(cache);
         const renderOffsetY = resolveOverviewRenderCacheRenderOffsetY(cache);
         const logicalWidth = resolveOverviewRenderCacheLogicalWidth(cache);
@@ -3693,8 +3668,11 @@ export class CanvasSceneRenderer {
         if (!(cachedWorldScale > 0) || !(safeWorldScale > 0)) {
             return false;
         }
+        if (cachedWorldScale !== Number(safeWorldScale.toFixed(6))) {
+            return false;
+        }
 
-        const scaleRatio = safeWorldScale / cachedWorldScale;
+        const scaleRatio = 1;
         const safeDpr = Number.isFinite(resolution?.dpr) ? Number(resolution.dpr) : 1;
         const renderOffsetX = resolveOverviewRenderCacheRenderOffsetX(cache);
         const renderOffsetY = resolveOverviewRenderCacheRenderOffsetY(cache);
