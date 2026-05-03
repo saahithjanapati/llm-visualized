@@ -683,7 +683,7 @@ body.touch-ui * {
         left: max(8px, env(safe-area-inset-left));
         right: max(8px, env(safe-area-inset-right));
         max-width: none;
-        justify-content: flex-end;
+        justify-content: stretch;
         pointer-events: none;
     }
     #topControls > * {
@@ -696,28 +696,41 @@ body.touch-ui * {
         min-height: 42px;
         border-radius: 10px;
     }
+    #topControls > #pauseBtn,
+    #topControls > #skipMenu,
+    #topControls > #settingsBtn,
+    #topControls > #infoBtn {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    #topControls > #skipMenu {
+        display: inline-flex;
+    }
     #pauseBtn,
     #skipMenuToggle,
     #settingsBtn,
     #infoBtn {
-        width: clamp(40px, 11.5vw, 42px);
-        min-width: clamp(40px, 11.5vw, 42px);
+        width: auto;
+        min-width: 0;
         height: clamp(40px, 11.5vw, 42px);
+    }
+    #skipMenuToggle {
+        width: 100%;
+        flex: 1 1 auto;
     }
     #followModeBtn,
     #transformerView2dBtn {
         min-width: 0;
         min-height: 42px;
-        flex: 0 1 auto;
         justify-content: center;
         padding-inline: clamp(8px, 2.4vw, 12px);
         font-size: 12px;
     }
     #followModeBtn {
-        width: clamp(66px, 21vw, 84px);
+        flex: 1.35 1 0;
     }
     #transformerView2dBtn {
-        width: clamp(50px, 16vw, 66px);
+        flex: 1.12 1 0;
     }
 }
 

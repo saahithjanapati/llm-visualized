@@ -32,17 +32,24 @@ describe('startup hover label styles', () => {
 
 describe('startup mobile chrome styles', () => {
     it('keeps top-control mobile sizing rules in the eager tower stylesheet', () => {
-        const eagerSelectors = [
+        const eagerOnlySelectors = [
             '#topControls > * {',
             '#topControls[data-auto-hidden="true"] > * {',
-            'width: clamp(40px, 11.5vw, 42px);',
-            'width: clamp(66px, 21vw, 84px);',
-            'width: clamp(50px, 16vw, 66px);'
+            '#topControls > #skipMenu,'
+        ];
+        const eagerRules = [
+            'justify-content: stretch;',
+            'flex: 1.35 1 0;',
+            'flex: 1.12 1 0;',
+            'width: 100%;'
         ];
 
-        eagerSelectors.forEach((selector) => {
+        eagerOnlySelectors.forEach((selector) => {
             expect(eagerTowerCss).toContain(selector);
             expect(lazySelectionPanelCss).not.toContain(selector);
+        });
+        eagerRules.forEach((rule) => {
+            expect(eagerTowerCss).toContain(rule);
         });
     });
 });
