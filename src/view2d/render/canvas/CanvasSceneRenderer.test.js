@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
     createAnchorRef,
@@ -25,7 +25,10 @@ import { buildMlpDetailSceneModel } from '../../model/buildMlpDetailSceneModel.j
 import { buildMhsaSceneModel } from '../../model/buildMhsaSceneModel.js';
 import { VIEW2D_VECTOR_STRIP_VARIANT } from '../../shared/vectorStrip.js';
 import { VIEW2D_STYLE_KEYS } from '../../theme/visualTokens.js';
-import { CanvasSceneRenderer } from './CanvasSceneRenderer.js';
+import {
+    CanvasSceneRenderer,
+    syncCanvasResolution
+} from './CanvasSceneRenderer.js';
 
 function createMockContext() {
     const stateStack = [];
@@ -577,6 +580,31 @@ function measureConnectorArrowScreenMetrics(operations = [], pathPoints = []) {
 }
 
 describe('CanvasSceneRenderer', () => {
+    it('skips layout measurement when explicit render dimensions are provided', () => {
+        const ctx = createMockContext();
+        const canvas = createMockCanvas(ctx, 480, 320);
+        canvas.getBoundingClientRect = vi.fn(() => ({
+            width: 999,
+            height: 777,
+            left: 0,
+            top: 0,
+            right: 999,
+            bottom: 777
+        }));
+
+        const resolution = syncCanvasResolution(canvas, {
+            width: 320,
+            height: 180,
+            dpr: 2
+        });
+
+        expect(canvas.getBoundingClientRect).not.toHaveBeenCalled();
+        expect(resolution?.width).toBe(320);
+        expect(resolution?.height).toBe(180);
+        expect(resolution?.pixelWidth).toBe(640);
+        expect(resolution?.pixelHeight).toBe(360);
+    });
+
     it('applies per-node visual opacity to matrix fills', () => {
         const ctx = createMockContext();
         const canvas = createMockCanvas(ctx, 480, 320);

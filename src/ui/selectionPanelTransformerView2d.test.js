@@ -1533,6 +1533,59 @@ describe('createTransformerView2dDetailView', () => {
         expect(overlay?.style.display).toBe('block');
     });
 
+    it('reuses sidebar viewport insets across rapid zoom frames', async () => {
+        const panelEl = document.getElementById('detailPanel');
+        const view = createTransformerView2dDetailView(panelEl);
+
+        const canvas = panelEl.querySelector('.detail-transformer-view2d-canvas');
+        const canvasCard = panelEl.querySelector('.detail-transformer-view2d-canvas-card');
+        const selectionSidebar = panelEl.querySelector('.detail-transformer-view2d-selection-sidebar');
+        setElementRect(canvas, 960, 600);
+        setElementRect(canvasCard, 960, 600);
+        setElementRectAt(selectionSidebar, {
+            left: 560,
+            top: 56,
+            width: 384,
+            height: 544
+        });
+        const sidebarRectSpy = vi.fn(() => ({
+            width: 384,
+            height: 544,
+            top: 56,
+            right: 944,
+            bottom: 600,
+            left: 560,
+            x: 560,
+            y: 56,
+            toJSON() {
+                return this;
+            }
+        }));
+        selectionSidebar.getBoundingClientRect = sidebarRectSpy;
+
+        view.setVisible(true);
+        view.open({
+            activationSource: createActivationSource(),
+            layerCount: 1,
+            tokenIndices: [0, 1, 2],
+            tokenLabels: ['A', 'B', 'C']
+        });
+        view.setSelectionSidebarVisible(true, { immediate: true });
+        await vi.advanceTimersByTimeAsync(32);
+
+        sidebarRectSpy.mockClear();
+        for (let index = 0; index < 4; index += 1) {
+            canvas.dispatchEvent(createWheelEvent({
+                clientX: 480,
+                clientY: 300,
+                deltaY: index % 2 === 0 ? -240 : 240
+            }));
+            await vi.advanceTimersByTimeAsync(32);
+        }
+
+        expect(sidebarRectSpy).not.toHaveBeenCalled();
+    });
+
     it('opens canvas attention-head clicks right after the overview focus zoom settles', async () => {
         const panelEl = document.getElementById('detailPanel');
         const view = createTransformerView2dDetailView(panelEl);

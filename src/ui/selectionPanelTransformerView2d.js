@@ -795,6 +795,14 @@ export function createTransformerView2dDetailView(panelEl, {
             width: 1,
             height: 1
         },
+        selectionViewportInsets: {
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0
+        },
+        selectionViewportInsetsSignature: '',
+        selectionViewportInsetsDirty: true,
         pendingInitialFocus: false,
         autoFrameOnResize: false,
         lastAutoFrameViewportSize: null,
@@ -1034,8 +1042,10 @@ export function createTransformerView2dDetailView(panelEl, {
         } else {
             selectionSidebar.classList.remove('is-visible');
             selectionSidebar.classList.add('is-closing');
+            markSelectionViewportInsetsDirty();
             selectionSidebarCloseTimerId = setTimeout(() => {
                 selectionSidebar.classList.remove('is-closing');
+                markSelectionViewportInsetsDirty();
                 clearSelectionSidebarHeader();
                 selectionSidebarCloseTimerId = null;
                 if (state.visible) {
@@ -1046,6 +1056,7 @@ export function createTransformerView2dDetailView(panelEl, {
                 }
             }, VIEW2D_SELECTION_SIDEBAR_CLOSE_ANIMATION_MS);
         }
+        markSelectionViewportInsetsDirty();
 
         if (state.visible) {
             syncViewportForSidebarVisibilityChange({
@@ -1499,14 +1510,43 @@ export function createTransformerView2dDetailView(panelEl, {
         state.renderFrame = null;
     }
 
+    function createEmptySelectionViewportInsets() {
+        return {
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0
+        };
+    }
+
+    function cloneSelectionViewportInsets(insets = null) {
+        return {
+            top: Math.max(0, Math.floor(Number(insets?.top) || 0)),
+            right: Math.max(0, Math.floor(Number(insets?.right) || 0)),
+            bottom: Math.max(0, Math.floor(Number(insets?.bottom) || 0)),
+            left: Math.max(0, Math.floor(Number(insets?.left) || 0))
+        };
+    }
+
+    function markSelectionViewportInsetsDirty() {
+        state.selectionViewportInsetsDirty = true;
+    }
+
     function measureCanvasSize() {
         const rect = typeof canvas?.getBoundingClientRect === 'function'
             ? canvas.getBoundingClientRect()
             : null;
-        state.viewportSize = {
+        const nextViewportSize = {
             width: Math.max(1, Math.floor(rect?.width || canvas?.clientWidth || canvas?.width || 1)),
             height: Math.max(1, Math.floor(rect?.height || canvas?.clientHeight || canvas?.height || 1))
         };
+        if (
+            nextViewportSize.width !== state.viewportSize?.width
+            || nextViewportSize.height !== state.viewportSize?.height
+        ) {
+            markSelectionViewportInsetsDirty();
+        }
+        state.viewportSize = nextViewportSize;
         return state.viewportSize;
     }
 
@@ -1522,19 +1562,36 @@ export function createTransformerView2dDetailView(panelEl, {
         return measureCanvasSize();
     }
 
-    function resolveSelectionSidebarViewportInsets() {
-        const emptyInsets = {
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0
-        };
+    function resolveSelectionSidebarViewportInsets({
+        force = false
+    } = {}) {
+        const emptyInsets = createEmptySelectionViewportInsets();
         if (!canvas || !selectionSidebar) return emptyInsets;
+        const sidebarVisible = selectionSidebar.classList.contains('is-visible');
+        const sidebarClosing = selectionSidebar.classList.contains('is-closing');
+        const sidebarState = sidebarVisible
+            ? 'visible'
+            : (sidebarClosing ? 'closing' : 'hidden');
+        const viewportWidth = Math.max(0, Math.floor(Number(state.viewportSize?.width) || 0));
+        const viewportHeight = Math.max(0, Math.floor(Number(state.viewportSize?.height) || 0));
+        const cacheSignature = [
+            sidebarState,
+            viewportWidth,
+            viewportHeight,
+            state.isSmallScreen ? 'small' : 'large'
+        ].join('|');
         if (
-            !selectionSidebar.classList.contains('is-visible')
-            && !selectionSidebar.classList.contains('is-closing')
+            !force
+            && !state.selectionViewportInsetsDirty
+            && state.selectionViewportInsetsSignature === cacheSignature
         ) {
-            return emptyInsets;
+            return cloneSelectionViewportInsets(state.selectionViewportInsets);
+        }
+        if (sidebarState === 'hidden') {
+            state.selectionViewportInsets = emptyInsets;
+            state.selectionViewportInsetsSignature = cacheSignature;
+            state.selectionViewportInsetsDirty = false;
+            return cloneSelectionViewportInsets(state.selectionViewportInsets);
         }
 
         const canvasRect = typeof canvas.getBoundingClientRect === 'function'
@@ -1546,7 +1603,10 @@ export function createTransformerView2dDetailView(panelEl, {
         const canvasWidth = Math.max(0, Number(canvasRect?.width) || 0);
         const canvasHeight = Math.max(0, Number(canvasRect?.height) || 0);
         if (!(canvasWidth > 0) || !(canvasHeight > 0)) {
-            return emptyInsets;
+            state.selectionViewportInsets = emptyInsets;
+            state.selectionViewportInsetsSignature = cacheSignature;
+            state.selectionViewportInsetsDirty = false;
+            return cloneSelectionViewportInsets(state.selectionViewportInsets);
         }
 
         const overlapWidth = Math.max(
@@ -1565,13 +1625,16 @@ export function createTransformerView2dDetailView(panelEl, {
             || !(overlapHeight > 0)
             || remainingWidth < VIEW2D_MIN_EFFECTIVE_VIEWPORT_WIDTH_PX
         ) {
-            return emptyInsets;
+            state.selectionViewportInsets = emptyInsets;
+            state.selectionViewportInsetsSignature = cacheSignature;
+            state.selectionViewportInsetsDirty = false;
+            return cloneSelectionViewportInsets(state.selectionViewportInsets);
         }
 
         const canvasCenterX = (Number(canvasRect?.left) || 0) + (canvasWidth * 0.5);
         const sidebarCenterX = (Number(sidebarRect?.left) || 0) + ((Number(sidebarRect?.width) || 0) * 0.5);
         const insetWidth = Math.round(overlapWidth);
-        return sidebarCenterX >= canvasCenterX
+        state.selectionViewportInsets = sidebarCenterX >= canvasCenterX
             ? {
                 ...emptyInsets,
                 right: insetWidth
@@ -1580,6 +1643,9 @@ export function createTransformerView2dDetailView(panelEl, {
                 ...emptyInsets,
                 left: insetWidth
             };
+        state.selectionViewportInsetsSignature = cacheSignature;
+        state.selectionViewportInsetsDirty = false;
+        return cloneSelectionViewportInsets(state.selectionViewportInsets);
     }
 
     function syncViewportControllers({

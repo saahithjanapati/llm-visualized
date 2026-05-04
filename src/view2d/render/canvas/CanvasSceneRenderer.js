@@ -1723,7 +1723,9 @@ export function syncCanvasResolution(canvas, {
     dprCap = null
 } = {}) {
     if (!canvas) return null;
-    const rect = typeof canvas.getBoundingClientRect === 'function'
+    const hasExplicitWidth = Number.isFinite(width) && width > 0;
+    const hasExplicitHeight = Number.isFinite(height) && height > 0;
+    const rect = (!hasExplicitWidth || !hasExplicitHeight) && typeof canvas.getBoundingClientRect === 'function'
         ? canvas.getBoundingClientRect()
         : null;
     const logicalWidth = clampPositive(width ?? rect?.width ?? canvas.clientWidth ?? canvas.width ?? 1, 1);
