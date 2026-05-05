@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     enhanceProjectInfoContent,
     PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS,
-    PROJECT_INFO_FEEDBACK_TARGET_ID
+    PROJECT_INFO_FEEDBACK_TARGET_ID,
+    PROJECT_INFO_INTRO_SECTION_CLASS,
+    PROJECT_INFO_SECTION_CLASS
 } from './projectInfoContent.js';
 
 describe('projectInfoContent', () => {
@@ -38,5 +40,31 @@ describe('projectInfoContent', () => {
 
         expect(feedbackTarget?.classList.contains(PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS)).toBe(false);
         vi.useRealTimers();
+    });
+
+    it('groups rendered content into semantic sections for responsive layouts', () => {
+        document.body.innerHTML = `
+            <div id="content">
+                <blockquote><p>Feedback lives here.</p></blockquote>
+                <p>Intro copy.</p>
+                <h2>Overview</h2>
+                <p>Overview copy.</p>
+                <h2>Keyboard Controls</h2>
+                <p>Keyboard copy.</p>
+            </div>
+        `;
+
+        const contentEl = document.getElementById('content');
+
+        enhanceProjectInfoContent(contentEl);
+        enhanceProjectInfoContent(contentEl);
+
+        const sections = Array.from(contentEl?.querySelectorAll(`.${PROJECT_INFO_SECTION_CLASS}`) || []);
+
+        expect(sections).toHaveLength(3);
+        expect(sections[0]?.classList.contains(PROJECT_INFO_INTRO_SECTION_CLASS)).toBe(true);
+        expect(sections[0]?.querySelector('blockquote')).not.toBeNull();
+        expect(sections[1]?.getAttribute('aria-labelledby')).toBe('project-info-overview');
+        expect(sections[2]?.getAttribute('aria-labelledby')).toBe('project-info-keyboard-controls');
     });
 });

@@ -29,6 +29,7 @@ body {
         radial-gradient(circle at top, rgba(255, 255, 255, 0.03), transparent 32%),
         linear-gradient(180deg, var(--info-bg-top) 0%, var(--info-bg-bottom) 100%);
     font-family: "Space Grotesk", "Rajdhani", "Segoe UI", system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
 }
 
 body::before {
@@ -80,6 +81,7 @@ body::before {
 .info-page-card {
     flex: 1 1 auto;
     min-height: 0;
+    min-width: 0;
     padding:
         24px
         max(30px, calc(env(safe-area-inset-right) + 22px))
@@ -106,40 +108,55 @@ body::before {
 .info-page-title {
     margin: 0 0 28px;
     max-width: 10ch;
-    font-size: clamp(2.2rem, 5vw, 3.6rem);
+    font-size: 3.2rem;
     line-height: 0.92;
-    letter-spacing: -0.04em;
+    letter-spacing: 0;
 }
 
 .info-page-markdown {
     display: flex;
     flex-direction: column;
     gap: 20px;
+    min-width: 0;
 }
 
 .info-page-markdown > * {
     margin: 0;
     max-width: 72ch;
+    min-width: 0;
+}
+
+.info-page-markdown .project-info-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+}
+
+.info-page-markdown .project-info-section > * {
+    margin: 0;
+    max-width: 72ch;
+    min-width: 0;
 }
 
 .info-page-markdown h2,
 .info-page-markdown h3 {
     color: var(--info-text);
     font-weight: 600;
-    letter-spacing: -0.025em;
+    letter-spacing: 0;
 }
 
 .info-page-markdown h2 {
     margin-top: 10px;
     padding-top: 20px;
     border-top: 1px solid var(--info-rule);
-    font-size: clamp(1.32rem, 2.2vw, 1.62rem);
+    font-size: 1.48rem;
     line-height: 1.1;
 }
 
 .info-page-markdown h3 {
     color: var(--info-muted);
-    font-size: clamp(0.98rem, 1.35vw, 1.1rem);
+    font-size: 1.04rem;
     line-height: 1.25;
     letter-spacing: 0.02em;
     text-transform: uppercase;
@@ -148,13 +165,13 @@ body::before {
 .info-page-markdown p,
 .info-page-markdown li {
     color: var(--info-text);
-    font-size: clamp(1rem, 1.02vw, 1.06rem);
+    font-size: 1.04rem;
     line-height: 1.78;
     text-wrap: pretty;
 }
 
 .info-page-markdown > blockquote + p {
-    font-size: clamp(1.06rem, 1.2vw, 1.18rem);
+    font-size: 1.12rem;
     line-height: 1.7;
 }
 
@@ -199,6 +216,7 @@ body::before {
 
 .info-page-markdown a {
     color: var(--info-link);
+    overflow-wrap: anywhere;
     text-decoration-thickness: 1.5px;
     text-underline-offset: 0.18em;
     text-decoration-color: rgba(255, 255, 255, 0.3);
@@ -232,6 +250,119 @@ body::before {
     outline: none;
 }
 
+@media (min-width: 960px) {
+    .info-page-back-link {
+        padding-right: clamp(36px, 5vw, 88px);
+        padding-left: clamp(36px, 5vw, 88px);
+    }
+
+    .info-page-card {
+        display: grid;
+        grid-template-columns: minmax(260px, 30vw) minmax(0, 1fr);
+        grid-template-rows: auto 1fr;
+        align-content: start;
+        column-gap: clamp(32px, 5vw, 88px);
+        row-gap: 14px;
+        padding:
+            clamp(30px, 4vh, 56px)
+            clamp(36px, 5vw, 88px)
+            max(48px, calc(env(safe-area-inset-bottom) + 36px));
+    }
+
+    .info-page-eyebrow {
+        grid-column: 1;
+        grid-row: 1;
+        margin: 0;
+    }
+
+    .info-page-title {
+        position: sticky;
+        top: clamp(28px, 5vh, 72px);
+        grid-column: 1;
+        grid-row: 2;
+        align-self: start;
+        max-width: none;
+        margin: 0;
+        font-size: 3.75rem;
+        line-height: 0.9;
+    }
+
+    .info-page-markdown {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        align-self: start;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        max-width: none;
+    }
+
+    .info-page-markdown > * {
+        max-width: min(92ch, 100%);
+    }
+
+    .info-page-markdown .project-info-section > * {
+        max-width: min(92ch, 100%);
+    }
+}
+
+@media (min-width: 1280px) {
+    .info-page-card {
+        grid-template-columns: minmax(360px, 30vw) minmax(0, 1fr);
+    }
+
+    .info-page-markdown {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: clamp(32px, 4vw, 60px);
+    }
+
+    .info-page-title {
+        font-size: 4.8rem;
+    }
+
+    .info-page-markdown > * {
+        max-width: none;
+    }
+
+    .info-page-markdown .project-info-section {
+        gap: 20px;
+        align-self: start;
+    }
+
+    .info-page-markdown .project-info-section > * {
+        max-width: none;
+    }
+
+    .info-page-markdown .project-info-section--intro {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: clamp(32px, 4vw, 60px);
+        row-gap: 22px;
+    }
+
+    .info-page-markdown .project-info-section--intro blockquote {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (min-width: 1760px) {
+    .info-page-title {
+        font-size: 5.4rem;
+    }
+
+    .info-page-markdown {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: clamp(34px, 3vw, 64px);
+    }
+
+    .info-page-markdown .project-info-section--intro {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        column-gap: clamp(34px, 3vw, 64px);
+    }
+}
+
 @media (max-width: 700px) {
     .info-page-shell {
         width: 100%;
@@ -259,7 +390,7 @@ body::before {
 
     .info-page-title {
         margin-bottom: 20px;
-        font-size: clamp(1.8rem, 9vw, 2.6rem);
+        font-size: 2.35rem;
         line-height: 1;
     }
 

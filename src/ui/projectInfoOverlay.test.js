@@ -92,7 +92,7 @@ describe('projectInfoOverlay', () => {
         expect(appState.modalPaused).toBe(true);
         expect(document.getElementById('projectInfoOverlay')?.style.display).toBe('flex');
         expect(document.getElementById('projectInfoOverlay')?.getAttribute('aria-hidden')).toBe('false');
-        expect(document.getElementById('projectInfoOverlayContent')?.innerHTML).toContain('<h2>Overview</h2>');
+        expect(document.getElementById('projectInfoOverlayContent')?.querySelector('h2')?.textContent).toBe('Overview');
         expect(window.location.pathname).toBe('/info/');
         expect(window.location.search).toBe('?returnTo=%2F%3Fview%3D2d%26component%3Dmhsa%26layer%3D3');
         expect(resetInteractionState).toHaveBeenCalledTimes(1);

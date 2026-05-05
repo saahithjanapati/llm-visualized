@@ -1,4 +1,4 @@
-> If you have any ideas or feedback to make the site better, I'd love to hear from you! You can send it through [this form](https://forms.gle/YD5UPKAnasYtCutbA), or as a [DM on X](https://x.com/stargaz3r42).
+> If you have any ideas or feedback to make the site better, I'd love to hear from you! You can send it through [this form](https://forms.gle/YD5UPKAnasYtCutbA), or as a [DM on X @stargaz3r42](https://x.com/stargaz3r42).
 
 This site is an interactive 3D and 2D visualization of GPT-2 (124M) performing forward passes.
 
@@ -70,7 +70,7 @@ Below is an incomplete list of sources that inspired this project in some way. I
 
 - There is a lot of unnecessary lag and several interaction bugs that need to be fixed. A lot of the current work is optimization, bug hunting, and cleanup.
 
-If you run into any problems or have suggestions, please let me know through the [form above](#project-info-feedback)!
+If you run into any problems or have suggestions, please let me know through [this feedback form](https://forms.gle/YD5UPKAnasYtCutbA)!
 
 ## Acknowledgements
 
@@ -80,6 +80,6 @@ Thank you to everyone on the internet who has already been generous with their t
 
 Thank you to my friends and family who gave me a lot of ideas throughout development. This project would not be the same without their feedback.
 
-And thank you for visiting the site! If you have any ideas or feedback to make it better, [I'd love to hear from you](#project-info-feedback)!
+And thank you for visiting the site! If you have any ideas or feedback to make it better, please send them through [this feedback form](https://forms.gle/YD5UPKAnasYtCutbA)!
 
 I hope you enjoy the site 😊🫡

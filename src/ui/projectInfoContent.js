@@ -1,5 +1,7 @@
 export const PROJECT_INFO_FEEDBACK_TARGET_ID = 'project-info-feedback';
 export const PROJECT_INFO_FEEDBACK_SPOTLIGHT_CLASS = 'is-feedback-spotlighted';
+export const PROJECT_INFO_SECTION_CLASS = 'project-info-section';
+export const PROJECT_INFO_INTRO_SECTION_CLASS = 'project-info-section--intro';
 
 const FEEDBACK_SPOTLIGHT_DURATION_MS = 1800;
 const feedbackSpotlightTimeouts = new WeakMap();
@@ -33,8 +35,66 @@ function spotlightScrollTarget(target) {
     feedbackSpotlightTimeouts.set(target, timeoutId);
 }
 
+function createProjectInfoSection(isIntro = false) {
+    const section = document.createElement('section');
+    section.classList.add(PROJECT_INFO_SECTION_CLASS);
+    if (isIntro) {
+        section.classList.add(PROJECT_INFO_INTRO_SECTION_CLASS);
+    }
+    return section;
+}
+
+function labelSectionFromHeading(section) {
+    const heading = section?.querySelector?.('h2');
+    if (!heading) return;
+
+    if (!heading.id) {
+        const text = heading.textContent || 'project-info-section';
+        const slug = text
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            || 'project-info-section';
+        heading.id = `project-info-${slug}`;
+    }
+    section.setAttribute('aria-labelledby', heading.id);
+}
+
+function groupProjectInfoSections(contentEl) {
+    if (contentEl.dataset.projectInfoSectionsBuilt === 'true') return;
+
+    const children = Array.from(contentEl.children);
+    if (!children.length) return;
+
+    const sections = [];
+    let currentSection = createProjectInfoSection(true);
+
+    children.forEach((child) => {
+        if (child.tagName === 'H2') {
+            if (currentSection.children.length > 0) {
+                sections.push(currentSection);
+            }
+            currentSection = createProjectInfoSection(false);
+        }
+        currentSection.appendChild(child);
+    });
+
+    if (currentSection.children.length > 0) {
+        sections.push(currentSection);
+    }
+
+    sections.forEach((section) => {
+        labelSectionFromHeading(section);
+        contentEl.appendChild(section);
+    });
+
+    contentEl.dataset.projectInfoSectionsBuilt = 'true';
+}
+
 export function enhanceProjectInfoContent(contentEl) {
     if (!contentEl || typeof contentEl.querySelector !== 'function') return;
+
+    groupProjectInfoSections(contentEl);
 
     const feedbackTarget = contentEl.querySelector('blockquote');
     if (feedbackTarget) {
