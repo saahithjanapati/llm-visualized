@@ -1945,6 +1945,65 @@ body.detail-panel-resizing * {
     z-index: 10; /* above everything */
 }
 
+#kvCacheModeTransitionOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    box-sizing: border-box;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    background:
+        radial-gradient(900px 520px at 50% 8%, rgba(122, 202, 255, 0.08), transparent 62%),
+        rgba(4, 7, 12, 0.62);
+    backdrop-filter: blur(8px) saturate(1.04);
+    -webkit-backdrop-filter: blur(8px) saturate(1.04);
+    transition: opacity .18s ease, visibility 0s linear .18s;
+}
+#kvCacheModeTransitionOverlay[data-visible="true"] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0s;
+}
+.kv-cache-mode-transition-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: min(320px, calc(100vw - 48px));
+    max-width: calc(100vw - 48px);
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: linear-gradient(160deg, rgba(15, 20, 28, 0.94), rgba(7, 10, 16, 0.96));
+    color: #edf5ff;
+    box-shadow:
+        0 22px 52px rgba(0, 0, 0, 0.52),
+        0 0 0 1px rgba(122, 202, 255, 0.08);
+    font-family: "Rajdhani", "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+.kv-cache-mode-transition-spinner {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background:
+        conic-gradient(from 0deg, rgba(122, 202, 255, 0), rgba(122, 202, 255, 0.95), rgba(255, 255, 255, 0.95), rgba(122, 202, 255, 0));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+    animation: kvCacheModeTransitionSpin 0.78s linear infinite;
+}
+.kv-cache-mode-transition-copy {
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.25;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+}
+
 #projectInfoOverlay {
     position: fixed;
     inset: 0;
@@ -2642,6 +2701,27 @@ body.detail-panel-resizing * {
         0 2px 7px rgba(0, 0, 0, 0.44),
         0 0 0 1px rgba(122, 202, 255, 0.18);
 }
+.toggle-row[data-switching="true"] {
+    border-color: rgba(122, 202, 255, 0.62);
+    background: linear-gradient(160deg, rgba(22, 38, 58, 0.94), rgba(9, 16, 28, 0.96));
+    box-shadow:
+        0 0 0 1px rgba(122, 202, 255, 0.14),
+        0 10px 26px rgba(5, 18, 36, 0.4);
+}
+.toggle-row[data-switching="true"] .toggle-track {
+    overflow: hidden;
+    border-color: rgba(122, 202, 255, 0.72);
+    box-shadow:
+        inset 0 0 0 1px rgba(122, 202, 255, 0.18),
+        0 0 14px rgba(122, 202, 255, 0.24),
+        0 7px 16px rgba(5, 18, 36, 0.38);
+}
+.toggle-row[data-switching="true"] .toggle-track::before {
+    opacity: 0.95;
+    background: linear-gradient(90deg, transparent, rgba(122, 202, 255, 0.58), transparent);
+    background-size: 220% 100%;
+    animation: settingsToggleTrackSweep 0.92s linear infinite;
+}
 .toggle-row .toggle-text {
     flex: 1;
     font-size: 12.5px;
@@ -2744,7 +2824,19 @@ body.detail-panel-resizing * {
     line-height: 1.35;
     letter-spacing: 0.2px;
 }
+.settings-hint[data-state="switching"] {
+    border-color: rgba(122, 202, 255, 0.3);
+    background: rgba(48, 113, 185, 0.12);
+    color: #e2edf9;
+}
 .settings-hint[hidden] { display: none !important; }
+@keyframes settingsToggleTrackSweep {
+    from { background-position: 220% 0; }
+    to { background-position: -120% 0; }
+}
+@keyframes kvCacheModeTransitionSpin {
+    to { transform: rotate(360deg); }
+}
 /* Equations panel (inside HUD) */
 #equationsPanel {
     grid-column: 1 / -1;

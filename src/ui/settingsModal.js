@@ -28,6 +28,10 @@ const BRIGHTNESS_UI_SCALE = 100;
 const BRIGHTNESS_UI_MIN = Math.round((BRIGHTNESS_MIN / BRIGHTNESS_UI_BASELINE) * BRIGHTNESS_UI_SCALE);
 const BRIGHTNESS_UI_MAX = Math.round((BRIGHTNESS_MAX / BRIGHTNESS_UI_BASELINE) * BRIGHTNESS_UI_SCALE);
 const BRIGHTNESS_UI_DEFAULT = Math.round((BRIGHTNESS_DEFAULT / BRIGHTNESS_UI_BASELINE) * BRIGHTNESS_UI_SCALE);
+const KV_CACHE_READY_HINT = 'KV cache enabled for prefill and decode.';
+const KV_CACHE_SWITCHING_ON_HINT = 'Switching to KV cache mode...';
+const KV_CACHE_SWITCHING_OFF_HINT = 'Returning to standard attention mode...';
+const KV_CACHE_SWITCH_DISPATCH_DELAY_MS = 260;
 
 function clampBrightness(value) {
     const next = Number(value);
@@ -55,6 +59,79 @@ function formatBrightness(value) {
 
 function formatPlaybackSpeed(value) {
     return `${clampPlaybackSpeedPercent(value)}%`;
+}
+
+function scheduleAfterNextPaint(callback, { delayMs = 0 } = {}) {
+    if (typeof callback !== 'function') return () => {};
+    if (typeof window === 'undefined') {
+        callback();
+        return () => {};
+    }
+
+    const safeDelayMs = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
+    let rafId = null;
+    let timeoutId = null;
+    let cancelled = false;
+
+    const run = () => {
+        if (cancelled) return;
+        const setTimer = typeof window.setTimeout === 'function' ? window.setTimeout.bind(window) : setTimeout;
+        timeoutId = setTimer(() => {
+            timeoutId = null;
+            if (!cancelled) callback();
+        }, safeDelayMs);
+    };
+
+    if (typeof window.requestAnimationFrame === 'function') {
+        rafId = window.requestAnimationFrame(run);
+    } else {
+        run();
+    }
+
+    return () => {
+        cancelled = true;
+        if (rafId !== null && typeof window.cancelAnimationFrame === 'function') {
+            window.cancelAnimationFrame(rafId);
+        }
+        if (timeoutId !== null) {
+            const clearTimer = typeof window.clearTimeout === 'function' ? window.clearTimeout.bind(window) : clearTimeout;
+            clearTimer(timeoutId);
+        }
+    };
+}
+
+function ensureKvCacheTransitionOverlay() {
+    if (typeof document === 'undefined') return null;
+    let root = document.getElementById('kvCacheModeTransitionOverlay');
+    if (!root) {
+        root = document.createElement('div');
+        root.id = 'kvCacheModeTransitionOverlay';
+        root.dataset.visible = 'false';
+        root.setAttribute('role', 'status');
+        root.setAttribute('aria-live', 'polite');
+        root.innerHTML = `
+            <div class="kv-cache-mode-transition-card">
+                <div class="kv-cache-mode-transition-spinner" aria-hidden="true"></div>
+                <div class="kv-cache-mode-transition-copy" data-role="copy"></div>
+            </div>
+        `;
+        document.body.appendChild(root);
+    }
+    return root;
+}
+
+function setKvCacheTransitionOverlayVisible(visible, {
+    enabled = false
+} = {}) {
+    const root = ensureKvCacheTransitionOverlay();
+    if (!root) return;
+    const copy = root.querySelector('[data-role="copy"]');
+    if (copy) {
+        copy.textContent = enabled
+            ? 'Switching to KV cache mode'
+            : 'Returning to standard attention mode';
+    }
+    root.dataset.visible = visible ? 'true' : 'false';
 }
 
 // Wires up the settings modal controls.
@@ -129,6 +206,11 @@ export function initSettingsModal(pipeline, {
     let followInspectorRaf = null;
     let perfOverlayController = null;
     let releaseModalUiLock = null;
+    let kvCacheModeChangeNonce = 0;
+    let kvCacheModeSwitchPending = false;
+    let kvCacheModeSwitchTarget = !!appState.kvCacheModeEnabled;
+    let cancelPendingKvCacheModeDispatch = null;
+    let cancelPendingKvCacheModeSettle = null;
 
     const setPerfOverlayEnabled = (enabled) => {
         const nextValue = !!enabled;
@@ -243,16 +325,94 @@ export function initSettingsModal(pipeline, {
         }
     };
 
-    const updateKvCacheStatusHint = (enabled) => {
+    const updateKvCacheStatusHint = (enabled, {
+        switching = false,
+        switchingTarget = enabled
+    } = {}) => {
         const hint = document.getElementById('kvCacheStatusHint');
         if (!hint) return;
+        if (switching) {
+            hint.hidden = false;
+            hint.textContent = switchingTarget
+                ? KV_CACHE_SWITCHING_ON_HINT
+                : KV_CACHE_SWITCHING_OFF_HINT;
+            hint.dataset.state = 'switching';
+            return;
+        }
+        hint.textContent = KV_CACHE_READY_HINT;
         hint.hidden = !enabled;
+        delete hint.dataset.state;
     };
 
-    const syncKvCacheModeUi = (enabled) => {
+    const syncKvCacheModeUi = (enabled, {
+        switching = kvCacheModeSwitchPending,
+        switchingTarget = kvCacheModeSwitchTarget
+    } = {}) => {
         const kvCacheModeToggle = document.getElementById('toggleKvCacheMode');
         if (kvCacheModeToggle) kvCacheModeToggle.checked = !!enabled;
-        updateKvCacheStatusHint(enabled);
+        const toggleRow = kvCacheModeToggle?.closest?.('.toggle-row') || null;
+        if (toggleRow) {
+            if (switching) {
+                toggleRow.dataset.switching = 'true';
+                toggleRow.setAttribute('aria-busy', 'true');
+            } else {
+                delete toggleRow.dataset.switching;
+                toggleRow.removeAttribute('aria-busy');
+            }
+        }
+        updateKvCacheStatusHint(enabled, { switching, switchingTarget });
+    };
+
+    const cancelScheduledKvCacheModeWork = () => {
+        if (cancelPendingKvCacheModeDispatch) {
+            cancelPendingKvCacheModeDispatch();
+            cancelPendingKvCacheModeDispatch = null;
+        }
+        if (cancelPendingKvCacheModeSettle) {
+            cancelPendingKvCacheModeSettle();
+            cancelPendingKvCacheModeSettle = null;
+        }
+    };
+
+    const settleKvCacheModeSwitch = (nonce) => {
+        cancelPendingKvCacheModeSettle = scheduleAfterNextPaint(() => {
+            cancelPendingKvCacheModeSettle = null;
+            if (nonce !== kvCacheModeChangeNonce) return;
+            kvCacheModeSwitchPending = false;
+            syncKvCacheModeUi(appState.kvCacheModeEnabled, { switching: false });
+            setKvCacheTransitionOverlayVisible(false, {
+                enabled: appState.kvCacheModeEnabled
+            });
+        });
+    };
+
+    const scheduleKvCacheModeDispatch = ({
+        nextEnabled,
+        previousEnabled
+    }) => {
+        const nonce = ++kvCacheModeChangeNonce;
+        kvCacheModeSwitchPending = true;
+        kvCacheModeSwitchTarget = !!nextEnabled;
+        cancelScheduledKvCacheModeWork();
+        setKvCacheTransitionOverlayVisible(true, { enabled: nextEnabled });
+        syncKvCacheModeUi(nextEnabled, {
+            switching: true,
+            switchingTarget: nextEnabled
+        });
+        cancelPendingKvCacheModeDispatch = scheduleAfterNextPaint(() => {
+            cancelPendingKvCacheModeDispatch = null;
+            if (nonce !== kvCacheModeChangeNonce) return;
+            try {
+                dispatchKvCacheModeChanged({
+                    enabled: nextEnabled,
+                    previousEnabled
+                });
+            } finally {
+                settleKvCacheModeSwitch(nonce);
+            }
+        }, {
+            delayMs: KV_CACHE_SWITCH_DISPATCH_DELAY_MS
+        });
     };
 
     const initInlinePercentEditor = ({
@@ -388,9 +548,7 @@ export function initSettingsModal(pipeline, {
         if (followInspector) followInspector.checked = !!appState.showFollowViewInspector;
         const perfOverlay = document.getElementById('togglePerfOverlay');
         if (perfOverlay) perfOverlay.checked = !!appState.showPerfOverlay;
-        const kvCacheModeToggle = document.getElementById('toggleKvCacheMode');
-        if (kvCacheModeToggle) kvCacheModeToggle.checked = !!appState.kvCacheModeEnabled;
-        updateKvCacheStatusHint(appState.kvCacheModeEnabled);
+        syncKvCacheModeUi(appState.kvCacheModeEnabled);
     }
 
     function closeSettings({ guardReopen = false } = {}) {
@@ -502,9 +660,8 @@ export function initSettingsModal(pipeline, {
         const nextEnabled = !!kvCacheModeToggle.checked;
         appState.kvCacheModeEnabled = nextEnabled;
         setPreference('kvCacheModeEnabled', nextEnabled);
-        syncKvCacheModeUi(nextEnabled);
-        dispatchKvCacheModeChanged({
-            enabled: nextEnabled,
+        scheduleKvCacheModeDispatch({
+            nextEnabled,
             previousEnabled: prevEnabled
         });
     });
@@ -512,8 +669,13 @@ export function initSettingsModal(pipeline, {
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
         window.addEventListener(KV_CACHE_MODE_STATE_SYNC_EVENT, (event) => {
             const nextEnabled = !!event?.detail?.enabled;
+            kvCacheModeChangeNonce += 1;
+            kvCacheModeSwitchPending = false;
+            kvCacheModeSwitchTarget = nextEnabled;
+            cancelScheduledKvCacheModeWork();
+            setKvCacheTransitionOverlayVisible(false, { enabled: nextEnabled });
             appState.kvCacheModeEnabled = nextEnabled;
-            syncKvCacheModeUi(nextEnabled);
+            syncKvCacheModeUi(nextEnabled, { switching: false });
         });
     }
 
