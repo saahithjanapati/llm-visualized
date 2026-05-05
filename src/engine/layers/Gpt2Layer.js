@@ -45,10 +45,14 @@ import {
     applyMatrixUserData
 } from '../../utils/matrixVisualUtils.js';
 import {
+    applyVectorKeyColors,
     applyVectorData,
     blendVectorKeyColors,
+    cloneVectorKeyColors,
     copyVectorAppearance,
     freezeStaticTransforms,
+    interpolateVectorKeyColors,
+    setObjectTreeOpacity,
     LN_INTERNAL_TRAIL_MIN_SEGMENT
 } from './gpt2LayerUtils.js';
 import {
@@ -81,7 +85,10 @@ import {
     computeGeluWhipOffset
 } from './gpt2GeluMotionUtils.js';
 import { sliceMlpActivationIntoSegments } from './gpt2MlpActivationSegments.js';
-import { computeMlpMatrixPassEmissive } from './gpt2MlpMatrixVisualUtils.js';
+import {
+    computeMlpMatrixPassColorProgress,
+    computeMlpMatrixPassEmissive
+} from './gpt2MlpMatrixVisualUtils.js';
 import { GPT2_LAYER_VISUAL_TUNING } from '../../utils/visualTuningProfiles.js';
 import {
     consoleInfo,
@@ -180,6 +187,8 @@ const MLP_MATRIX_FLASH_MIN_DURATION_MS = Number.isFinite(GPT2_LAYER_VISUAL_TUNIN
     ? GPT2_LAYER_VISUAL_TUNING.mlp.flashMinDurationMs
     : 340;
 const POST_MLP_RETURN_TRAIL_OPACITY = 0.1;
+const MLP_DOWN_COLLAPSE_INSIDE_FRACTION = 0.42;
+const MLP_DOWN_EXPANDED_EXIT_SCALE = 0.08;
 const MLP_TRANSITION_PROFILE_DEFAULT = Object.freeze({
     expandRiseUnits: 38,
     expandRiseMs: 500,
@@ -470,7 +479,7 @@ export default class Gpt2Layer extends BaseLayer {
         if (!matrix || !tweenColor || !startColor || !activeColor) return;
 
         const clampedProgress = THREE.MathUtils.clamp(progress, 0, 1);
-        const entryT = THREE.MathUtils.smoothstep(clampedProgress, 0, 0.22);
+        const entryT = computeMlpMatrixPassColorProgress(clampedProgress);
         const emissive = computeMlpMatrixPassEmissive(
             clampedProgress,
             startIntensity,
@@ -2359,10 +2368,12 @@ export default class Gpt2Layer extends BaseLayer {
         const rawDuration = (distance / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
         const mlpProfile = this._resolveMlpTransitionProfile();
         const startY = vec.group.position.y;
+        const startScale = Number.isFinite(vec.group.scale?.x) ? vec.group.scale.x : 1;
+        const targetScale = 0.6;
         const duration = this._resolveMlpPassDuration(rawDuration, mlpProfile, mlpProfile.maxUpDurationMs);
         if (duration <= 0) {
             vec.group.position.y = Math.max(vec.group.position.y, topY);
-            vec.group.scale.setScalar(0.6);
+            vec.group.scale.setScalar(targetScale);
             this.mlpUp.setColor(matrixEndColor);
             this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
             const mlpUpData = this._getMlpUpData(lane);
@@ -2376,6 +2387,8 @@ export default class Gpt2Layer extends BaseLayer {
             .easing(TWEEN.Easing.Linear.None)
             .onUpdate(() => {
                 const progress = this._computeTweenProgress(vec.group.position.y, startY, topY);
+                const scaleT = THREE.MathUtils.smootherstep(progress, 0, 0.72);
+                vec.group.scale.setScalar(THREE.MathUtils.lerp(startScale, targetScale, scaleT));
                 this._applyMlpMatrixPassVisual(
                     this.mlpUp,
                     progress,
@@ -2388,8 +2401,6 @@ export default class Gpt2Layer extends BaseLayer {
                 );
             })
             .onStart(() => {
-                // Shrink to fit in narrowing matrix
-                vec.group.scale.setScalar(0.6);
                 this._applyMlpMatrixPassVisual(
                     this.mlpUp,
                     0,
@@ -2402,8 +2413,8 @@ export default class Gpt2Layer extends BaseLayer {
                 );
             })
             .onComplete(() => {
-                // Restore scale
-                vec.group.scale.setScalar(0.6);
+                // Keep the source vector at its final in-matrix scale before expansion.
+                vec.group.scale.setScalar(targetScale);
                 this.mlpUp.setColor(matrixEndColor);
                 this.mlpUp.setEmissive(matrixEndColor, finalIntensity);
 
@@ -2762,9 +2773,14 @@ export default class Gpt2Layer extends BaseLayer {
         const downTweenColor = this._mlpDownTweenColor;
         const downBottomY = this.mlpDown.group.position.y - MLP_MATRIX_PARAMS_DOWN.height / 2;
         const downTopY = this.mlpDown.group.position.y + MLP_MATRIX_PARAMS_DOWN.height / 2;
-        // Collapse before matrix entry so the 3072-dim visual never protrudes through the shell.
+        // Start collapsing before entry, then complete the crossfade inside the
+        // matrix so the wide source shrinks away instead of popping off.
         const preEntryCollapseLead = THREE.MathUtils.clamp(MLP_MATRIX_PARAMS_DOWN.height * 0.22, 8, 30);
-        const collapseTriggerY = downBottomY - preEntryCollapseLead;
+        const collapseStartY = downBottomY - preEntryCollapseLead;
+        const collapseEndY = Math.min(
+            downTopY,
+            downBottomY + MLP_MATRIX_PARAMS_DOWN.height * MLP_DOWN_COLLAPSE_INSIDE_FRACTION
+        );
         
         const startY = expandedGroup.position.y;
         const totalDist = downTopY - startY;
@@ -2805,6 +2821,16 @@ export default class Gpt2Layer extends BaseLayer {
                 trail.update(expandedGroup.position);
             }
         };
+        const updateCollapseTrail = (collapseVec) => {
+            const trail = collapseVec?.userData && collapseVec.userData.trail;
+            if (!trail || typeof trail.update !== 'function') return;
+            if (collapseVec.userData.trailWorld) {
+                collapseVec.group.getWorldPosition(TMP_WORLD_POS);
+                trail.update(TMP_WORLD_POS);
+            } else {
+                trail.update(collapseVec.group.position);
+            }
+        };
         const attachExpandedTrailToVec = (targetVec) => {
             if (!targetVec || !targetVec.group || !lane || !lane.expandedVecTrail) return;
             targetVec.userData = targetVec.userData || {};
@@ -2828,6 +2854,99 @@ export default class Gpt2Layer extends BaseLayer {
             lane.expandedVecTrail = null;
             lane.expandedVecTrailWorld = false;
         };
+        const computeCollapseProgress = (yPos) => {
+            const denom = collapseEndY - collapseStartY;
+            if (!Number.isFinite(denom) || denom <= 1e-6) {
+                return yPos >= collapseEndY ? 1 : 0;
+            }
+            const linearT = THREE.MathUtils.clamp((yPos - collapseStartY) / denom, 0, 1);
+            return THREE.MathUtils.smootherstep(linearT, 0, 1);
+        };
+        let collapseTransition = null;
+        const createCollapseTransition = () => {
+            if (collapseTransition || lane.collapsedInMatrix) return collapseTransition;
+            const sourceSegment = lane.expandedVecSegments && lane.expandedVecSegments[0];
+            if (!sourceSegment || !sourceSegment.group) return null;
+
+            lane.collapsedInMatrix = true;
+            const sourceData = Array.isArray(sourceSegment.rawData) || ArrayBuffer.isView(sourceSegment.rawData)
+                ? Array.from(sourceSegment.rawData)
+                : [];
+            const collapseVec = this._createPrismVector(
+                sourceData,
+                expandedGroup.position.clone(),
+                30,
+                sourceSegment.instanceCount
+            );
+
+            if (Array.isArray(sourceSegment.currentKeyColors) && sourceSegment.currentKeyColors.length) {
+                applyVectorKeyColors(collapseVec, sourceSegment.currentKeyColors);
+            }
+
+            this.raycastRoot.add(collapseVec.group);
+            this._setVectorOpacity(collapseVec, 0);
+            attachExpandedTrailToVec(collapseVec);
+            lane.finalVecAfterMlp = collapseVec;
+
+            const sourceColors = cloneVectorKeyColors(collapseVec);
+            let targetColors = sourceColors;
+            const mlpDownData = this._getMlpDownData(lane);
+            if (mlpDownData && applyVectorData(
+                collapseVec,
+                mlpDownData,
+                lane.tokenLabel ? `MLP Down Projection - ${lane.tokenLabel}` : 'MLP Down Projection',
+                this._getLaneMeta(lane, 'mlp.down')
+            )) {
+                targetColors = cloneVectorKeyColors(collapseVec);
+                applyVectorKeyColors(collapseVec, sourceColors);
+            }
+
+            collapseTransition = {
+                collapseVec,
+                sourceColors,
+                targetColors,
+                startExpandedScale: Number.isFinite(expandedGroup.scale?.x) ? expandedGroup.scale.x : 1
+            };
+            return collapseTransition;
+        };
+        const finalizeCollapseTransition = () => {
+            if (!collapseTransition) return;
+            const { collapseVec, targetColors } = collapseTransition;
+            expandedGroup.visible = false;
+            setObjectTreeOpacity(expandedGroup, 0);
+            if (collapseVec && collapseVec.group) {
+                collapseVec.group.position.copy(expandedGroup.position);
+                this._setVectorOpacity(collapseVec, 1);
+                applyVectorKeyColors(collapseVec, targetColors);
+                updateCollapseTrail(collapseVec);
+            }
+        };
+        const updateCollapseTransition = () => {
+            if (!collapseTransition) return;
+            const { collapseVec, sourceColors, targetColors, startExpandedScale } = collapseTransition;
+            if (!collapseVec || !collapseVec.group) return;
+
+            const collapseT = computeCollapseProgress(expandedGroup.position.y);
+            const targetScale = (() => {
+                const fitScale = clampScaleForY(collapseEndY);
+                return Number.isFinite(fitScale)
+                    ? Math.min(fitScale, MLP_DOWN_EXPANDED_EXIT_SCALE)
+                    : MLP_DOWN_EXPANDED_EXIT_SCALE;
+            })();
+            const expandedScale = THREE.MathUtils.lerp(startExpandedScale, targetScale, collapseT);
+
+            expandedGroup.scale.setScalar(Math.max(0.001, expandedScale));
+            setObjectTreeOpacity(expandedGroup, 1 - collapseT);
+
+            collapseVec.group.position.copy(expandedGroup.position);
+            this._setVectorOpacity(collapseVec, collapseT);
+            interpolateVectorKeyColors(collapseVec, sourceColors, targetColors, collapseT);
+            updateCollapseTrail(collapseVec);
+
+            if (collapseT >= 0.999) {
+                finalizeCollapseTransition();
+            }
+        };
         
         // Matrix colour + emissive animation for glow
         const startIntensity = MLP_MATRIX_FLASH_START_EMISSIVE;
@@ -2850,71 +2969,22 @@ export default class Gpt2Layer extends BaseLayer {
                     peakIntensity,
                     finalIntensity
                 );
-                updateExpandedTrail();
-                if (expandedGroup.position.y >= downBottomY) {
-                    const maxScale = clampScaleForY(expandedGroup.position.y);
-                    if (Number.isFinite(maxScale)) {
-                        const nextScale = Math.min(expandedGroup.scale.x, maxScale);
-                        if (nextScale !== expandedGroup.scale.x) {
-                            expandedGroup.scale.setScalar(nextScale);
+                if (expandedGroup.position.y >= collapseStartY) {
+                    createCollapseTransition();
+                }
+                if (collapseTransition) {
+                    updateCollapseTransition();
+                } else {
+                    updateExpandedTrail();
+                    if (expandedGroup.position.y >= downBottomY) {
+                        const maxScale = clampScaleForY(expandedGroup.position.y);
+                        if (Number.isFinite(maxScale)) {
+                            const nextScale = Math.min(expandedGroup.scale.x, maxScale);
+                            if (nextScale !== expandedGroup.scale.x) {
+                                expandedGroup.scale.setScalar(nextScale);
+                            }
                         }
                     }
-                }
-
-                // Transition to the 768-dim collapsed vector early in the matrix so
-                // the wider source visual is gone before the top taper gets narrow.
-                if (!lane.collapsedInMatrix && expandedGroup.position.y >= collapseTriggerY) {
-                    lane.collapsedInMatrix = true;
-                    
-                    // Create collapsed vector at current position
-                    const collapseVec = this._createPrismVector(
-                        lane.expandedVecSegments[0].rawData.slice(),
-                        expandedGroup.position.clone(),
-                        30,
-                        lane.expandedVecSegments[0].instanceCount
-                    );
-                    // Do not start a local trail yet; we'll create a clean path trail
-                    // when rising above the MLP to avoid zig-zag artifacts.
-                    
-                    // Copy gradient colors
-                    if (Array.isArray(lane.expandedVecSegments[0].currentKeyColors) && lane.expandedVecSegments[0].currentKeyColors.length) {
-                        collapseVec.currentKeyColors = lane.expandedVecSegments[0].currentKeyColors.map(c => c.clone());
-                        collapseVec.updateInstanceGeometryAndColors();
-                    }
-                    
-                    this.raycastRoot.add(collapseVec.group);
-                    expandedGroup.visible = false;
-                    attachExpandedTrailToVec(collapseVec);
-                    
-                    lane.finalVecAfterMlp = collapseVec;
-                    const mlpDownData = this._getMlpDownData(lane);
-                    if (mlpDownData) {
-                        applyVectorData(
-                            collapseVec,
-                            mlpDownData,
-                            lane.tokenLabel ? `MLP Down Projection - ${lane.tokenLabel}` : 'MLP Down Projection',
-                            this._getLaneMeta(lane, 'mlp.down')
-                        );
-                    }
-                    
-                    // Continue animating the collapsed vector for the rest of the journey
-                    const remainingDist = Math.max(0, downTopY - expandedGroup.position.y);
-                    const remainingDuration = (remainingDist / (ANIM_RISE_SPEED_INSIDE_LN * GLOBAL_ANIM_SPEED_MULT)) * 1000;
-                    new TWEEN.Tween(collapseVec.group.position)
-                        .to({ y: downTopY }, remainingDuration)
-                        .easing(TWEEN.Easing.Linear.None)
-                        .onUpdate(() => {
-                            const collapseTrail = collapseVec.userData && collapseVec.userData.trail;
-                            if (collapseTrail && typeof collapseTrail.update === 'function') {
-                                if (collapseVec.userData.trailWorld) {
-                                    collapseVec.group.getWorldPosition(TMP_WORLD_POS);
-                                    collapseTrail.update(TMP_WORLD_POS);
-                                } else {
-                                    collapseTrail.update(collapseVec.group.position);
-                                }
-                            }
-                        })
-                        .start();
                 }
             })
             .onStart(() => {
@@ -2937,6 +3007,9 @@ export default class Gpt2Layer extends BaseLayer {
                 // Ensure both MLP matrices are fully opaque at the end
                 this.mlpUp.setMaterialProperties({ opacity: 1.0, transparent: false });
                 this.mlpDown.setMaterialProperties({ opacity: 1.0, transparent: false });
+                if (collapseTransition) {
+                    finalizeCollapseTransition();
+                }
                 
                 // If we haven't collapsed yet (shouldn't happen), do it now
                 if (!lane.collapsedInMatrix) {

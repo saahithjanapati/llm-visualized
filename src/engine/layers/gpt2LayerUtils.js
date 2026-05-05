@@ -108,6 +108,92 @@ export function blendVectorKeyColors(vec, baseColors, tintColor, tintAlpha = 0) 
     return true;
 }
 
+export function applyVectorKeyColors(vec, keyColors) {
+    if (!vec || !Array.isArray(keyColors) || !keyColors.length) return false;
+    const colors = keyColors
+        .map((color) => {
+            if (color && color.isColor) return color.clone();
+            try {
+                return new THREE.Color(color);
+            } catch (_) {
+                return null;
+            }
+        })
+        .filter(Boolean);
+    if (!colors.length) return false;
+
+    vec.currentKeyColors = colors;
+    vec.numSubsections = Math.max(0, colors.length - 1);
+
+    if (typeof vec._buildColorBuffers === 'function' && typeof vec._applyColorBuffers === 'function') {
+        vec._applyColorBuffers(vec._buildColorBuffers());
+        return true;
+    }
+    if (typeof vec.updateInstanceGeometryAndColors === 'function') {
+        vec.updateInstanceGeometryAndColors();
+        return true;
+    }
+    return false;
+}
+
+export function interpolateVectorKeyColors(vec, fromColors, toColors, progress) {
+    if (!Array.isArray(fromColors) || !fromColors.length || !Array.isArray(toColors) || !toColors.length) {
+        return false;
+    }
+    const targetCount = Math.max(fromColors.length, toColors.length);
+    const clampedProgress = THREE.MathUtils.clamp(Number.isFinite(progress) ? progress : 0, 0, 1);
+    const sampleColor = (colors, index, scratch) => {
+        if (colors.length === 1 || targetCount <= 1) {
+            return scratch.copy(colors[0]);
+        }
+        const sourceT = index / (targetCount - 1);
+        const sourceIndex = sourceT * (colors.length - 1);
+        const low = Math.floor(sourceIndex);
+        const high = Math.min(colors.length - 1, low + 1);
+        const localT = sourceIndex - low;
+        return scratch.copy(colors[low]).lerp(colors[high], localT);
+    };
+    const blended = [];
+    const fromScratch = new THREE.Color();
+    const toScratch = new THREE.Color();
+    for (let i = 0; i < targetCount; i++) {
+        const from = sampleColor(fromColors, i, fromScratch);
+        const to = sampleColor(toColors, i, toScratch);
+        blended.push(from.clone().lerp(to, clampedProgress));
+    }
+    return applyVectorKeyColors(vec, blended);
+}
+
+export function setObjectTreeOpacity(root, opacity) {
+    if (!root || typeof root.traverse !== 'function') return false;
+    const clampedOpacity = THREE.MathUtils.clamp(Number.isFinite(opacity) ? opacity : 1, 0, 1);
+    const shouldBeTransparent = clampedOpacity < 0.999;
+    let changed = false;
+    root.traverse((obj) => {
+        if (!obj || !obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach((mat) => {
+            if (!mat) return;
+            if (mat.opacity !== clampedOpacity) {
+                mat.opacity = clampedOpacity;
+                changed = true;
+            }
+            if (mat.transparent !== shouldBeTransparent) {
+                mat.transparent = shouldBeTransparent;
+                mat.needsUpdate = true;
+                changed = true;
+            }
+            const nextDepthWrite = !shouldBeTransparent;
+            if (mat.depthWrite !== nextDepthWrite) {
+                mat.depthWrite = nextDepthWrite;
+                mat.needsUpdate = true;
+                changed = true;
+            }
+        });
+    });
+    return changed;
+}
+
 export function geluApprox(x) {
     const coeff = Math.sqrt(2 / Math.PI);
     return 0.5 * x * (1 + Math.tanh(coeff * (x + 0.044715 * Math.pow(x, 3))));

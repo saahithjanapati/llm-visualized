@@ -2,6 +2,15 @@ import * as THREE from 'three';
 
 const MLP_MATRIX_EMISSIVE_PEAK_T = 0.68;
 
+export function computeMlpMatrixPassColorProgress(progress) {
+    const clampedProgress = THREE.MathUtils.clamp(
+        Number.isFinite(progress) ? progress : 0,
+        0,
+        1
+    );
+    return THREE.MathUtils.smootherstep(clampedProgress, 0, 1);
+}
+
 export function computeMlpMatrixPassEmissive(progress, startIntensity, peakIntensity, finalIntensity) {
     const clampedProgress = THREE.MathUtils.clamp(
         Number.isFinite(progress) ? progress : 0,

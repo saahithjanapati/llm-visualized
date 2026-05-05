@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeMlpMatrixPassEmissive } from './gpt2MlpMatrixVisualUtils.js';
+import {
+    computeMlpMatrixPassColorProgress,
+    computeMlpMatrixPassEmissive
+} from './gpt2MlpMatrixVisualUtils.js';
+
+describe('computeMlpMatrixPassColorProgress', () => {
+    it('spreads the colour lerp across the full pass instead of finishing at entry', () => {
+        expect(computeMlpMatrixPassColorProgress(0)).toBeCloseTo(0, 6);
+        expect(computeMlpMatrixPassColorProgress(1)).toBeCloseTo(1, 6);
+        expect(computeMlpMatrixPassColorProgress(0.1)).toBeLessThan(0.1);
+        expect(computeMlpMatrixPassColorProgress(0.5)).toBeCloseTo(0.5, 6);
+        expect(computeMlpMatrixPassColorProgress(0.9)).toBeGreaterThan(0.9);
+    });
+});
 
 describe('computeMlpMatrixPassEmissive', () => {
     const startIntensity = 0.04;
